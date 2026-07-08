@@ -1,4 +1,11 @@
 <?php
+/*
+
+门禁设备管理模块
+Ver 1.0.0.0 20260708
+Code by Jason / Codex
+
+*/
 
 namespace anim210System;
 

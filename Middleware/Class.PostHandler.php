@@ -413,10 +413,10 @@ class PostHandler {
 						$allowedKeys = [
 							'oa_attendance_enabled', 'oa_base_url', 'oa_auth_path', 'oa_upload_path', 'oa_location_default', 'oa_batch_size',
 							'feishu_attendance_enabled', 'card_as_attendance_enabled', 'swipe_async_feishu_enabled', 'feishu_attendance_mode',
-							'feishu_attendance_endpoint', 'feishu_employee_id_type', 'feishu_attendance_batch_size',
+							'feishu_employee_id_type', 'feishu_attendance_batch_size',
 							'feishu_message_enabled', 'feishu_message_template', 'feishu_message_batch_size',
 							'feishu_event_enabled',
-							'feishu_oauth_enabled', 'feishu_oauth_authorize_url', 'feishu_oauth_redirect_uri',
+							'feishu_oauth_enabled', 'feishu_oauth_redirect_uri',
 							'remote_open_enabled', 'remote_open_path', 'remote_open_timeout',
 							'queue_retry_base_seconds', 'queue_retry_max_seconds'
 						];

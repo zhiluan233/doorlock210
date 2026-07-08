@@ -1,4 +1,12 @@
 <?php
+/*
+
+功能未开放提示模块
+Ver 1.0.0.0 20260708
+Code by Jason / Codex
+
+*/
+
 $page_title = "功能未开放";
 ?>
 <section class="content-header">

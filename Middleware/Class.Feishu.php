@@ -91,7 +91,10 @@ class appLinkFeishu {
             return '';
         }
 
-        $url = 'https://open.feishu.cn/open-apis/auth/v3/app_access_token/internal';
+        $url = $this->endpoint('getAppToken');
+        if ($url === '') {
+            return '';
+        }
         $data = $this->requestFeishu($url, 'POST', null, ['app_id' => $appId, 'app_secret' => $appSecret]);
         if (($data['status_code'] ?? 0) != 200 || !isset($data['response']['app_access_token'])) {
             return '';
@@ -110,7 +113,12 @@ class appLinkFeishu {
             return ['ok' => false, 'message' => '无法获取 app_access_token'];
         }
 
-        $data = $this->requestFeishu('https://open.feishu.cn/open-apis/authen/v1/access_token', 'POST', $appToken, [
+        $url = $this->endpoint('getUserAccessToken');
+        if ($url === '') {
+            return ['ok' => false, 'message' => '飞书 getUserAccessToken endpoint 未在 config.php 中配置'];
+        }
+
+        $data = $this->requestFeishu($url, 'POST', $appToken, [
             'grant_type' => 'authorization_code',
             'code' => $code
         ], 10);
@@ -122,17 +130,52 @@ class appLinkFeishu {
     }
 
     public function getUserInfo($userAccessToken) {
-        $data = $this->requestFeishu('https://open.feishu.cn/open-apis/authen/v1/user_info', 'GET', $userAccessToken, null, 10);
+        $url = $this->endpoint('getUserInfo');
+        if ($url === '') {
+            return ['ok' => false, 'message' => '飞书 getUserInfo endpoint 未在 config.php 中配置'];
+        }
+
+        $data = $this->requestFeishu($url, 'GET', $userAccessToken, null, 10);
         if (($data['status_code'] ?? 0) != 200 || intval($data['response']['code'] ?? -1) !== 0) {
             return ['ok' => false, 'message' => json_encode($data, JSON_UNESCAPED_UNICODE)];
         }
         return ['ok' => true, 'data' => $data['response']['data']];
     }
 
+    public function sendInteractiveMessage($openId, $card, $uuid = '') {
+        $tenantToken = $this->getTenantAccessToken();
+        if ($tenantToken === '') {
+            return ['ok' => false, 'message' => '无法获取 tenant_access_token'];
+        }
+        $url = $this->endpoint('sendMessage');
+        if ($url === '') {
+            return ['ok' => false, 'message' => '飞书 sendMessage endpoint 未在 config.php 中配置'];
+        }
+
+        $body = [
+            'receive_id' => $openId,
+            'msg_type' => 'interactive',
+            'content' => json_encode($card, JSON_UNESCAPED_UNICODE)
+        ];
+        if ($uuid !== '') {
+            $body['uuid'] = substr($uuid, 0, 50);
+        }
+
+        $data = $this->requestFeishu($url, 'POST', $tenantToken, $body, 10);
+        if (($data['status_code'] ?? 0) >= 200 && ($data['status_code'] ?? 0) < 300 && intval($data['response']['code'] ?? -1) === 0) {
+            return ['ok' => true, 'data' => $data['response']['data'] ?? []];
+        }
+        return ['ok' => false, 'message' => json_encode($data, JSON_UNESCAPED_UNICODE)];
+    }
+
     public function sendTextMessage($openId, $text, $uuid = '') {
         $tenantToken = $this->getTenantAccessToken();
         if ($tenantToken === '') {
             return ['ok' => false, 'message' => '无法获取 tenant_access_token'];
+        }
+        $url = $this->endpoint('sendMessage');
+        if ($url === '') {
+            return ['ok' => false, 'message' => '飞书 sendMessage endpoint 未在 config.php 中配置'];
         }
 
         $body = [
@@ -144,7 +187,7 @@ class appLinkFeishu {
             $body['uuid'] = substr($uuid, 0, 50);
         }
 
-        $data = $this->requestFeishu('https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=open_id', 'POST', $tenantToken, $body, 10);
+        $data = $this->requestFeishu($url, 'POST', $tenantToken, $body, 10);
         if (($data['status_code'] ?? 0) >= 200 && ($data['status_code'] ?? 0) < 300 && intval($data['response']['code'] ?? -1) === 0) {
             return ['ok' => true, 'data' => $data['response']['data'] ?? []];
         }
@@ -299,6 +342,10 @@ class appLinkFeishu {
             'raw' => $response,
             'error' => $curlError
         ];
+    }
+
+    public function endpoint($key) {
+        return $this->_config['feishu']['appEndpoint'][$key] ?? '';
     }
 
     private function loadKeyFile() {

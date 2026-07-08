@@ -1,4 +1,11 @@
 <?php
+/*
+
+系统设置读取与持久化模块
+Ver 1.0.0.0 20260708
+Code by Jason / Codex
+
+*/
 
 namespace anim210System;
 
@@ -22,17 +29,15 @@ class Settings {
             'card_as_attendance_enabled' => 'true',
             'swipe_async_feishu_enabled' => 'true',
             'feishu_attendance_mode' => 'custom',
-            'feishu_attendance_endpoint' => '',
             'feishu_employee_id_type' => 'employee_no',
             'feishu_attendance_batch_size' => '50',
             'feishu_message_enabled' => 'false',
-            'feishu_message_template' => '打卡成功：{name} 于 {time} 在 {door} 完成刷卡。',
+            'feishu_message_template' => '刷卡成功',
             'feishu_message_batch_size' => '50',
 
             'feishu_event_enabled' => 'true',
 
             'feishu_oauth_enabled' => 'true',
-            'feishu_oauth_authorize_url' => 'https://open.feishu.cn/open-apis/authen/v1/index',
             'feishu_oauth_redirect_uri' => '',
 
             'remote_open_enabled' => 'true',
@@ -53,6 +58,9 @@ class Settings {
     public static function get($key, $default = null)
     {
         self::load();
+        if (self::isConfigManagedKey($key)) {
+            return self::configFallback($key) ?? $default;
+        }
         if (self::isCredentialKey($key)) {
             return self::configFallback($key) ?? $default;
         }
@@ -131,6 +139,14 @@ class Settings {
         ], true);
     }
 
+    private static function isConfigManagedKey($key)
+    {
+        return in_array($key, [
+            'feishu_oauth_authorize_url',
+            'feishu_attendance_endpoint'
+        ], true);
+    }
+
     public static function invalidate()
     {
         self::$cache = null;
@@ -196,6 +212,12 @@ class Settings {
         }
         if ($key === 'feishu_event_encrypt_key' && isset($_config['feishu']['eventEncryptKey'])) {
             return $_config['feishu']['eventEncryptKey'];
+        }
+        if ($key === 'feishu_oauth_authorize_url' && isset($_config['feishu']['appEndpoint']['oauthAuthorize'])) {
+            return $_config['feishu']['appEndpoint']['oauthAuthorize'];
+        }
+        if ($key === 'feishu_attendance_endpoint' && isset($_config['feishu']['appEndpoint']['attendanceCustom'])) {
+            return $_config['feishu']['appEndpoint']['attendanceCustom'];
         }
         return null;
     }

@@ -1,4 +1,11 @@
 <?php
+/*
+
+飞书事件订阅处理模块
+Ver 1.0.0.0 20260708
+Code by Jason / Codex
+
+*/
 
 namespace anim210System;
 

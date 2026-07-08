@@ -1,4 +1,11 @@
 <?php
+/*
+
+门禁考勤队列与远程开门模块
+Ver 1.0.0.0 20260708
+Code by Jason / Codex
+
+*/
 
 namespace anim210System;
 
@@ -219,7 +226,7 @@ class AttendanceService {
         }
 
         $mode = Settings::get('feishu_attendance_mode', 'custom');
-        $feishu = new appLinkFeishu();
+        $feishu = new appLinkFeishu(true);
         $token = $feishu->getTenantAccessToken();
         if ($token === '') {
             self::markRowsFailed($rows, 'feishu', '无法获取 tenant_access_token');
@@ -276,17 +283,11 @@ class AttendanceService {
             return ['total' => 0, 'sent' => 0, 'failed' => 0];
         }
 
-        $feishu = new appLinkFeishu();
+        $feishu = new appLinkFeishu(true);
         $sent = 0;
         $failed = 0;
-        $template = Settings::get('feishu_message_template', '打卡成功：{name} 于 {time} 在 {door} 完成刷卡。');
         foreach ($rows as $row) {
-            $text = str_replace(
-                ['{name}', '{time}', '{door}', '{card}', '{location}'],
-                [$row['employee_name'], $row['punch_time_text'], $row['door_name'], $row['card_id'], $row['location']],
-                $template
-            );
-            $resp = $feishu->sendTextMessage($row['employee_open_id'], $text, $row['event_hash']);
+            $resp = $feishu->sendInteractiveMessage($row['employee_open_id'], self::buildSwipeMessageCard($row), $row['event_hash']);
             if ($resp['ok']) {
                 self::markRowsSent([$row], 'message', json_encode($resp['data'], JSON_UNESCAPED_UNICODE));
                 $sent++;
@@ -298,6 +299,42 @@ class AttendanceService {
         }
 
         return ['total' => count($rows), 'sent' => $sent, 'failed' => $failed];
+    }
+
+    private static function buildSwipeMessageCard($row)
+    {
+        $eventTime = intval($row['punch_time']);
+        $titleText = Settings::get('feishu_message_template', '刷卡成功');
+        if ($titleText === '' || strpos($titleText, '打卡') !== false) {
+            $titleText = '刷卡成功';
+        }
+        $deviceName = $row['door_name'] ?: ($row['location'] ?: '门禁设备');
+
+        return [
+            'config' => [
+                'wide_screen_mode' => true
+            ],
+            'header' => [
+                'template' => 'green',
+                'title' => [
+                    'tag' => 'plain_text',
+                    'content' => date('H:i', $eventTime) . ' ' . $titleText
+                ]
+            ],
+            'elements' => [
+                [
+                    'tag' => 'markdown',
+                    'content' => '**刷卡方式** 门禁刷卡' . "\n" . '**刷卡设备** ' . $deviceName
+                ],
+                [
+                    'tag' => 'div',
+                    'text' => [
+                        'tag' => 'plain_text',
+                        'content' => date('Y年m月d日', $eventTime)
+                    ]
+                ]
+            ]
+        ];
     }
 
     public static function remoteOpen($deviceId, $adminName)
@@ -362,7 +399,13 @@ class AttendanceService {
             'reason' => '门禁刷卡自动同步',
             'time' => '-'
         ];
-        $url = 'https://open.feishu.cn/open-apis/attendance/v1/user_task_remedys?employee_type=' . rawurlencode($employeeType);
+        $feishu = new appLinkFeishu(true);
+        $endpoint = $feishu->endpoint('createAttendanceRemedy');
+        if ($endpoint === '') {
+            self::markRowsFailed([$row], 'feishu', '飞书 createAttendanceRemedy endpoint 未在 config.php 中配置');
+            return false;
+        }
+        $url = $endpoint . '?employee_type=' . rawurlencode($employeeType);
         $resp = self::postJson($url, $body, ['Authorization: Bearer ' . $tenantToken], $timeout);
         $code = intval($resp['response']['code'] ?? -1);
         if (($resp['status_code'] ?? 0) >= 200 && ($resp['status_code'] ?? 0) < 300 && ($code === 0 || $code === 1226501)) {

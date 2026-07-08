@@ -1,4 +1,11 @@
 <?php
+/*
+
+数据库迁移与初始化模块
+Ver 1.0.0.0 20260708
+Code by Jason / Codex
+
+*/
 
 namespace anim210System;
 
@@ -127,6 +134,7 @@ class Migrator {
         self::addIndex('user', 'idx_user_open_id', ['open_id'], $errors);
 
         self::seedDefaults();
+        self::normalizeRuntimeSettings($errors);
         self::cleanupCredentialSettings($errors);
         self::ensureFeishuKeyFile($_config['feishu']['keyConfigFile'] ?? ROOT . '/feishu_key.json');
         Settings::set('schema_version', self::SCHEMA_VERSION);
@@ -159,6 +167,12 @@ class Migrator {
         Settings::invalidate();
     }
 
+    private static function normalizeRuntimeSettings(&$errors)
+    {
+        self::exec("UPDATE `system_settings` SET `setting_value`='刷卡成功' WHERE `setting_key`='feishu_message_template' AND `setting_value`='打卡成功：{name} 于 {time} 在 {door} 完成刷卡。'", $errors);
+        Settings::invalidate();
+    }
+
     private static function cleanupCredentialSettings(&$errors)
     {
         $keys = [
@@ -171,7 +185,9 @@ class Migrator {
             'feishu_event_token',
             'feishu_event_encrypt_key',
             'oa_token',
-            'oa_token_expires_at'
+            'oa_token_expires_at',
+            'feishu_oauth_authorize_url',
+            'feishu_attendance_endpoint'
         ];
         $escaped = [];
         foreach ($keys as $key) {

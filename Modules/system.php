@@ -1,4 +1,11 @@
 <?php
+/*
+
+系统设置页面模块
+Ver 1.0.0.0 20260708
+Code by Jason / Codex
+
+*/
 
 namespace anim210System;
 
@@ -11,10 +18,11 @@ if(!$rs || $rs['type'] !== 'admin') {
 	exit("<script>location='/?page=panel&module=accesslog';</script>");
 }
 
-$settings = Settings::all();
 $feishuCredentialReady = Settings::get('feishu_app_id', '') !== '' && Settings::get('feishu_app_secret', '') !== '';
 $oaCredentialReady = Settings::get('oa_app_id', '') !== '' && Settings::get('oa_app_secret', '') !== '';
 $remoteCredentialReady = Settings::get('remote_open_username', '') !== '' || Settings::get('remote_open_password', '') !== '';
+$feishuAttendanceEndpointReady = Settings::get('feishu_attendance_endpoint', '') !== '';
+$feishuOauthEndpointReady = Settings::get('feishu_oauth_authorize_url', '') !== '';
 
 function checked($key) {
 	return Settings::getBool($key) ? 'checked' : '';
@@ -63,13 +71,13 @@ function settingValue($key) {
 										</select>
 									</div>
 								</div>
-								<div class="layui-form-item"><label class="layui-form-label">自定义端点</label><div class="layui-input-block"><input class="layui-input" name="feishu_attendance_endpoint" value="<?php echo settingValue('feishu_attendance_endpoint'); ?>"></div></div>
 								<div class="layui-form-item"><label class="layui-form-label">员工ID类型</label><div class="layui-input-block"><select name="feishu_employee_id_type"><option value="employee_no" <?php echo Settings::get('feishu_employee_id_type') === 'employee_no' ? 'selected' : ''; ?>>employee_no</option><option value="employee_id" <?php echo Settings::get('feishu_employee_id_type') === 'employee_id' ? 'selected' : ''; ?>>employee_id</option></select></div></div>
 								<div class="layui-form-item"><label class="layui-form-label">批量条数</label><div class="layui-input-block"><input class="layui-input" name="feishu_attendance_batch_size" value="<?php echo settingValue('feishu_attendance_batch_size'); ?>"></div></div>
 								<div class="layui-form-item"><label class="layui-form-label">刷卡提醒</label><div class="layui-input-block"><input type="checkbox" name="feishu_message_enabled" value="true" lay-skin="switch" <?php echo checked('feishu_message_enabled'); ?>></div></div>
-								<div class="layui-form-item"><label class="layui-form-label">提醒模板</label><div class="layui-input-block"><input class="layui-input" name="feishu_message_template" value="<?php echo settingValue('feishu_message_template'); ?>"></div></div>
+								<div class="layui-form-item"><label class="layui-form-label">卡片标题</label><div class="layui-input-block"><input class="layui-input" name="feishu_message_template" value="<?php echo settingValue('feishu_message_template'); ?>" placeholder="刷卡成功"></div></div>
 								<div class="layui-form-item"><label class="layui-form-label">提醒批量</label><div class="layui-input-block"><input class="layui-input" name="feishu_message_batch_size" value="<?php echo settingValue('feishu_message_batch_size'); ?>"></div></div>
 								<p>飞书凭证：<?php echo $feishuCredentialReady ? '已在 config.php 配置' : '未配置'; ?></p>
+								<p>飞书自定义考勤端点：<?php echo $feishuAttendanceEndpointReady ? '已在 config.php 配置' : '未配置'; ?></p>
 							</div>
 						</div>
 						<hr>
@@ -78,8 +86,8 @@ function settingValue($key) {
 								<h5>飞书事件与登录</h5>
 								<div class="layui-form-item"><label class="layui-form-label">事件订阅</label><div class="layui-input-block"><input type="checkbox" name="feishu_event_enabled" value="true" lay-skin="switch" <?php echo checked('feishu_event_enabled'); ?>></div></div>
 								<div class="layui-form-item"><label class="layui-form-label">一键登录</label><div class="layui-input-block"><input type="checkbox" name="feishu_oauth_enabled" value="true" lay-skin="switch" <?php echo checked('feishu_oauth_enabled'); ?>></div></div>
-								<div class="layui-form-item"><label class="layui-form-label">授权URL</label><div class="layui-input-block"><input class="layui-input" name="feishu_oauth_authorize_url" value="<?php echo settingValue('feishu_oauth_authorize_url'); ?>"></div></div>
 								<div class="layui-form-item"><label class="layui-form-label">回调地址</label><div class="layui-input-block"><input class="layui-input" name="feishu_oauth_redirect_uri" value="<?php echo settingValue('feishu_oauth_redirect_uri'); ?>" placeholder="留空自动生成"></div></div>
+								<p>飞书登录授权端点：<?php echo $feishuOauthEndpointReady ? '已在 config.php 配置' : '未配置'; ?></p>
 							</div>
 							<div class="layui-col-md6">
 								<h5>门禁与队列</h5>
