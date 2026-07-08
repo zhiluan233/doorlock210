@@ -1,0 +1,22 @@
+
+
+.afc-container{
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}   
+
+.afc-appbox{
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    height: auto;
+
+    width: 260px;
+    height: 130px;
+    border-radius: 20px;
+    background-color: #f7f9fa;
+
+    box-shadow: 1px 2px 10px rgba(100, 100, 100, 0.25);
+}

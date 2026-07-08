@@ -1,0 +1,31 @@
+/*                                                     */
+/*  A-FurCon 御绒聚 */
+/*  忘记密码页面样式表   */
+/*  本样式表被 Forgot.html 引用 */
+
+/*  Html Designed by DotWebDesign */
+/*  Modified by Gxdung(乐乐龙果冻)  */
+/*  Copyright: 2023 A-FurCon(R), All Rights Reserved.  */
+
+/*  请勿在未经授权的情况下擅用代码 违者将追究法律责任*/
+/* --------------------------------------------------- */
+
+/* CSS 引入 */
+@import url('afc-LogSys.css');
+@import url('afc-Register.css');
+
+/* 自定义组件 */
+.body-flex{
+    display: flex;
+}
+
+/* Pad PC (2K)  */
+@media screen and (min-width:1100px) and (min-height: 776px){
+    .afc-bg {
+        margin-top: -30px;
+    }
+
+    .footer{
+        bottom: -25%;
+    }
+}

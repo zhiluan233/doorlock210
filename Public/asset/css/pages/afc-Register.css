@@ -1,0 +1,123 @@
+/*                                                     */
+/*  A-FurCon 御绒聚 */
+/*  注册页面样式表   */
+/*  本样式表被 Register.html 引用 */
+
+/*  Html Designed by DotWebDesign */
+/*  Modified by Gxdung(乐乐龙果冻)  */
+/*  Copyright: 2023 A-FurCon(R), All Rights Reserved.  */
+
+/*  请勿在未经授权的情况下擅用代码 违者将追究法律责任*/
+/* --------------------------------------------------- */
+
+/* CSS 引入 */
+@import url('afc-LogSys.css');
+
+/* 自定义组件 */
+.footer{
+    bottom: -60px;
+}
+
+.afc-bg{
+    margin-top: 0px;
+    display: flex;
+    justify-content: center;
+}
+
+@media screen and (min-width: 1100px){
+    .afc-bg::before{
+        margin-top: 100px;
+        height: 150px;
+        width: 250px;
+        justify-content: center;
+    }
+    .footer{
+        bottom: -120px;
+    }
+}
+
+/* 适配 2K 显示器宽度*/
+@media screen and (min-width: 1920px){
+    .footer{
+        bottom: -280px;
+    }
+}
+
+/* Pad PC (2K)  */
+@media screen and (min-width:1100px) and (min-height: 776px){
+    .afc-bg {
+        margin-top: -30px;
+    }
+}
+
+
+@media screen and (max-width: 1100px){
+    .afc-bg {
+        margin-top: 50px;
+    }
+    .main{
+        margin-top: -30px;
+    }
+    .footer{
+        bottom: -50px; 
+    }
+}
+
+/* 适配 iPhone 4~8/SE 宽度*/
+@media screen and (max-width: 376px){
+    .afc-bg {
+        margin-top: -20px;
+    }
+    .container {
+        min-width: 85% !important;
+    }
+    .footer{
+        bottom: -40px;
+    }
+    .body-flex{
+        display: block;
+    }
+}
+
+/* 适配 iPhone 6~8P/X/11~14P 宽度*/
+@media screen and (min-width: 376px) and (max-width: 425px){
+    .afc-bg {
+        margin-top: -30px;
+    }
+    .container {
+        min-width: 80% !important;
+    }
+    .footer{
+        bottom: -45px;
+    }
+    .body-flex{
+        display: block;
+    }
+}
+
+/* 适配移动端横屏 */
+@media screen and (max-height: 775px){
+    .afc-bg {
+        margin-top: -30px;
+    }
+    .container {
+        min-width: 80% !important;
+    }
+    .footer{
+        bottom: -45px;
+    }
+    .body-flex{
+        display: block;
+    }
+}
+
+
+
+.afcblock{
+    margin-top: -30px;
+}
+
+
+.main form{
+    gap: 20px;
+}

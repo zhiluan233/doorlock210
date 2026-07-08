@@ -1,0 +1,413 @@
+/*                                                     */
+/*  A-FurCon 御绒聚 */
+/*  登录系统总样式表  */
+
+/*  下述页面使用本样式 */
+/*  - Forgot.html
+    - Login.html 
+    - Register.html */
+
+/*  Html Designed by DotWebDesign */
+/*  Modified by Gxdung(乐乐龙果冻)  */
+/*  Copyright: 2023 A-FurCon(R), All Rights Reserved.  */
+
+/*  请勿在未经授权的情况下擅用代码 违者将追究法律责任*/
+/* --------------------------------------------------- */
+
+/* 字体 */
+@import url('https://fonts.googleapis.com/css?family=Noto+Sans+SC:100,300,400,500,700,900');
+
+/* 配色 */
+:root {
+    --primary-color: #1c64f2;
+    --white-color: #ffffff;
+    --light-text-color: #9398b3;
+    --light-bg-color: #f2f4ff;
+    --dark-color: #333333;
+    --background-color: #fcfcff;
+}
+
+/* 基本元素 */
+* {
+    margin: 0;
+    padding: 0;
+}
+
+*, ::before::after {
+    box-sizing: border-box;
+}
+
+
+body{
+    font-family: 'Noto Sans SC', sans-serif;
+    font-size: 16px;
+    font-weight: 400;
+    line-height: 1.8;
+    color: var(--dark-color);
+    background-color: var(--background-color);
+    user-select: none;
+    -webkit-user-drag: none;
+    height: 100vh;
+    width: 100vw;
+}
+
+html,body{
+    height: 100vh;
+}
+
+/* 基本组件 */
+a {
+    text-decoration: none;
+    color: inherit;
+    -webkit-tap-highlight-color: transparent;
+}
+
+ul {
+    list-style: none;
+}
+
+h1 {
+    font-size: 3em;
+    font-weight: 700;
+    line-height: normal;
+    color: black;
+}
+
+/* 自定义组件 */
+/* Logo */
+.afclogo{
+    width: 250px;
+}
+
+.separate{
+    padding-top: 20px;
+    padding-bottom: 20px;
+    width: 100vw;
+    height: 5vh;
+}
+
+@media screen and (max-width:1100px){
+    .afclogo{
+        width: 200px;
+    }
+}
+
+/* Submit 按钮 */
+.submit{
+    border-radius: 20px !important;
+    -moz-border-radius: 20px !important;
+    -webkit-border-radius: 20px !important;
+}
+
+/* 备案 Logo */
+.beian{
+    margin-left: 5px; 
+    padding-left: 20px;
+    color: #505050; 
+    background-size: 15px !important; 
+    background: url(/img/Logo_Beian.png) no-repeat left center;
+}
+
+/* Box 布局 */
+.afclogbox{
+    display: flex;
+    flex-wrap: wrap;
+}
+
+/* Main 布局 */
+.main {
+    flex: 1 0 33%;
+}
+
+@media screen and (min-width:825px) and (max-width:1100px) {
+    .main {
+        flex: 1 0 35%;
+    }
+}
+
+@media screen and (max-width:825px) {
+    .main {
+        flex: 1 0 35%;
+    }
+    .container{
+        width: 75%;
+    }
+}
+
+/* 背景图层 */
+.afc-bg {
+    flex: 1 0 66.6666%;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 50px;
+    padding: 70px 0;
+}
+
+.afc-bg::before {
+    content: '';
+    position: absolute;
+    top: 15%;
+    left: 0;
+    width: 280px;
+    height: 100px;
+    background: linear-gradient(to right, var(--primary-color), #71b9ed, #ff5a1f);
+    z-index: -1;
+    filter: blur(60px);
+}
+
+.afc-bg a {
+    font-weight: 500;
+    color: var(--primary-color);
+    transition: color .3s;
+}
+
+.afc-bg a:hover,
+form .password a:hover {
+    color: var(--dark-color);
+    text-decoration: underline;
+}
+
+@media screen and (max-width:1100px) {
+    .afc-bg{
+        margin-top: -220px;
+    }
+}
+
+@media screen and (min-width:1100px) {
+    .afc-bg{
+        margin-top: -30px;
+    }
+}
+
+/* 自定义样式 */
+.site {
+    align-items: center;
+    justify-content: center;
+    height: 100vh;
+}
+
+.afcblock{
+    margin-left: 5px;
+    margin-top: -15px;
+}
+
+@media screen and (max-width:1100px){
+    .afcblock{
+        margin-top: -35px;
+    }
+    
+}
+
+/* 表格样式 */
+.main form {
+    display: flex;
+    flex-direction: column;
+    gap: 30px;
+}
+
+.main form p {
+    position: relative;
+}
+
+form input {
+    font: inherit;
+    font-size: 14px;
+    width: 100%;
+    border: 0;
+    outline: 0;
+    padding: 0 20px;
+    line-height: 60px;
+    border-radius: 20px !important;
+    -moz-border-radius: 20px !important;
+    -webkit-border-radius: 20px !important;
+    /*修复input 加入padding之后大小变化的问题*/
+    box-sizing: border-box;
+}
+
+input::placeholder {
+    color: var(--dark-color);
+    font-family: 'Noto Sans SC', sans-serif;
+    font-size: inherit;
+}
+
+form input:not(.submit) {
+    background-color: var(--light-bg-color);
+}
+
+form .password i {
+    position: absolute;
+    top: calc(60px / 2);
+    right: 20px;
+    margin-top: -8px;
+    line-height: 1;
+    color: var(--light-text-color);
+    cursor: pointer;
+}
+
+form .password a {
+    font-size: 14px;
+    color: var(--light-text-color);
+    float: right;
+    margin: 10px 5px 0 0;
+}
+
+form input.submit {
+    font-weight: 400;
+    font-size: 16px;
+    color: var(--white-color);
+    background-color: var(--primary-color);
+    box-shadow: var(--primary-color) 0 20px 30px -10px;
+    cursor: pointer;
+    transition: box-shadow .3s;
+}
+
+form input.submit:hover {
+    box-shadow: var(--primary-color) 0 10px 30px -10px;
+}
+
+/* 自定义页面布局 */
+.body-flex{
+    width: 100vw;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+}
+
+/* 自定义布局 */
+.wrapper-flex {
+    flex: 1;
+}
+
+.absolute {
+    width: 100%;
+    position: absolute;
+    bottom: 0;
+}
+
+.container {
+    min-width: 350px !important;
+    max-width: 1000px;
+    width: 80%;
+    margin: 0 auto;
+    display: block;
+}
+
+@media screen and (max-width: 825px){
+    .container{
+        width: 75%;
+    }
+}
+
+
+/* 页面底部 Footer */
+.footer{
+    width: 100%;
+    height: auto;
+    position: relative;
+    text-align: center;
+    font-size: 11px;
+    bottom: -200px;
+}
+
+.footer a{
+    color: #666666 !important;
+}
+
+.footer p{
+    color: #666666 !important;
+}
+
+@media screen and (max-width:1100px){
+    .footer{
+        bottom: -50px;
+    }
+    
+}
+
+/* 自定义字重部分 */
+.afcfontwgt4{
+    font-weight: 400 !important;
+}
+
+.afcfontwgt5{
+    font-weight: 500 !important;
+}
+
+.afcfontwgt7{
+    font-weight: 700 !important;
+}
+
+
+
+/* 快捷登录模块样式 */
+.separator {
+    position: relative;
+    margin: 50px 0 30px;
+}
+
+.separator::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    width: 100%;
+    height: 1px;
+    background-color: var(--light-text-color);
+    opacity: .3;
+    z-index: 1;
+}
+
+.separator p {
+    font-size: 14px;
+    width: fit-content;
+    padding: 0 10px;
+    color: var(--light-text-color);
+    background-color: var(--background-color);
+    margin: 0 auto;
+    position: relative;
+    z-index: 1;
+}
+
+.options ul {
+    display: flex;
+    justify-content: center;
+    gap: 20px;
+}
+
+.options ul li a {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 60px;
+    height: 60px;
+    border-radius: 20px;
+
+    background-color: var(--white-color);
+    box-shadow: var(--light-text-color) 0 10px 20px -10px;
+    transition: all .3s ease-out;
+}
+
+.options ul li a:hover {
+    color: var(--white-color);
+    box-shadow: none;
+}
+/*用STEAM PSN XBOX替换原先APPLE GOOGLE FACEBOOK图标*/
+.options ul li:nth-child(1) a:hover {
+    background-color: #00acfc;
+}
+
+.options ul li:nth-child(2) a:hover {
+    background-color: #05d367;
+}
+
+.options ul li:nth-child(3) a:hover {
+    background-color: #232323;
+}
+
+.disableBtn2{
+    background-color: #7a7a7a !important;
+    cursor: wait !important;
+    box-shadow: #7a7a7a 0 20px 30px -10px !important;
+}

@@ -1,0 +1,43 @@
+
+.mainCard{
+    display: flex; 
+    justify-content: center
+}
+
+.pass1{
+    background: linear-gradient( 135deg, #FFE985 10%, #FA742B 100%);
+    color:#fff
+}
+
+.pass2{
+    background-image: linear-gradient( 135deg, #81FBB8 10%, #28C76F 100%);
+    color:#fff
+}
+
+.pass3{
+    background: linear-gradient( 135deg, #ABDCFF 10%, #0396FF 100%);
+    color:#fff
+}
+
+.pass4{
+    background: linear-gradient(to right, #ff5858, #f857a6); 
+    color:#fff
+
+}
+
+.pass5{
+    background: linear-gradient(to right, #8f8f8f, #616161); 
+    color:#fff
+}
+
+.ticketBtn{
+    color: #222;
+}
+
+.ticketBtn:hover{
+    background-color: rgb(255, 255, 255);
+}
+
+.ticketBtn:active{
+    background-color: rgb(131, 131, 131);
+}

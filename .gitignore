@@ -1,0 +1,16 @@
+.env
+node_modules/
+.idea/
+.vscode/
+
+bun.lockb
+pnpm-lock.yaml
+
+.DS_Store
+.wrangler/
+
+coverage/
+config.php
+feishu_key.json
+.user.ini
+.well-known/

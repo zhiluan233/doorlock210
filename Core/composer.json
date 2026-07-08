@@ -1,0 +1,6 @@
+{
+    "require": {
+        "alipaysdk/easysdk": "^2.0",
+        "tencentcloud/tencentcloud-sdk-php": "^3.0"
+    }
+}

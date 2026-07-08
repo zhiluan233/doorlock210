@@ -1,0 +1,112 @@
+pre code.hljs {
+    display: block;
+    overflow-x: auto;
+    padding: 1em;
+    font-family: 'fira code' !important;
+  }
+  
+  code.hljs {
+    padding: 3px 5px;
+    font-family: 'fira code' !important;
+  }
+  
+  .hljs {
+    background: #011627;
+    color: #d6deeb;
+  }
+  
+  /* General Purpose */
+  .hljs-keyword,
+  .hljs-built_in {
+    color: #c792ea;
+    font-style: italic;
+  }
+  
+  .hljs-type,
+  .hljs-symbol {
+    color: #82aaff;
+  }
+  
+  .hljs-literal,
+  .hljs-number {
+    color: #ff5874;
+  }
+  
+  .hljs-regexp,
+  .hljs-string,
+  .hljs-subst,
+  .hljs-class,
+  .hljs-function,
+  .hljs-title,
+  .hljs-params,
+  .hljs-variable,
+  .hljs-code,
+  .hljs-emphasis,
+  .hljs-strong,
+  .hljs-formula,
+  .hljs-link {
+    color: #ecc48d;
+  }
+  
+  /* Meta */
+  .hljs-comment,
+  .hljs-doctag,
+  .hljs-meta,
+  .hljs-meta .hljs-keyword,
+  .hljs-meta .hljs-string {
+    color: #82aaff;
+    font-style: italic;
+  }
+  
+  /* Tags, attributes, config */
+  .hljs-section,
+  .hljs-tag,
+  .hljs-name,
+  .hljs-attr,
+  .hljs-attribute {
+    color: #7fdbca;
+  }
+  
+  .hljs-variable,
+  .hljs-bullet,
+  .hljs-selector-id,
+  .hljs-selector-attr,
+  .hljs-selector-pseudo,
+  .hljs-template-variable {
+    color: #addb67;
+  }
+  
+  /* Markup */
+  .hljs-selector-tag {
+    color: #ff6363;
+  }
+  
+  .hljs-link,
+  .hljs-quote {
+    color: #697098;
+    font-style: italic;
+  }
+  
+  /* CSS */
+  .hljs-selector-class {
+    color: #addb67;
+    font-style: italic;
+  }
+  
+  /* Templates */
+  .hljs-template-tag,
+  .hljs-template-variable {
+    color: #c792ea;
+  }
+  
+  /* diff */
+  .hljs-addition {
+    color: #addb67ff;
+    font-style: italic;
+  }
+  
+  .hljs-deletion {
+    color: #EF535090;
+    font-style: italic;
+  }
+  

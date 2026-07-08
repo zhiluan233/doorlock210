@@ -1,0 +1,67 @@
+<?php
+// Yinying Web Configure File(Iceven PHP Framework)
+$_config = [
+
+	'appVersion' => '1.0.0 Dev',
+
+	'appPath' => '/home/210official/doorlock', //App目录
+
+	// 数据库相关配置
+	/* 地址 */ 'db_host'           => '127.0.0.1',
+	/* 端口 */ 'db_port'           => 3306,
+	/* 账号 */ 'db_user'           => '',
+	/* 密码 */ 'db_pass'           => '',
+	/* 名称 */ 'db_name'           => '',
+	/* 编码 */ 'db_code'           => 'utf8mb4',
+
+	// 通用物联网API请求key
+	'apiCommonKey' => '',
+	// 门单次开5秒
+	'doorOpenTime' => 5,
+
+	// 飞书对接模块
+	'feishu' => [
+		'appId' => '',
+		'appSecret' => '',
+		'appEndpoint' => [
+			'getTenantToken' => 'https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal',
+			'getUsersList' => 'https://open.feishu.cn/open-apis/contact/v3/users/batch',
+			'getAllDepartments' => 'https://open.feishu.cn/open-apis/contact/v3/departments/0/children?department_id_type=department_id&fetch_child=true&user_id_type=open_id&page_size=50',
+			'getDepartmentMemberInfo' => 'https://open.feishu.cn/open-apis/contact/v3/users/find_by_department?user_id_type=open_id&department_id=',
+			'getMemberInfo' => 'https://open.feishu.cn/open-apis/contact/v3/users/'
+		],
+		'keyConfigFile' => ROOT . '/feishu_key.json'
+	],
+
+	// 腾讯验证码模块设置
+	'tcode' => [
+	    /*   API接口地址   */ 'ApiURL' => 'captcha.tencentcloudapi.com',
+	    /*   验证码APPID   */ 'CaptchaAppId' => '',
+	    /* 验证码SecretKey */ 'AppSecretKey' => '',
+	    /*      AppID      */ 'AppID' => '',
+	    /*    SecretID     */ 'SecretID' => '',
+	    /*    SecretKey    */ 'SecretKey' => '',
+	],
+
+	//支付宝模块设置
+	'alipay' => [
+		/*     收款人ID     */ 'sellerId' => '',
+		/*  取消支付返回URL  */ 'quitUrl' => '',
+		/*      AppID       */ 'appId' => '',
+		/*     私有证书      */ 'appPrivateKey' => '',
+		/*     公有证书      */ 'appPublicKey' => ''
+	],
+
+	// MQTT 基础配置（全局默认，可在设备级覆盖）
+	'mqtt' => [
+		'host'     => '127.0.0.1',
+		'port'     => 1883,
+		'username' => '',   // 如无鉴权留空
+		'password' => '',
+		'clientPrefix' => 'anim210-php-',
+		'qos'      => 1,
+		'keepalive'=> 60,
+		'topicPrefix' => '20211214'
+	]
+
+];

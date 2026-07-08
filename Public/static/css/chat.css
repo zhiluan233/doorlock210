@@ -1,0 +1,120 @@
+body {
+    font-family: "Helvetica Neue", "Luxi Sans", "Segoe UI", "Hiragino Sans GB", "Microsoft Yahei", sans-serif, "Apple Logo";
+    margin: 0;
+    padding: 0;
+}
+
+#app {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    max-width: 900px;
+    margin: 0 auto;
+}
+
+#app, .input-area{
+    background-color: #ffffff;
+}
+
+.messages-container {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px;
+    padding-top: 40px;
+}
+
+.message{
+    max-width: 60%;
+    margin-top: 10px;
+    margin-bottom: 10px;
+    padding: 10px;
+    border-radius: 15px;
+    background-color: white;
+}
+
+.question::before {
+    content: '';
+    display: inline-block;
+    width: 30px;
+    height: 30px;
+    margin-right: 10px;
+    background-image: url("https://q1.qlogo.cn/g?b=qq&nk=1660466270&s=640");
+    background-size: cover;
+    background-position: center;
+    border-radius: 50%;
+}
+
+.answer::before {
+    content: '';
+    display: inline-block;
+    width: 30px;
+    height: 30px;
+    margin-right: 10px;
+    background-image: url("/asset/yinying.png");
+    background-size: cover;
+    background-position: center;
+    border-radius: 50%;
+}
+
+.question{
+    border-bottom-right-radius: 0;
+    background-color: #eeeeee;
+    margin-left: auto;
+}
+
+.answer{
+    border-top-left-radius: 0;
+    background-color: #0084ff;
+    margin-right: auto;
+    color: white;
+}
+.message p, .message pre{
+    margin: 10px 0;
+}
+
+
+.message pre{
+    width: 100%;
+    padding: 10px;
+    background-color: #23241f;
+    border-radius: 6px;
+    color: #f8f8f2;
+    box-sizing: border-box;
+    overflow-x: auto;
+}
+
+.input-area {
+    display: flex;
+    align-items: center;
+    padding: 10px 20px;
+    border-top: 1px solid #ffffff;
+}
+
+textarea {
+    flex: 1;
+    height: 52px;
+    padding: 5px 10px;
+    line-height: 20px;
+    resize: none;
+    border: 1px solid #c3c6cb;
+    outline: none;
+    box-sizing: border-box;
+    border-radius: 6px;
+}
+
+button {
+    margin-left: 10px;
+    height: 40px;
+    padding: 0 20px;
+    line-height: 40px;
+    background-color: #007bff;
+    color: #fff;
+    border: none;
+    cursor: pointer;
+    border-radius: 6px;
+}
+
+button:disabled {
+    background-color: #c3c6cb;
+    cursor: not-allowed;
+}
