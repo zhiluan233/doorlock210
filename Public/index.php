@@ -15,11 +15,14 @@ require(ROOT . "/Core/vendor/autoload.php");
 include(ROOT . "/config.php");
 include(ROOT . "/Core/Utils.php");
 include(ROOT . "/Core/DataBase.php");
+include(ROOT . "/Core/Settings.php");
+include(ROOT . "/Core/Migrator.php");
 include(ROOT . "/Core/UserCheck.php");
 
 
 // 获取客户端IP地址
 $client_ip = $_SERVER['REMOTE_ADDR'];
+$is_public_callback = isset($_GET['action']) && $_GET['action'] === 'feishuWebhook';
 
 // 定义白名单IP地址段
 $whitelist = [
@@ -51,7 +54,7 @@ foreach ($whitelist as $range) {
 }
 
 // 如果不在白名单中，返回403
-if (!$is_allowed) {
+if (!$is_allowed && !$is_public_callback) {
     header('HTTP/1.1 403 Forbidden');
     exit('内网系统，不支持公网访问！');
 }
@@ -60,12 +63,18 @@ if (!$is_allowed) {
 //include(ROOT . '/Middleware/Class.Alipay.php');
 //include(ROOT . "/Middleware/Class.TencentSMS.php");
 include(ROOT . "/Middleware/Class.Feishu.php");
+include(ROOT . "/Middleware/Class.FeishuEvent.php");
 include(ROOT . "/Middleware/Class.DeviceApi.php");
 include(ROOT . "/Middleware/Class.PostHandler.php");
 
 $conn = null;
 $db = new anim210System\Database();
 
+if (!(isset($_GET['action']) && $_GET['action'] === 'api')) {
+    anim210System\Migrator::ensure();
+}
+
 //页面渲染类与路由中间件
 include(ROOT . "/Core/Pages.php");
+include(ROOT . "/Middleware/Class.Attendance.php");
 include(ROOT . "/Middleware/Class.Router.php");

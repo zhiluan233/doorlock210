@@ -24,15 +24,18 @@ if($_SERVER['REQUEST_METHOD'] == "POST") {
 
 
 // Router
-if(isset($_GET['page']) && preg_match("/^[A-Za-z0-9\-\_]{1,20}$/", $_GET['page'])) {
+if(isset($_GET['page']) && preg_match("/^[A-Za-z0-9\-\_]{1,30}$/", $_GET['page'])) {
 	$um = new anim210System\UserCheck();
+	$publicPages = ["login", "register", "forgetpsw", "share_cyberfurry", "feishu_oauth_start", "feishu_oauth_callback"];
 	if($um->isLogged()) {
 		if($_GET['page'] == "login") {
 			exit("<script>location='/?page=panel&module=home';</script>");
 		}
 		$pages->loadPage($_GET['page'], $_config['appVersion']);
 	} else {
-		if($_GET['page'] !== "login" && $_GET['page'] !== "register" && $_GET['page'] !== "forgetpsw" && $_GET['page'] !== "share_cyberfurry") {
+		if (isset($_SESSION['member_open_id']) && $_GET['page'] === 'userpanel') {
+			$pages->loadPage($_GET['page'], $_config['appVersion']);
+		} elseif(!in_array($_GET['page'], $publicPages, true)) {
 			exit("<script>location='/?page=login';</script>");
 		} else {
 			$pages->loadPage($_GET['page'], $_config['appVersion']);

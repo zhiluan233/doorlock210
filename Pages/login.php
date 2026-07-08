@@ -49,6 +49,7 @@ use anim210System;
                                 <i class="ri-eye-off-line" id="eye"></i>
                             </p>
                             <p> <input type="button" class="submit afcfontwgt7" value="登录" id="login"> </p>
+                            <p> <input type="button" class="submit afcfontwgt7" value="飞书一键登录" onclick="location='/?page=feishu_oauth_start'"> </p>
                         </form>
                     </div>
 

@@ -52,6 +52,9 @@ class PostHandler {
 					Header("HTTP/1.1 403 Forbidden");
                     exit($data['message']);
 				break;
+				case "feishuWebhook":
+					anim210System\FeishuEventHandler::handle();
+				break;
 				case "updateinfo":
 					$um = new anim210System\UserCheck();
 					if($um->isLogged()) {
@@ -95,12 +98,19 @@ class PostHandler {
 						anim210System\Utils::checkCsrf();
 						$us = $um->getInfoByUser($_SESSION['user']);
 						if($us['type'] == "admin") {
+							if (!in_array($_POST['group'], ['admin', 'user', 'readonly'], true)) {
+								Header("HTTP/1.1 400 Bad Request");
+								exit("用户组只允许 admin、readonly、user");
+							}
 								$update = Database::insert("user", Array(
 			                    "id"             => null,
 			                    "username"       => $_POST['username'],
 			                    "password"       => $_POST['password'],
 			                    "mail"          => $_POST['mail'],
 			                    "type"           => $_POST['group'],
+								"open_id"        => $_POST['open_id'] ?? '',
+								"employee_id"    => $_POST['employee_id'] ?? '',
+								"display_name"   => $_POST['display_name'] ?? ''
 	                    	));
 								if($update === true) {
 									exit("创建新用户 ".$_POST['username']." 成功！");
@@ -140,6 +150,10 @@ class PostHandler {
 					if($um->isLogged()) {
 						anim210System\Utils::checkCsrf();
 						$us = $um->getInfoByUser($_SESSION['user']);
+						if($us['type'] !== "admin") {
+							Header("HTTP/1.1 403 Forbidden");
+							exit("你没有足够的权限这么做");
+						}
 						$open_id = '210-door-sys_'.$_POST['phone'].'_'.time();
 						$update = Database::insert("guest", Array(
 			                    "id"         => null,
@@ -163,6 +177,10 @@ class PostHandler {
 					if($um->isLogged()) {
 						anim210System\Utils::checkCsrf();
 						$us = $um->getInfoByUser($_SESSION['user']);
+						if($us['type'] !== "admin") {
+							Header("HTTP/1.1 403 Forbidden");
+							exit("你没有足够的权限这么做");
+						}
 						$id = $_POST['id'];
 						$type = $_POST['type'];
 						$employeeInfo = Database::querySingleLine("employee", Array("card_id" => $_POST['cardid']));
@@ -201,6 +219,10 @@ class PostHandler {
 					if($um->isLogged()) {
 						anim210System\Utils::checkCsrf();
 						$us = $um->getInfoByUser($_SESSION['user']);
+						if($us['type'] !== "admin") {
+							Header("HTTP/1.1 403 Forbidden");
+							exit("你没有足够的权限这么做");
+						}
 						$update = Database::insert("devices", Array(
 			                "id"               => null,
 			                "name"             => $_POST['devicename'],
@@ -223,6 +245,11 @@ class PostHandler {
 					$um = new anim210System\UserCheck();
 					if($um->isLogged()) {
 						anim210System\Utils::checkCsrf();
+						$us = $um->getInfoByUser($_SESSION['user']);
+						if($us['type'] !== "admin") {
+							Header("HTTP/1.1 403 Forbidden");
+							exit("你没有足够的权限这么做");
+						}
 						$feishuMethod = new anim210System\appLinkFeishu();
 						$feishuMembers = $feishuMethod->getFeishuMemberList();
 						$totalSyncNum = 0;
@@ -239,10 +266,19 @@ class PostHandler {
 							if ($memberInfo == null) {
 								$update = Database::insert("employee", Array(
 									"open_id"      => $members['open_id'],
+									"user_id"      => $members['user_id'],
+									"union_id"     => $members['union_id'],
 									"name"         => $members['name'],
 									"employee_id"  => $members['employee_no'],
 									"realname"     => $members['real_name'],
-									"status"       => $memberStatus
+									"status"       => $memberStatus,
+									"department_id" => $members['department_id'],
+									"department_name" => $members['department_name'],
+									"department_ids" => json_encode($members['department_ids'], JSON_UNESCAPED_UNICODE),
+									"email"        => $members['email'],
+									"mobile"       => $members['mobile'],
+									"tenant_key"   => $members['tenant_key'],
+									"updated_at"   => time()
 								));
 								if($update !== true) {
 									Header("HTTP/1.1 500 Internal Error");
@@ -252,9 +288,18 @@ class PostHandler {
 							} else {
 								$data = Array(
 									"name"         => $members['name'],
+									"user_id"      => $members['user_id'],
+									"union_id"     => $members['union_id'],
 									"employee_id"  => $members['employee_no'],
 									"realname"     => $members['real_name'],
-									"status"       => $memberStatus
+									"status"       => $memberStatus,
+									"department_id" => $members['department_id'],
+									"department_name" => $members['department_name'],
+									"department_ids" => json_encode($members['department_ids'], JSON_UNESCAPED_UNICODE),
+									"email"        => $members['email'],
+									"mobile"       => $members['mobile'],
+									"tenant_key"   => $members['tenant_key'],
+									"updated_at"   => time()
 								);
 								$update = Database::update("employee", $data, Array("open_id" => $members['open_id']));
 								if($update !== true) {
@@ -274,6 +319,11 @@ class PostHandler {
 					$um = new anim210System\UserCheck();
 					if($um->isLogged()) {
 						anim210System\Utils::checkCsrf();
+						$us = $um->getInfoByUser($_SESSION['user']);
+						if($us['type'] !== "admin") {
+							Header("HTTP/1.1 403 Forbidden");
+							exit("你没有足够的权限这么做");
+						}
 						if (!isset($_POST['user'], $_POST['type'], $_POST['device'])) {
 							Header("HTTP/1.1 403 Forbidden");
 							exit("参数不完整");
@@ -304,7 +354,7 @@ class PostHandler {
 								Header("HTTP/1.1 404 Not Found");
 								exit("用户权限表中有已失效的用户：".$uList['title']."，请移除后重新操作"); // 检查失效用户
 							}
-							if (!$userinfo['status']) {
+							if (($userinfo['status'] ?? '') !== 'true') {
 								Header("HTTP/1.1 404 Not Found");
 								exit("用户权限表中有已禁用的用户：".$uList['title']."，请移除后重新操作"); // 检查失效用户
 							}
@@ -319,10 +369,10 @@ class PostHandler {
 								Header("HTTP/1.1 400 Bad Request");
 								exit("发现重复添加的设备");
 							} else {
-								$seenElements[] = $dList['value'];
+								$seenElements1[] = $dList['value'];
 							}
 							
-							$deviceinfo = Database::querySingleLine($_POST['type'], Array("id" => $dList['value'])); // 获取设备信息
+							$deviceinfo = Database::querySingleLine("devices", Array("id" => $dList['value'])); // 获取设备信息
 							if (!$deviceinfo) {
 								Header("HTTP/1.1 404 Not Found");
 								exit("设备表中有已失效的设备：".$dList['title']."，请移除后重新操作"); // 检查失效设备
@@ -351,11 +401,144 @@ class PostHandler {
 						exit("你没有足够的权限这么做");
 					}
 				break;
+				case "saveSystemSettings":
+					$um = new anim210System\UserCheck();
+					if($um->isLogged()) {
+						anim210System\Utils::checkCsrf();
+						$us = $um->getInfoByUser($_SESSION['user']);
+						if($us['type'] !== "admin") {
+							Header("HTTP/1.1 403 Forbidden");
+							exit("你没有足够的权限这么做");
+						}
+						$allowedKeys = [
+							'oa_attendance_enabled', 'oa_base_url', 'oa_auth_path', 'oa_upload_path', 'oa_location_default', 'oa_batch_size',
+							'feishu_attendance_enabled', 'card_as_attendance_enabled', 'swipe_async_feishu_enabled', 'feishu_attendance_mode',
+							'feishu_attendance_endpoint', 'feishu_employee_id_type', 'feishu_attendance_batch_size',
+							'feishu_message_enabled', 'feishu_message_template', 'feishu_message_batch_size',
+							'feishu_event_enabled',
+							'feishu_oauth_enabled', 'feishu_oauth_authorize_url', 'feishu_oauth_redirect_uri',
+							'remote_open_enabled', 'remote_open_path', 'remote_open_timeout',
+							'queue_retry_base_seconds', 'queue_retry_max_seconds'
+						];
+						$data = [];
+						foreach ($allowedKeys as $key) {
+							if (isset($_POST[$key])) {
+								$data[$key] = $_POST[$key];
+							}
+						}
+						foreach (['oa_attendance_enabled','feishu_attendance_enabled','card_as_attendance_enabled','swipe_async_feishu_enabled','feishu_message_enabled','feishu_event_enabled','feishu_oauth_enabled','remote_open_enabled'] as $boolKey) {
+							if (!isset($data[$boolKey])) {
+								$data[$boolKey] = 'false';
+							}
+						}
+						$result = Settings::setMany($data);
+						if ($result === true) {
+							exit("系统设置已保存");
+						}
+						Header("HTTP/1.1 500 Internal Error");
+						exit("系统设置保存失败：".$result);
+					}
+					Header("HTTP/1.1 403 Forbidden");
+					exit("登录会话已超时，请重新登录");
+				break;
+				case "remoteOpenDoor":
+					$um = new anim210System\UserCheck();
+					if($um->isLogged()) {
+						anim210System\Utils::checkCsrf();
+						$us = $um->getInfoByUser($_SESSION['user']);
+						if($us['type'] !== "admin") {
+							Header("HTTP/1.1 403 Forbidden");
+							exit("你没有足够的权限这么做");
+						}
+						$result = AttendanceService::remoteOpen(intval($_POST['device_id'] ?? 0), $us['username']);
+						if ($result['ok']) {
+							exit($result['message']);
+						}
+						Header("HTTP/1.1 500 Internal Error");
+						exit($result['message']);
+					}
+					Header("HTTP/1.1 403 Forbidden");
+					exit("登录会话已超时，请重新登录");
+				break;
+				case "saveAccessPolicy":
+					$um = new anim210System\UserCheck();
+					if($um->isLogged()) {
+						anim210System\Utils::checkCsrf();
+						$us = $um->getInfoByUser($_SESSION['user']);
+						if($us['type'] !== "admin") {
+							Header("HTTP/1.1 403 Forbidden");
+							exit("你没有足够的权限这么做");
+						}
+						$deviceId = intval($_POST['device_id'] ?? 0);
+						$deviceInfo = Database::querySingleLine('devices', ['id' => $deviceId]);
+						if (!$deviceInfo) {
+							Header("HTTP/1.1 404 Not Found");
+							exit("设备不存在");
+						}
+						$items = json_decode($_POST['policies'] ?? '[]', true);
+						if (!is_array($items)) {
+							Header("HTTP/1.1 400 Bad Request");
+							exit("策略格式错误");
+						}
+						$delete = Database::delete('access_policies', ['device_id' => $deviceId]);
+						if ($delete !== true) {
+							Header("HTTP/1.1 500 Internal Error");
+							exit("清理旧策略失败：".$delete);
+						}
+						$now = time();
+						$employeeLegacy = [];
+						$guestLegacy = [];
+						foreach ($items as $item) {
+							$kind = $item['subject_kind'] ?? 'employee';
+							$type = $item['subject_type'] ?? '';
+							$value = trim($item['subject_value'] ?? '');
+							$extra = trim($item['subject_extra'] ?? '');
+							if (!in_array($kind, ['employee', 'guest'], true)) {
+								continue;
+							}
+							if (!in_array($type, ['all', 'employee', 'guest', 'department', 'group', 'role', 'department_group'], true)) {
+								continue;
+							}
+							if ($type !== 'all' && $value === '') {
+								continue;
+							}
+							Database::insert('access_policies', [
+								'device_id' => $deviceId,
+								'subject_kind' => $kind,
+								'subject_type' => $type,
+								'subject_value' => $value,
+								'subject_extra' => $extra,
+								'enabled' => 1,
+								'note' => $item['note'] ?? '',
+								'created_at' => $now,
+								'updated_at' => $now
+							]);
+							if ($kind === 'employee' && $type === 'employee') {
+								$employeeLegacy[] = ['value' => $value, 'title' => $item['title'] ?? $value];
+							}
+							if ($kind === 'guest' && $type === 'guest') {
+								$guestLegacy[] = ['value' => $value, 'title' => $item['title'] ?? $value];
+							}
+						}
+						Database::update('devices', [
+							'allowedEmployee' => json_encode($employeeLegacy, JSON_UNESCAPED_UNICODE),
+							'allowedGuest' => json_encode($guestLegacy, JSON_UNESCAPED_UNICODE)
+						], ['id' => $deviceId]);
+						exit("通行策略已保存");
+					}
+					Header("HTTP/1.1 403 Forbidden");
+					exit("登录会话已超时，请重新登录");
+				break;
 
 				case 'addFaceDevice':
 					$um = new anim210System\UserCheck();
 					if($um->isLogged()) {
 						anim210System\Utils::checkCsrf();
+						$us = $um->getInfoByUser($_SESSION['user']);
+						if($us['type'] !== "admin") {
+							Header("HTTP/1.1 403 Forbidden");
+							exit("你没有足够的权限这么做");
+						}
 						$name = $_POST['devicename']; 
 						$deviceSn = $_POST['deviceSn']; 
 						$oemcode = $_POST['oemcode'];
@@ -381,6 +564,11 @@ class PostHandler {
 					$um = new anim210System\UserCheck();
 					if($um->isLogged()) {
 						anim210System\Utils::checkCsrf();
+						$us = $um->getInfoByUser($_SESSION['user']);
+						if($us['type'] !== "admin") {
+							Header("HTTP/1.1 403 Forbidden");
+							exit("你没有足够的权限这么做");
+						}
 						$deviceId   = $_POST['deviceId'];                 // 选定设备
 						$empId      = $_POST['employeeNumber'];           // 人员ID
 						$name       = $_POST['name'];

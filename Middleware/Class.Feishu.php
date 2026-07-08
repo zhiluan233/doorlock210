@@ -3,8 +3,8 @@
 /*
 
 飞书对接模块
-Ver 1.0.0.0 20240705
-Code by Jason
+Ver 1.1.0.0 20260708
+Code by Jason / Codex
 
 */
 
@@ -14,207 +14,322 @@ use anim210System;
 
 class appLinkFeishu {
     private $_config;
-    private $keyContent;
+    private $keyContent = [];
+    private $keyFile;
 
-    public function __construct() {
+    public function __construct($skipTenantToken = false) {
         global $_config;
+
         $this->_config = $_config;
-        $keyFile = file_get_contents($_config['feishu']['keyConfigFile']);
-        $keyContent = json_decode($keyFile, true);
-        // 检查是否解码成功
-        if (json_last_error() !== JSON_ERROR_NONE) {
-            $keyContent = [];
+        $this->keyFile = $_config['feishu']['keyConfigFile'] ?? (ROOT . '/feishu_key.json');
+        $this->loadKeyFile();
+        if (!$skipTenantToken) {
+            $this->getTenantAccessToken();
         }
-
-        $newTenantToken = $this->requestFeishu($_config['feishu']['appEndpoint']['getTenantToken'], 'POST', null, ['app_id' => $_config['feishu']['appId'], 'app_secret' => $_config['feishu']['appSecret']]);
-        if ($newTenantToken['status_code'] != 200 || $newTenantToken['response']['msg'] != 'ok') {
-            exit('Error: '.json_encode($newTenantToken));
-        }
-        // 修改tenant_access_token字段的值
-        $keyContent['tenant_access_token'] = $newTenantToken['response']['tenant_access_token'];
-        $this->keyContent = $keyContent;
-
-        // 将修改后的数组编码为JSON字符串
-        $newJsonContent = json_encode($keyContent, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
-
-        // 检查是否编码成功
-        if (json_last_error() !== JSON_ERROR_NONE) {
-            exit('Error encoding JSON: ' . json_last_error_msg());
-        }
-
-        // 将新的JSON内容写回文件
-        file_put_contents($_config['feishu']['keyConfigFile'], $newJsonContent);
     }
 
     public function getFeishuMemberList() {
         $allDepartments = [];
         $allMembers = [];
-        $processedOpenIds = []; // 用于记录已经处理过的用户open_id
+        $processedOpenIds = [];
 
-        // 初始调用递归函数
         $this->fetchDepartments($allDepartments);
-        foreach ($allDepartments as $departmentId) {
-            $this->fetchMembers($allMembers, $departmentId, $processedOpenIds);
+        foreach ($allDepartments as $departmentId => $departmentName) {
+            $this->fetchMembers($allMembers, $departmentId, $departmentName, $processedOpenIds);
         }
         return $allMembers;
     }
 
     public function verifyFeishuMemberStatus($open_id) {
+        $token = $this->getTenantAccessToken();
+        if (!$token) {
+            return true;
+        }
         $url = $this->_config['feishu']['appEndpoint']['getMemberInfo'].$open_id.'?department_id_type=open_department_id&user_id_type=open_id';
 
-        $data = $this->requestFeishu($url, 'GET', $this->keyContent['tenant_access_token'], null, 2);
+        $data = $this->requestFeishu($url, 'GET', $token, null, 2);
         if (!isset($data['response']['data']['user']['status'])) {
             return true;
         }
-        if ($data['response']['data']['user']['status']['is_activated'] !== true || $data['response']['data']['user']['status']['is_frozen'] == true || $data['response']['data']['user']['status']['is_resigned'] == true || $data['response']['data']['user']['status']['is_exited'] == true || $data['response']['data']['user']['status']['is_unjoin'] == true) {
-            return false;
+        return $this->isActiveStatus($data['response']['data']['user']['status']);
+    }
+
+    public function getTenantAccessToken() {
+        $now = time();
+        if (!empty($this->keyContent['tenant_access_token']) && !empty($this->keyContent['tenant_access_token_expires_at']) && intval($this->keyContent['tenant_access_token_expires_at']) > $now + 300) {
+            return $this->keyContent['tenant_access_token'];
         }
 
-        return true;
+        $appId = Settings::get('feishu_app_id', '');
+        $appSecret = Settings::get('feishu_app_secret', '');
+        if ($appId === '' || $appSecret === '') {
+            return '';
+        }
+
+        $url = $this->_config['feishu']['appEndpoint']['getTenantToken'];
+        $newTenantToken = $this->requestFeishu($url, 'POST', null, ['app_id' => $appId, 'app_secret' => $appSecret]);
+        if (($newTenantToken['status_code'] ?? 0) != 200 || !isset($newTenantToken['response']['tenant_access_token'])) {
+            return '';
+        }
+
+        $expiresIn = intval($newTenantToken['response']['expire'] ?? $newTenantToken['response']['expires_in'] ?? 7200);
+        $this->keyContent['tenant_access_token'] = $newTenantToken['response']['tenant_access_token'];
+        $this->keyContent['tenant_access_token_expires_at'] = $now + $expiresIn;
+        $this->saveKeyFile();
+        return $this->keyContent['tenant_access_token'];
+    }
+
+    public function getAppAccessToken() {
+        $now = time();
+        if (!empty($this->keyContent['app_access_token']) && !empty($this->keyContent['app_access_token_expires_at']) && intval($this->keyContent['app_access_token_expires_at']) > $now + 300) {
+            return $this->keyContent['app_access_token'];
+        }
+
+        $appId = Settings::get('feishu_app_id', '');
+        $appSecret = Settings::get('feishu_app_secret', '');
+        if ($appId === '' || $appSecret === '') {
+            return '';
+        }
+
+        $url = 'https://open.feishu.cn/open-apis/auth/v3/app_access_token/internal';
+        $data = $this->requestFeishu($url, 'POST', null, ['app_id' => $appId, 'app_secret' => $appSecret]);
+        if (($data['status_code'] ?? 0) != 200 || !isset($data['response']['app_access_token'])) {
+            return '';
+        }
+
+        $expiresIn = intval($data['response']['expire'] ?? $data['response']['expires_in'] ?? 7200);
+        $this->keyContent['app_access_token'] = $data['response']['app_access_token'];
+        $this->keyContent['app_access_token_expires_at'] = $now + $expiresIn;
+        $this->saveKeyFile();
+        return $this->keyContent['app_access_token'];
+    }
+
+    public function getUserAccessToken($code) {
+        $appToken = $this->getAppAccessToken();
+        if ($appToken === '') {
+            return ['ok' => false, 'message' => '无法获取 app_access_token'];
+        }
+
+        $data = $this->requestFeishu('https://open.feishu.cn/open-apis/authen/v1/access_token', 'POST', $appToken, [
+            'grant_type' => 'authorization_code',
+            'code' => $code
+        ], 10);
+
+        if (($data['status_code'] ?? 0) != 200 || intval($data['response']['code'] ?? -1) !== 0) {
+            return ['ok' => false, 'message' => json_encode($data, JSON_UNESCAPED_UNICODE)];
+        }
+        return ['ok' => true, 'data' => $data['response']['data']];
+    }
+
+    public function getUserInfo($userAccessToken) {
+        $data = $this->requestFeishu('https://open.feishu.cn/open-apis/authen/v1/user_info', 'GET', $userAccessToken, null, 10);
+        if (($data['status_code'] ?? 0) != 200 || intval($data['response']['code'] ?? -1) !== 0) {
+            return ['ok' => false, 'message' => json_encode($data, JSON_UNESCAPED_UNICODE)];
+        }
+        return ['ok' => true, 'data' => $data['response']['data']];
+    }
+
+    public function sendTextMessage($openId, $text, $uuid = '') {
+        $tenantToken = $this->getTenantAccessToken();
+        if ($tenantToken === '') {
+            return ['ok' => false, 'message' => '无法获取 tenant_access_token'];
+        }
+
+        $body = [
+            'receive_id' => $openId,
+            'msg_type' => 'text',
+            'content' => json_encode(['text' => $text], JSON_UNESCAPED_UNICODE)
+        ];
+        if ($uuid !== '') {
+            $body['uuid'] = substr($uuid, 0, 50);
+        }
+
+        $data = $this->requestFeishu('https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=open_id', 'POST', $tenantToken, $body, 10);
+        if (($data['status_code'] ?? 0) >= 200 && ($data['status_code'] ?? 0) < 300 && intval($data['response']['code'] ?? -1) === 0) {
+            return ['ok' => true, 'data' => $data['response']['data'] ?? []];
+        }
+        return ['ok' => false, 'message' => json_encode($data, JSON_UNESCAPED_UNICODE)];
     }
 
     private function fetchDepartments(&$allDepartments, $pageToken = null) {
+        $token = $this->getTenantAccessToken();
+        if ($token === '') {
+            return;
+        }
+
         $url = $this->_config['feishu']['appEndpoint']['getAllDepartments'];
         if ($pageToken) {
             $url .= '&page_token='.$pageToken;
         }
-        $data = $this->requestFeishu($url, 'GET', $this->keyContent['tenant_access_token'], null);
+        $data = $this->requestFeishu($url, 'GET', $token, null);
         $departmentsData = $data['response'];
 
-        // 检查响应数据结构
         if (isset($departmentsData['data']['items'])) {
             foreach ($departmentsData['data']['items'] as $item) {
                 if (isset($item['open_department_id'])) {
-                    $allDepartments[] = $item['open_department_id'];
+                    $allDepartments[$item['open_department_id']] = $item['name'] ?? '';
+                } elseif (isset($item['department_id'])) {
+                    $allDepartments[$item['department_id']] = $item['name'] ?? '';
                 }
             }
         }
 
-        // 检查是否有更多数据
-        if (isset($departmentsData['data']['has_more']) && $departmentsData['data']['has_more'] === true) {
-            if (isset($departmentsData['data']['page_token'])) {
-                $nextPageToken = $departmentsData['data']['page_token'];
-                $this->fetchDepartments($allDepartments, $nextPageToken);
-            } else {
-                exit('【500】Next page token is missing.');
-            }
+        if (isset($departmentsData['data']['has_more']) && $departmentsData['data']['has_more'] === true && isset($departmentsData['data']['page_token'])) {
+            $this->fetchDepartments($allDepartments, $departmentsData['data']['page_token']);
         }
     }
 
-    private function fetchMembers(&$allMembers, $departmentId, &$processedOpenIds, $pageToken = null) {
+    private function fetchMembers(&$allMembers, $departmentId, $departmentName, &$processedOpenIds, $pageToken = null) {
+        $token = $this->getTenantAccessToken();
+        if ($token === '') {
+            return;
+        }
+
         $url = $this->_config['feishu']['appEndpoint']['getDepartmentMemberInfo'];
         $url .= $departmentId;
         if ($pageToken) {
             $url .= '&page_token='.$pageToken;
         }
-        $data = $this->requestFeishu($url, 'GET', $this->keyContent['tenant_access_token'], null);
+        $data = $this->requestFeishu($url, 'GET', $token, null);
         $membersData = $data['response'];
 
-        // 检查响应数据结构
         if (isset($membersData['data']['items'])) {
             foreach ($membersData['data']['items'] as $item) {
-                if (isset($item['open_id'], $item['name'], $item['employee_no'], $item['status'])) {
-                    // 检查当前open_id是否已经处理过
-                    if (in_array($item['open_id'], $processedOpenIds)) {
-                        continue; // 跳过重复的open_id
-                    }
-                    // 记录当前open_id
-                    $processedOpenIds[] = $item['open_id'];
-                    if ($item['status']['is_activated'] !== true || $item['status']['is_frozen'] == true || $item['status']['is_resigned'] == true || $item['status']['is_exited'] == true || $item['status']['is_unjoin'] == true) {
-                        $status = false;
-                    } else {
-                        $status = true;
-                    }
-                    // 搜索员工真实姓名字段
-                    $realName  = '--';// 默认值
-                    
-                    if (isset($item['custom_attrs']) && is_array($item['custom_attrs'])) {
-                        foreach ($item['custom_attrs'] as $attr) {
-                            if (
-                                isset($attr['id']) &&
-                                $attr['id'] === 'C-7077865918377885700' &&
-                                isset($attr['value']['text']) &&
-                                trim($attr['value']['text']) !== ''
-                            ) {
-                                $realName = $attr['value']['text'];
-                                break;
-                            }
-                        }
-                    }
-                    $allMembers[] = [
-                        'open_id' => $item['open_id'],
-                        'name' => $item['name'],
-                        'employee_no' => $item['employee_no'],
-                        'real_name' => $realName,
-                        'status' => $status
-                    ];
+                if (!isset($item['open_id'])) {
+                    continue;
+                }
+                if (in_array($item['open_id'], $processedOpenIds)) {
+                    continue;
+                }
+                $processedOpenIds[] = $item['open_id'];
+                $status = $this->isActiveStatus($item['status'] ?? []);
+                $realName = $this->extractRealName($item);
+                $departmentIds = $item['department_ids'] ?? [$departmentId];
+
+                $allMembers[] = [
+                    'open_id' => $item['open_id'],
+                    'user_id' => $item['user_id'] ?? '',
+                    'union_id' => $item['union_id'] ?? '',
+                    'name' => $item['name'] ?? '',
+                    'employee_no' => $item['employee_no'] ?? '',
+                    'real_name' => $realName,
+                    'status' => $status,
+                    'department_id' => $departmentIds[0] ?? $departmentId,
+                    'department_name' => $departmentName,
+                    'department_ids' => $departmentIds,
+                    'email' => $item['email'] ?? '',
+                    'mobile' => $item['mobile'] ?? '',
+                    'tenant_key' => $item['tenant_key'] ?? ''
+                ];
+            }
+        }
+
+        if (isset($membersData['data']['has_more']) && $membersData['data']['has_more'] === true && isset($membersData['data']['page_token'])) {
+            $this->fetchMembers($allMembers, $departmentId, $departmentName, $processedOpenIds, $membersData['data']['page_token']);
+        }
+    }
+
+    private function extractRealName($item) {
+        $realName = '--';
+        if (isset($item['custom_attrs']) && is_array($item['custom_attrs'])) {
+            foreach ($item['custom_attrs'] as $attr) {
+                if (
+                    isset($attr['id']) &&
+                    $attr['id'] === 'C-7077865918377885700' &&
+                    isset($attr['value']['text']) &&
+                    trim($attr['value']['text']) !== ''
+                ) {
+                    $realName = $attr['value']['text'];
+                    break;
                 }
             }
         }
-
-        // 检查是否有更多数据
-        if (isset($membersData['data']['has_more']) && $membersData['data']['has_more'] === true) {
-            if (isset($membersData['data']['page_token'])) {
-                $nextPageToken = $membersData['data']['page_token'];
-                $this->fetchMembers($allMembers, $departmentId, $processedOpenIds, $nextPageToken);
-            } else {
-                exit('【500】Next page token is missing.');
-            }
-        }
+        return $realName;
     }
 
-    private function requestFeishu($url, $method = 'GET', $authorization = '', $body = [], $timeout = 60) {
-        // 初始化Curl
-        $ch = curl_init();
-    
-        // 设置URL
-        curl_setopt($ch, CURLOPT_URL, $url);
-    
-        // 设置返回内容不直接输出
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    private function isActiveStatus($status) {
+        if (!is_array($status) || count($status) === 0) {
+            return true;
+        }
+        if (
+            (isset($status['is_activated']) && $status['is_activated'] !== true) ||
+            (isset($status['is_frozen']) && $status['is_frozen'] == true) ||
+            (isset($status['is_resigned']) && $status['is_resigned'] == true) ||
+            (isset($status['is_exited']) && $status['is_exited'] == true) ||
+            (isset($status['is_unjoin']) && $status['is_unjoin'] == true)
+        ) {
+            return false;
+        }
+        return true;
+    }
 
-        // 设置请求超时时间
+    public function requestFeishu($url, $method = 'GET', $authorization = '', $body = null, $timeout = 60) {
+        $ch = curl_init();
+        curl_setopt($ch, CURLOPT_URL, $url);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
         curl_setopt($ch, CURLOPT_TIMEOUT, $timeout);
-    
-        // 设置请求方法
+        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, min(5, $timeout));
+
+        $headers = [];
         if (strtoupper($method) == 'POST') {
             curl_setopt($ch, CURLOPT_POST, true);
-    
-            // 设置请求体
-            $jsonBody = json_encode($body);
+            $jsonBody = json_encode($body ?: [], JSON_UNESCAPED_UNICODE);
             curl_setopt($ch, CURLOPT_POSTFIELDS, $jsonBody);
-    
-            // 设置请求头，包含Content-Type: application/json
-            $headers = ['Content-Type: application/json'];
+            $headers[] = 'Content-Type: application/json; charset=utf-8';
         } else {
-            // 默认为GET请求
             curl_setopt($ch, CURLOPT_HTTPGET, true);
-            $headers = [];
         }
-    
-        // 设置Authorization头
+
         if (!empty($authorization)) {
             $headers[] = 'Authorization: Bearer ' . $authorization;
         }
-    
-        // 设置所有头信息
+
         if (!empty($headers)) {
             curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
         }
-    
-        // 执行请求并获取响应
+
         $response = curl_exec($ch);
-    
-        // 获取响应状态码
+        $curlError = curl_errno($ch) ? curl_error($ch) : '';
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    
-        // 关闭Curl
         curl_close($ch);
-    
+
         return [
             'status_code' => $httpCode,
-            'response' => json_decode($response, true)
+            'response' => json_decode($response, true),
+            'raw' => $response,
+            'error' => $curlError
         ];
     }
-    
+
+    private function loadKeyFile() {
+        if (!file_exists($this->keyFile)) {
+            @file_put_contents($this->keyFile, "{}");
+        }
+        $keyFile = @file_get_contents($this->keyFile);
+        $keyContent = json_decode($keyFile ?: '{}', true);
+        $this->keyContent = json_last_error() === JSON_ERROR_NONE && is_array($keyContent) ? $keyContent : [];
+    }
+
+    private function saveKeyFile() {
+        $fp = @fopen($this->keyFile, 'c+');
+        if (!$fp) {
+            return;
+        }
+        if (flock($fp, LOCK_EX)) {
+            $current = stream_get_contents($fp);
+            $currentData = json_decode($current ?: '{}', true);
+            if (json_last_error() === JSON_ERROR_NONE && is_array($currentData)) {
+                $this->keyContent = array_merge($currentData, $this->keyContent);
+            }
+            $newJsonContent = json_encode($this->keyContent, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
+            if (json_last_error() === JSON_ERROR_NONE) {
+                ftruncate($fp, 0);
+                rewind($fp);
+                fwrite($fp, $newJsonContent);
+                fflush($fp);
+            }
+            flock($fp, LOCK_UN);
+        }
+        fclose($fp);
+    }
 }

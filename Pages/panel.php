@@ -15,6 +15,19 @@ if(!$um->isLogged()) {
     exit ("<script>alart('你还没有登录！');</script>");
 }
 $rs = Database::querySingleLine("user", Array("username" => $_SESSION['user']));
+$isAdmin = $rs && $rs['type'] === 'admin';
+$isReadonly = $rs && $rs['type'] === 'readonly';
+
+if (!$isAdmin && !$isReadonly) {
+    unset($_SESSION['user']);
+    unset($_SESSION['token']);
+    exit("<script>location='/?page=login';</script>");
+}
+
+if ($isReadonly && !in_array($module, ['home', 'admininfo', 'accesslog', ''], true)) {
+    $module = 'accesslog';
+    $_GET['module'] = 'accesslog';
+}
 
 ?>
 <!DOCTYPE html>
@@ -115,6 +128,7 @@ $rs = Database::querySingleLine("user", Array("username" => $_SESSION['user']));
                             <li class="<?php echo $module == "admininfo" || $module == "" ? "active-page" : ""; ?>">
                                 <a href="/?page=panel&module=admininfo"><i class="fa-solid fa-id-card" style="padding-left: 2.5px; padding-right: 2px"></i><span>用户信息</span></a>
                             </li>
+                            <?php if($isAdmin) { ?>
                             <li class="menu-divider"></li>
                             <li class="<?php echo $module == "submitcard" || $module == "" ? "active-page" : ""; ?>">
 								<a href="/?page=panel&module=submitcard"><i class="fa-solid fa-credit-card" style="padding-left: 2.5px; padding-right: 2px"></i><span>发卡管理</span></a>
@@ -125,10 +139,11 @@ $rs = Database::querySingleLine("user", Array("username" => $_SESSION['user']));
 							<li class="<?php echo $module == "doorcontrol" || $module == "" ? "active-page" : ""; ?>">
 								<a href="/?page=panel&module=doorcontrol"><i class="fa-solid fa-cubes" style="padding-left: 2.5px; padding-right: 2px"></i><span>门禁控制</span></a>
 							</li>
+                            <?php } ?>
 							<li class="<?php echo $module == "accesslog" || $module == "" ? "active-page" : ""; ?>">
                                 <a href="/?page=panel&module=accesslog"><i class="fa-solid fa-file-text" style="padding-left: 2.5px; padding-right: 2px"></i><span> 出入日志</span></a>
                             </li>
-                            <?php if($rs['type'] == "admin") { ?>
+                            <?php if($isAdmin) { ?>
                                 <li class="menu-divider"></li>
                                 <li class="<?php echo $module == "useropt" || $module == "" ? "active-page" : ""; ?>">
                                     <a href="/?page=panel&module=useropt"><i class="fa-solid fa-user" style="padding-left: 2.5px; padding-right: 2px"></i><span>管理员编辑</span></a>

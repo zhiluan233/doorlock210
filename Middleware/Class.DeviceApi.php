@@ -82,43 +82,33 @@ class deviceApi {
 			                exit("Unauthorized device!");
                         }
 
+                        $eventTime = time();
                         $card = $data['Card'];
                         if ($this->is_base64($data['Card'])) {
                             $card = base64_decode($data['Card']);
+                        }
+                        $card = trim((string)$card);
+                        if (ctype_digit($card) && strlen($card) < 10) {
+                            $card = str_pad($card, 10, '0', STR_PAD_LEFT);
                         }
 
                         $employeeInfo = Database::querySingleLine("employee", Array("card_id" => $card));
                         $guestInfo = Database::querySingleLine("guest", Array("card_id" => $card));
 
                         if ($guestInfo != null) {
-                            if ($guestInfo['status'] == 'true') {
-                                $userList = json_decode($deviceInfo['allowedGuest'],true);
-                                $allowPass = false;
-                                foreach ($userList as $item) {
-                                    if ($item["value"] === $guestInfo['open_id']) {
-                                        $allowPass = true;
-                                        break;
-                                    }
-                                }
-                                if ($allowPass === false) {
-                                    http_response_code(200);
-                                    $resp = [
-                                        'ActIndex' => '0',
-                                        'AcsRes' => '0',
-                                        'Time' => (string)$_config['doorOpenTime'],
-                                        'OEM' => (string)$deviceInfo['oemcode']
-                                    ];
-                                    $writelogs = [
-                                        'passusername' => $guestInfo['name'],
-                                        'passusertype' => '访客',
-                                        'passdoor' => $deviceInfo['name'],
-                                        'cardid' => $card,
-                                        'action' => '开门失败：没有权限',
-                                        'time' => time()
-                                    ];
-                                    Database::insert("logs",$writelogs);
-                                    exit(json_encode($resp));
-                                }
+                            $reason = '';
+                            $allowPass = AttendanceService::canGuestPass($guestInfo, $deviceInfo, $reason);
+                            if ($allowPass === false) {
+                                http_response_code(200);
+                                $resp = [
+                                    'ActIndex' => '0',
+                                    'AcsRes' => '0',
+                                    'Time' => (string)$_config['doorOpenTime'],
+                                    'OEM' => (string)$deviceInfo['oemcode']
+                                ];
+                                AttendanceService::writeAccessLog($guestInfo['name'], '访客', $deviceInfo['name'], $card, '开门失败：'.$reason, $eventTime);
+                                exit(json_encode($resp));
+                            }
                                 http_response_code(200);
                                 $resp = [
                                     'ActIndex' => '0',
@@ -127,73 +117,24 @@ class deviceApi {
                                     'OEM' => (string)$deviceInfo['oemcode']
                                 ];
 
-                                $writelogs = [
-                                    'passusername' => $guestInfo['name'],
-                                    'passusertype' => '访客',
-                                    'passdoor' => $deviceInfo['name'],
-                                    'cardid' => $card,
-                                    'action' => '开门成功',
-                                    'time' => time()
-                                ];
-                                Database::insert("logs",$writelogs);
+                                AttendanceService::writeAccessLog($guestInfo['name'], '访客', $deviceInfo['name'], $card, '开门成功', $eventTime);
                                 exit(json_encode($resp));
-                            }
                         }
 
                         if ($employeeInfo != null) {
-                            if ($employeeInfo['status'] == 'true') {
-                                $userList = json_decode($deviceInfo['allowedEmployee'],true);
-                                $allowPass = false;
-                                foreach ($userList as $item) {
-                                    if ($item["value"] === $employeeInfo['open_id']) {
-                                        $allowPass = true;
-                                        break;
-                                    }
-                                }
-                                if ($allowPass === false) {
-                                    http_response_code(200);
-                                    $resp = [
-                                        'ActIndex' => '0',
-                                        'AcsRes' => '0',
-                                        'Time' => (string)$_config['doorOpenTime'],
-                                        'OEM' => (string)$deviceInfo['oemcode']
-                                    ];
-                                    $writelogs = [
-                                        'passusername' => $employeeInfo['name'],
-                                        'passusertype' => '员工',
-                                        'passdoor' => $deviceInfo['name'],
-                                        'cardid' => $card,
-                                        'action' => '开门失败：没有权限',
-                                        'time' => time()
-                                    ];
-                                    Database::insert("logs",$writelogs);
-                                    exit(json_encode($resp));
-                                }
-                                $feishuMethod = new anim210System\appLinkFeishu();
-						        $feishuMemberInfo = $feishuMethod->verifyFeishuMemberStatus($employeeInfo['open_id']);
-                                if ($feishuMemberInfo === false) {
-                                    $updatedata = Array(
-                                        "status"       => 'false'
-                                    );
-                                    $update = Database::update("employee", $updatedata, Array("open_id" => $employeeInfo['open_id']));
-                                    http_response_code(200);
-                                    $resp = [
-                                        'ActIndex' => '0',
-                                        'AcsRes' => '0',
-                                        'Time' => (string)$_config['doorOpenTime'],
-                                        'OEM' => (string)$deviceInfo['oemcode']
-                                    ];
-                                    $writelogs = [
-                                        'passusername' => $employeeInfo['name'],
-                                        'passusertype' => '员工',
-                                        'passdoor' => $deviceInfo['name'],
-                                        'cardid' => $card,
-                                        'action' => '开门失败：飞书账号已禁用',
-                                        'time' => time()
-                                    ];
-                                    Database::insert("logs",$writelogs);
-                                    exit(json_encode($resp));
-                                }
+                            $reason = '';
+                            $allowPass = AttendanceService::canEmployeePass($employeeInfo, $deviceInfo, $reason);
+                            if ($allowPass === false) {
+                                http_response_code(200);
+                                $resp = [
+                                    'ActIndex' => '0',
+                                    'AcsRes' => '0',
+                                    'Time' => (string)$_config['doorOpenTime'],
+                                    'OEM' => (string)$deviceInfo['oemcode']
+                                ];
+                                AttendanceService::writeAccessLog($employeeInfo['name'], '员工', $deviceInfo['name'], $card, '开门失败：'.$reason, $eventTime);
+                                exit(json_encode($resp));
+                            }
                                 http_response_code(200);
                                 $resp = [
                                     'ActIndex' => '0',
@@ -201,17 +142,9 @@ class deviceApi {
                                     'Time' => (string)$_config['doorOpenTime'],
                                     'OEM' => (string)$deviceInfo['oemcode']
                                 ];
-                                $writelogs = [
-                                    'passusername' => $employeeInfo['name'],
-                                    'passusertype' => '员工',
-                                    'passdoor' => $deviceInfo['name'],
-                                    'cardid' => $card,
-                                    'action' => '开门成功',
-                                    'time' => time()
-                                ];
-                                Database::insert("logs",$writelogs);
+                                AttendanceService::writeAccessLog($employeeInfo['name'], '员工', $deviceInfo['name'], $card, '开门成功', $eventTime);
+                                AttendanceService::enqueueSwipe($employeeInfo, $deviceInfo, $card, 'card', $eventTime);
                                 exit(json_encode($resp));
-                            }
                         }
 
                         http_response_code(200);

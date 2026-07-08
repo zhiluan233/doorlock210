@@ -6,73 +6,120 @@ use anim210System;
 
 global $_config;
 
-$page_title = "门禁控制与权限";
 $rs = Database::querySingleLine("user", Array("username" => $_SESSION['user']));
-
-if(!$rs) {
-	exit("<script>location='/?page=login';</script>");
+if(!$rs || $rs['type'] !== 'admin') {
+	exit("<script>location='/?page=panel&module=accesslog';</script>");
 }
 
-if(isset($_GET['getdevices']) && preg_match("/^[A-Za-z0-9\_\-]{1,30}$/", $_GET['getdevices'])) {
-	anim210System\Utils::checkCsrf();
-	if ($_GET['getdevices'] !== 'all') {
-		ob_clean();
-		Header("HTTP/1.1 403");
-		exit("未找到");
-	}
-	$mainSQL = 'SELECT * FROM `devices`';
-	$deviceData = Database::query('devices', $mainSQL, true);
-	$outArray = [];
-	if($deviceData) {
-		foreach($deviceData as $dData) {
-			$outArray[] = [
-				'value' => $dData['id'],
-				'title' => $dData['name'],
-			];
+function fetchAssocRows($sql, $table = 'devices') {
+	$rs = Database::query($table, $sql, '', true);
+	$rows = [];
+	if ($rs) {
+		while ($row = mysqli_fetch_assoc($rs)) {
+			$rows[] = $row;
 		}
-		ob_clean();
-		exit(json_encode($outArray));
-	} else {
-		ob_clean();
-		Header("HTTP/1.1 500");
-		exit("无法解析设备表");
+	}
+	return $rows;
+}
+
+$devices = fetchAssocRows('SELECT * FROM `devices` ORDER BY `id` ASC', 'devices');
+$employeesRaw = fetchAssocRows("SELECT * FROM `employee` WHERE `status`='true' ORDER BY `name` ASC", 'employee');
+$guestsRaw = fetchAssocRows("SELECT * FROM `guest` WHERE `status`='true' ORDER BY `name` ASC", 'guest');
+$policiesRaw = fetchAssocRows('SELECT * FROM `access_policies` WHERE `enabled`=1 ORDER BY `id` ASC', 'access_policies');
+
+$employees = [];
+$departments = [];
+$groups = [];
+$roles = [];
+foreach ($employeesRaw as $employee) {
+	$employees[] = ['value' => $employee['open_id'], 'title' => $employee['name'].'（'.($employee['employee_id'] ?: '无工号').'）'];
+	foreach ([$employee['department_id'] ?? '', $employee['department_name'] ?? ''] as $dept) {
+		if ($dept !== '') { $departments[$dept] = $dept; }
+	}
+	$groupItems = json_decode($employee['groups'] ?? '', true);
+	if (!is_array($groupItems)) {
+		$groupItems = array_filter(array_map('trim', explode(',', $employee['groups'] ?? '')));
+	}
+	foreach ($groupItems as $item) {
+		if ($item !== '') { $groups[$item] = $item; }
+	}
+	$roleItems = json_decode($employee['roles'] ?? '', true);
+	if (!is_array($roleItems)) {
+		$roleItems = array_filter(array_map('trim', explode(',', $employee['roles'] ?? '')));
+	}
+	foreach ($roleItems as $item) {
+		if ($item !== '') { $roles[$item] = $item; }
 	}
 }
 
-if(isset($_GET['getuser']) && preg_match("/^[A-Za-z0-9\_\-]{1,30}$/", $_GET['getuser'])) {
-	anim210System\Utils::checkCsrf();
-	if ($_GET['getuser'] !== 'employee' && $_GET['getuser'] !== 'guest') {
-		ob_clean();
-		Header("HTTP/1.1 403");
-		exit("未找到");
-	}
-	$mainSQL = 'SELECT * FROM `'.$_GET['getuser'].'`';
-	$userData = Database::query($_GET['getuser'], $mainSQL, true);
-	$outArray = [];
-	if($userData) {
-		foreach($userData as $uData) {
-			if ($uData['status'] == 'true') {
-				$outArray[] = [
-					'value' => $uData['open_id'],
-					'title' => $uData['name'],
-				];
-			}
+$guests = [];
+foreach ($guestsRaw as $guest) {
+	$guests[] = ['value' => $guest['open_id'], 'title' => $guest['name']];
+}
+
+$policyMap = [];
+foreach ($devices as $device) {
+	$policyMap[$device['id']] = [
+		'all_employee' => false,
+		'all_guest' => false,
+		'employees' => [],
+		'guests' => [],
+		'departments' => [],
+		'groups' => [],
+		'roles' => [],
+		'department_groups' => []
+	];
+	$legacyEmployees = json_decode($device['allowedEmployee'] ?? '[]', true);
+	if (is_array($legacyEmployees)) {
+		foreach ($legacyEmployees as $item) {
+			if (isset($item['value'])) { $policyMap[$device['id']]['employees'][] = $item['value']; }
 		}
-		ob_clean();
-		exit(json_encode($outArray));
-	} else {
-		ob_clean();
-		Header("HTTP/1.1 500");
-		exit("无法解析用户表");
+	}
+	$legacyGuests = json_decode($device['allowedGuest'] ?? '[]', true);
+	if (is_array($legacyGuests)) {
+		foreach ($legacyGuests as $item) {
+			if (isset($item['value'])) { $policyMap[$device['id']]['guests'][] = $item['value']; }
+		}
 	}
 }
 
-$um = new anim210System\UserCheck();
-
-$mainSQL = 'SELECT * FROM `devices`';
-$countSQL = 'SELECT count(*) FROM `devices`';
-$deviceData = Database::query("devices", $mainSQL, true);
-$countData = Database::query("devices", $countSQL, true);
+foreach ($policiesRaw as $policy) {
+	$deviceId = $policy['device_id'];
+	if (!isset($policyMap[$deviceId])) {
+		continue;
+	}
+	if ($policy['subject_kind'] === 'employee' && $policy['subject_type'] === 'all') {
+		$policyMap[$deviceId]['all_employee'] = true;
+	}
+	if ($policy['subject_kind'] === 'guest' && $policy['subject_type'] === 'all') {
+		$policyMap[$deviceId]['all_guest'] = true;
+	}
+	if ($policy['subject_kind'] === 'employee' && $policy['subject_type'] === 'employee') {
+		$policyMap[$deviceId]['employees'][] = $policy['subject_value'];
+	}
+	if ($policy['subject_kind'] === 'guest' && $policy['subject_type'] === 'guest') {
+		$policyMap[$deviceId]['guests'][] = $policy['subject_value'];
+	}
+	if ($policy['subject_type'] === 'department') {
+		$policyMap[$deviceId]['departments'][] = $policy['subject_value'];
+	}
+	if ($policy['subject_type'] === 'group') {
+		$policyMap[$deviceId]['groups'][] = $policy['subject_value'];
+	}
+	if ($policy['subject_type'] === 'role') {
+		$policyMap[$deviceId]['roles'][] = $policy['subject_value'];
+	}
+	if ($policy['subject_type'] === 'department_group') {
+		$policyMap[$deviceId]['department_groups'][] = $policy['subject_value'].'|'.$policy['subject_extra'];
+	}
+}
+foreach ($policyMap as $deviceId => $policy) {
+	foreach ($policy as $key => $value) {
+		if (is_array($value)) {
+			$policyMap[$deviceId][$key] = array_values(array_unique($value));
+		}
+	}
+}
 
 ?>
 <div class="page-title">
@@ -82,233 +129,161 @@ $countData = Database::query("devices", $countSQL, true);
 	<div class="row">
 		<div class="col-md-12">
 			<div class="panel panel-white">
-				<div class="panel-body" style="font-weight: 400;overflow-x: auto;max-width: ;">
+				<div class="panel-body" style="font-weight: 400;overflow-x: auto;">
 					<h4 style="font-weight: 400">门禁控制与权限</h4><br>
-					<h6>设置员工和访客的通行权限表，根据人员添加权限</h6><br />
-          <button style="margin-left:5px;" class="btn btn-default" onclick="setEmployeePassPermission()">设置员工通行权限</button>
-          <button style="margin-left:5px;" class="btn btn-default" onclick="setGuestPassPermission()">设置访客通行权限</button>
-
+					<h6>按设备设置员工、访客、部门、组、角色和部门+组通行策略</h6><br />
 					<table id="devices1" class="table table-bordered table-auto" style="clear: both;margin-top: 20px;">
                         <thead>
                             <tr>
                                 <th>ID</th>
                                 <th>设备名</th>
-								                <th>IP</th>
-								                <th>最后一次心跳</th>
+								<th>IP</th>
+								<th>最后一次心跳</th>
                                 <th>操作</th>
-							              </tr>
+							</tr>
                         </thead>
-						            <tbody>
-							                  <?php
-                                foreach ($deviceData as $dData) {
-                                    echo "<tr>
-                                    <td>{$dData['id']}</td>
-                                    <td>{$dData['name']}</td>
-									<td>{$dData['ip']}</td>
-									<td>{$dData['hbtime']}</td>
-                                    <td><button style=\"margin-left:5px;margin-top:5px\" class=\"btn btn-default\" onclick=\"remoteOpen({$dData['id']})\">远程开门</button></td>
-                                    </tr>";
-                                }
-                            ?>
+						<tbody>
+							<?php foreach ($devices as $dData) { ?>
+								<tr>
+									<td><?php echo $dData['id']; ?></td>
+									<td><?php echo htmlspecialchars($dData['name']); ?></td>
+									<td><?php echo htmlspecialchars($dData['ip']); ?></td>
+									<td><?php echo htmlspecialchars($dData['hbtime']); ?></td>
+									<td>
+										<button style="margin-left:5px;margin-top:5px" class="btn btn-default" onclick="editPolicy(<?php echo $dData['id']; ?>)">编辑通行策略</button>
+										<button style="margin-left:5px;margin-top:5px" class="btn btn-default" onclick="remoteOpen(<?php echo $dData['id']; ?>)">远程开门</button>
+									</td>
+								</tr>
+							<?php } ?>
 						</tbody>
 					</table>
 				</div>
 			</div>
 		</div>
     </div>
-	<div class="row">
-    </div>
-		<!-- Row -->
 </div>
-<!-- 对话框模板 -->
-<script type="text/html" id="createDeviceDialogTpl">
-  <div class="layui-form layui-form-pane" style="padding: 20px;">
-    <div class="layui-form-item">
-      <label class="layui-form-label">IP</label>
-      <div class="layui-input-block">
-        <input type="text" id="ipaddr" class="layui-input" placeholder="192.168.x.x">
-      </div>
-    </div>
-    <div class="layui-form-item">
-      <label class="layui-form-label">名称</label>
-      <div class="layui-input-block">
-        <input type="text" id="name" class="layui-input" placeholder="xx门禁">
-      </div>
-    </div>
-    <div class="layui-form-item">
-      <div class="layui-input-block">
-        <button class="layui-btn" lay-filter="submit" lay-submit onclick="addDevice()">创建</button>
-        <button class="layui-btn layui-btn-primary" onclick="closeDialog()">取消</button>
-      </div>
-    </div>
-  </div>
-</script>
-<script type="text/javascript" src="/asset/js/md5.js"></script>
 <script src="asset/layui/layui.js"></script>
 <script>
 var csrf_token = "<?php echo $_SESSION['token']; ?>";
-layui.use(['layer', 'util', 'form', 'transfer', 'upload'], function(){
-    var layer = layui.layer;
-    var form = layui.form;
-    var transfer = layui.transfer;
-    var util = layui.util;
-    var upload = layui.upload;
+var employeeList = <?php echo json_encode($employees, JSON_UNESCAPED_UNICODE); ?>;
+var guestList = <?php echo json_encode($guests, JSON_UNESCAPED_UNICODE); ?>;
+var policyMap = <?php echo json_encode($policyMap, JSON_UNESCAPED_UNICODE); ?>;
+var deviceMap = <?php echo json_encode(array_column($devices, 'name', 'id'), JSON_UNESCAPED_UNICODE); ?>;
 
-    function setEmployeePassPermission() {
-      var htmlobj = $.ajax({
-			type: 'GET',
-			url: "?page=panel&module=doorcontrol&getdevices=all&csrf=" + csrf_token,
-			async:true,
-			error: function() {
-				layer.msg("错误：" + htmlobj.responseText);
-				return;
-			},
+layui.use(['layer', 'util', 'form', 'transfer'], function(){
+	var layer = layui.layer;
+	var form = layui.form;
+	var transfer = layui.transfer;
+
+	window.remoteOpen = function(deviceId) {
+		layer.confirm('确认远程打开 ' + (deviceMap[deviceId] || deviceId) + '？', {icon: 3, title: '远程开门'}, function(index) {
+			layer.close(index);
+			$.ajax({
+				type: 'POST',
+				url: '?action=remoteOpenDoor&page=panel&module=doorcontrol&csrf=' + csrf_token,
+				data: {device_id: deviceId},
+				success: function(resp) { layer.msg(resp); },
+				error: function(xhr) { layer.msg('远程开门失败：' + xhr.responseText); }
+			});
+		});
+	};
+
+	window.editPolicy = function(deviceId) {
+		var policy = policyMap[deviceId] || {};
+		var html = '<div class="layui-form layui-form-pane" style="padding:16px;">'
+			+ '<div class="layui-form-item"><input type="checkbox" id="all_employee" title="允许全体员工通行" lay-skin="primary" ' + (policy.all_employee ? 'checked' : '') + '></div>'
+			+ '<div id="employeeTransfer"></div>'
+			+ '<hr><div class="layui-form-item"><input type="checkbox" id="all_guest" title="允许全体访客通行" lay-skin="primary" ' + (policy.all_guest ? 'checked' : '') + '></div>'
+			+ '<div id="guestTransfer"></div>'
+			+ '<hr>'
+			+ '<div class="layui-form-item"><label class="layui-form-label">部门</label><div class="layui-input-block"><textarea id="departments" class="layui-textarea" placeholder="每行一个部门ID或部门名">' + escapeHtml((policy.departments || []).join("\n")) + '</textarea></div></div>'
+			+ '<div class="layui-form-item"><label class="layui-form-label">组</label><div class="layui-input-block"><textarea id="groups" class="layui-textarea" placeholder="每行一个组名">' + escapeHtml((policy.groups || []).join("\n")) + '</textarea></div></div>'
+			+ '<div class="layui-form-item"><label class="layui-form-label">角色</label><div class="layui-input-block"><textarea id="roles" class="layui-textarea" placeholder="每行一个角色名">' + escapeHtml((policy.roles || []).join("\n")) + '</textarea></div></div>'
+			+ '<div class="layui-form-item"><label class="layui-form-label">部门+组</label><div class="layui-input-block"><textarea id="department_groups" class="layui-textarea" placeholder="每行一个：部门|组">' + escapeHtml((policy.department_groups || []).join("\n")) + '</textarea></div></div>'
+			+ '<div style="text-align:center;"><button class="layui-btn layui-btn-normal" onclick="savePolicy(' + deviceId + ')">保存</button><button class="layui-btn layui-btn-primary" onclick="layui.layer.closeAll()">取消</button></div>'
+			+ '</div>';
+
+		layer.open({
+			type: 1,
+			title: '编辑通行策略 - ' + (deviceMap[deviceId] || deviceId),
+			area: ['760px', '720px'],
+			content: html,
 			success: function() {
-				try {
-					var deviceList = htmlobj.responseText;
-
-          setPassPermission(deviceList, "employee");
-				} catch(e) {
-          layer.msg('错误：无法解析服务器返回的数据');
-				}
-				return;
+				transfer.render({
+					elem: '#employeeTransfer',
+					title: ['可选员工', '已允许员工'],
+					data: employeeList,
+					value: policy.employees || [],
+					width: 300,
+					height: 260,
+					showSearch: true,
+					id: 'employeePolicy'
+				});
+				transfer.render({
+					elem: '#guestTransfer',
+					title: ['可选访客', '已允许访客'],
+					data: guestList,
+					value: policy.guests || [],
+					width: 300,
+					height: 200,
+					showSearch: true,
+					id: 'guestPolicy'
+				});
+				form.render();
 			}
 		});
-    }
+	};
 
-    function setGuestPassPermission() {
-      var htmlobj = $.ajax({
-			type: 'GET',
-			url: "?page=panel&module=doorcontrol&getdevices=all&csrf=" + csrf_token,
-			async:true,
-			error: function() {
-				layer.msg("错误：" + htmlobj.responseText);
-				return;
-			},
-			success: function() {
-				try {
-					var deviceList = htmlobj.responseText;
-
-          setPassPermission(deviceList, "guest");
-				} catch(e) {
-          layer.msg('错误：无法解析服务器返回的数据');
-				}
-				return;
+	window.savePolicy = function(deviceId) {
+		var policies = [];
+		if ($('#all_employee').is(':checked')) {
+			policies.push({subject_kind: 'employee', subject_type: 'all', subject_value: ''});
+		}
+		if ($('#all_guest').is(':checked')) {
+			policies.push({subject_kind: 'guest', subject_type: 'all', subject_value: ''});
+		}
+		transfer.getData('employeePolicy').forEach(function(item) {
+			policies.push({subject_kind: 'employee', subject_type: 'employee', subject_value: item.value, title: item.title});
+		});
+		transfer.getData('guestPolicy').forEach(function(item) {
+			policies.push({subject_kind: 'guest', subject_type: 'guest', subject_value: item.value, title: item.title});
+		});
+		lines('#departments').forEach(function(value) {
+			policies.push({subject_kind: 'employee', subject_type: 'department', subject_value: value});
+		});
+		lines('#groups').forEach(function(value) {
+			policies.push({subject_kind: 'employee', subject_type: 'group', subject_value: value});
+		});
+		lines('#roles').forEach(function(value) {
+			policies.push({subject_kind: 'employee', subject_type: 'role', subject_value: value});
+		});
+		lines('#department_groups').forEach(function(value) {
+			var parts = value.split('|');
+			if (parts.length >= 2) {
+				policies.push({subject_kind: 'employee', subject_type: 'department_group', subject_value: parts[0].trim(), subject_extra: parts.slice(1).join('|').trim()});
 			}
 		});
-    }
+		$.ajax({
+			type: 'POST',
+			url: '?action=saveAccessPolicy&page=panel&module=doorcontrol&csrf=' + csrf_token,
+			data: {device_id: deviceId, policies: JSON.stringify(policies)},
+			success: function(resp) {
+				layer.msg(resp);
+				setTimeout(function(){ location.reload(); }, 600);
+			},
+			error: function(xhr) {
+				layer.msg('保存失败：' + xhr.responseText);
+			}
+		});
+	};
 
-    function setPassPermission(devicelist, type) {
-        let deviceListArr = JSON.parse(devicelist);
-        let userListArr = [];
-        var htmlobj = $.ajax({
-            type: 'GET',
-            url: "?page=panel&module=doorcontrol&getuser=" + type + "&csrf=" + csrf_token,
-            async:true,
-            error: function(response) {
-                layer.msg("错误：" + response.responseText);
-                return;
-            },
-            success: function(response) {
-              userListArr = JSON.parse(response);
-              // 弹出窗口
-              layer.open({
-                type: 1,
-                offset: 'auto',
-                title: '您正在编辑通行权限',
-                content: '<div id="transferContainer"></div>' + 
-                '<div style="text-align: center;margin: 10px">' +
-                '<button class="layui-btn layui-btn-normal" lay-on="selectDevices">保存</button>' + 
-                '<button class="layui-btn layui-btn-danger" onclick="layer.closeAll();">取消</button>' +
-                '</div>',
-                area: '400px',
-                success: function (layero, index) {
-                    // 配置项
-                    var userMonifyOptions = {
-                        elem: '#transferContainer',
-                        title: ['可添加的用户', '已选择的用户'],  // 穿梭框的标题
-                        data: userListArr,  // 数据源
-                        width: 160,
-                        height: 400,
-                        showSearch: true,
-                        id: 'userManage'
-                    };
-                    // 初始化transfer组件
-                    transfer.render(userMonifyOptions);
-                }
-                });
-                util.on('lay-on', {
-                    selectDevices: function(othis){
-                      // 弹出窗口
-                      layer.open({
-                        type: 1,
-                        offset: 'auto',
-                        title: '请选择需要下发设置的设备',
-                        content: '<div id="transferContainer1"></div>' + 
-                        '<div style="text-align: center;margin: 10px">' +
-                        '<button class="layui-btn layui-btn-normal" lay-on="savePermission">保存</button>' + 
-                        '<button class="layui-btn layui-btn-danger" onclick="layer.closeAll();">取消</button>' +
-                        '</div>',
-                        area: '400px',
-                        success: function (layero, index) {
-                            // 配置项
-                            var userMonifyOptions = {
-                                elem: '#transferContainer1',
-                                title: ['可下发的设备', '已选择的设备'],  // 穿梭框的标题
-                                data: deviceListArr,  // 数据源
-                                width: 160,
-                                height: 400,
-                                showSearch: true,
-                                id: 'userManage1'
-                            };
-                            // 初始化transfer组件
-                            transfer.render(userMonifyOptions);
-                        }
-                        });
-                        util.on('lay-on', {
-                            savePermission: function(othis){
-                                var getData = transfer.getData('userManage');
-                                let userJson = JSON.stringify(getData);
-                                var getData1 = transfer.getData('userManage1');
-                                let userJson1 = JSON.stringify(getData1);
-                                var htmlobj = $.ajax({
-                                    type: 'POST',
-                                    url: "?action=editPassPermission&page=panel&module=doorcontrol&csrf=" + csrf_token,
-                                    async:true,
-                                    data: {
-                                        type: type,
-                                        user: userJson,
-                                        device: userJson1
-                                    },
-                                    error: function() {
-                                        layer.msg("错误：" + htmlobj.responseText);
-                                        return;
-                                    },
-                                    success: function() {
-                                        vt.success(htmlobj.responseText, {
-                                            position: "top-center",
-                                        });
-                                        layer.msg(htmlobj.responseText);
-                                        layer.closeAll();
-                                        layer.msg('操作成功，数据同步中...', {
-                                          icon: 16,
-                                          shade: 0.2,
-                                          time: 500
-                                        }, function(){
-                                          location.reload();
-                                        });
-                                        return;
-                                    }
-                                });
-                            },
-                        });
-                    },
-                });
-            }
-        });
-    }
-
-    window.setEmployeePassPermission = setEmployeePassPermission;
-    window.setGuestPassPermission = setGuestPassPermission;
+	function lines(selector) {
+		return ($(selector).val() || '').split(/\n|,/).map(function(item) { return item.trim(); }).filter(Boolean);
+	}
+	function escapeHtml(text) {
+		return String(text || '').replace(/[&<>"']/g, function(s) {
+			return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[s];
+		});
+	}
 });
 </script>

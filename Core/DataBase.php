@@ -89,8 +89,13 @@ class Database {
 				foreach($data as $key => $value) {
 					$i++;
 					$key = mysqli_real_escape_string($conn, $key);
-					$value = mysqli_real_escape_string($conn, $value);
-					$updateSQL .= "`{$key}`='{$value}'";
+					if ($value === null) {
+						$updateSQL .= "`{$key}`=NULL";
+					} else {
+						$value = self::normalizeValue($value);
+						$value = mysqli_real_escape_string($conn, $value);
+						$updateSQL .= "`{$key}`='{$value}'";
+					}
 					if($i < $total) {
 						$updateSQL .= ", ";
 					}
@@ -103,6 +108,7 @@ class Database {
 				foreach($query as $key => $value) {
 					$i++;
 					$key = mysqli_real_escape_string($conn, $key);
+					$value = self::normalizeValue($value);
 					$value = mysqli_real_escape_string($conn, $value);
 					$querySQL .= "`{$key}`='{$value}'";
 					if($i < $total) {
@@ -243,9 +249,14 @@ class Database {
 					$i++;
 					$svalue = $value;
 					$key = mysqli_real_escape_string($conn, $key);
-					$value = mysqli_real_escape_string($conn, $value);
 					$queryKey .= "`{$key}`";
-					$queryValue .= $svalue === null ? "NULL" : "'{$value}'";
+					if ($svalue === null) {
+						$queryValue .= "NULL";
+					} else {
+						$value = self::normalizeValue($value);
+						$value = mysqli_real_escape_string($conn, $value);
+						$queryValue .= "'{$value}'";
+					}
 					if($i < $total) {
 						$queryKey .= ", ";
 						$queryValue .= ", ";
@@ -278,7 +289,7 @@ class Database {
 	{
 		global $conn;
 		
-		return mysqli_fetch_array(Database::query($table, $query, $raw));
+		return mysqli_fetch_array(Database::query($table, $query, "AND", $raw));
 	}
 	
 	public static function toArray($result)
@@ -300,5 +311,19 @@ class Database {
 	{
 		global $conn;
 		return mysqli_real_escape_string($conn, $str);
+	}
+
+	private static function normalizeValue($value)
+	{
+		if (is_array($value) || is_object($value)) {
+			return json_encode($value, JSON_UNESCAPED_UNICODE);
+		}
+		if (is_bool($value)) {
+			return $value ? 'true' : 'false';
+		}
+		if ($value === null) {
+			return null;
+		}
+		return (string)$value;
 	}
 }

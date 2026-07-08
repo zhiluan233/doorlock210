@@ -93,6 +93,9 @@ $countData = Database::query("user", $countSQL, true);
 									if ($uData['type'] == 'admin') {
 										$type = '管理员';
 										$button = '';
+									} else if ($uData['type'] == 'readonly') {
+										$type = '只读管理员';
+										$button = '';
 									} else if ($uData['type'] == 'user') {
 										$type = '普通用户';
 										$button = '';
@@ -139,7 +142,23 @@ $countData = Database::query("user", $countSQL, true);
 	<div class="layui-form-item">
       <label class="layui-form-label">用户组</label>
       <div class="layui-input-block">
-        <input type="text" id="group" class="layui-input" placeholder="输入user代表普通用户，admin代表管理员">
+        <select id="group" class="layui-input">
+			<option value="admin">管理员</option>
+			<option value="readonly">只读管理员</option>
+			<option value="user">普通用户</option>
+		</select>
+      </div>
+    </div>
+	<div class="layui-form-item">
+      <label class="layui-form-label">飞书OpenID</label>
+      <div class="layui-input-block">
+        <input type="text" id="open_id" class="layui-input" placeholder="用于飞书一键登录，可留空">
+      </div>
+    </div>
+	<div class="layui-form-item">
+      <label class="layui-form-label">飞书工号</label>
+      <div class="layui-input-block">
+        <input type="text" id="employee_id" class="layui-input" placeholder="用于飞书一键登录，可留空">
       </div>
     </div>
     <div class="layui-form-item">
@@ -219,7 +238,7 @@ $countData = Database::query("user", $countSQL, true);
         type: 1,
         title: '创建用户',
         content: $('#createUserDialogTpl').html(),
-        area: ['400px', '400px']
+        area: ['440px', '520px']
       });
     }
 
@@ -234,6 +253,8 @@ $countData = Database::query("user", $countSQL, true);
       var password = md5($('#password').val()); // 使用md5()处理密码
       var mail = $('#email').val();
 	  var group = $('#group').val();
+	  var open_id = $('#open_id').val();
+	  var employee_id = $('#employee_id').val();
       
       var htmlobj = $.ajax({
 		type: 'POST',
@@ -243,7 +264,10 @@ $countData = Database::query("user", $countSQL, true);
             username: username,
 			password: password,
 			mail: mail,
-			group: group
+			group: group,
+			open_id: open_id,
+			employee_id: employee_id,
+			display_name: username
 		},
 		error: function() {
 			vt.error("错误：" + htmlobj.responseText, {
