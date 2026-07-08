@@ -45,17 +45,17 @@ function settingValue($key) {
 					<form class="layui-form layui-form-pane" id="systemForm">
 						<div class="layui-row layui-col-space20">
 							<div class="layui-col-md6">
-								<h5>OA考勤推送</h5>
+								<h5>AMT考勤推送</h5>
 								<div class="layui-form-item">
 									<label class="layui-form-label">启用</label>
 									<div class="layui-input-block"><input type="checkbox" name="oa_attendance_enabled" value="true" lay-skin="switch" <?php echo checked('oa_attendance_enabled'); ?>></div>
 								</div>
-								<div class="layui-form-item"><label class="layui-form-label">OA地址</label><div class="layui-input-block"><input class="layui-input" name="oa_base_url" value="<?php echo settingValue('oa_base_url'); ?>" placeholder="https://oa.example.com"></div></div>
+								<div class="layui-form-item"><label class="layui-form-label">AMT地址</label><div class="layui-input-block"><input class="layui-input" name="oa_base_url" value="<?php echo settingValue('oa_base_url'); ?>" placeholder="https://oa.example.com"></div></div>
 								<div class="layui-form-item"><label class="layui-form-label">取Token路径</label><div class="layui-input-block"><input class="layui-input" name="oa_auth_path" value="<?php echo settingValue('oa_auth_path'); ?>"></div></div>
 								<div class="layui-form-item"><label class="layui-form-label">上传路径</label><div class="layui-input-block"><input class="layui-input" name="oa_upload_path" value="<?php echo settingValue('oa_upload_path'); ?>"></div></div>
 								<div class="layui-form-item"><label class="layui-form-label">默认地点</label><div class="layui-input-block"><input class="layui-input" name="oa_location_default" value="<?php echo settingValue('oa_location_default'); ?>"></div></div>
 								<div class="layui-form-item"><label class="layui-form-label">批量条数</label><div class="layui-input-block"><input class="layui-input" name="oa_batch_size" value="<?php echo settingValue('oa_batch_size'); ?>"></div></div>
-								<p>OA凭证：<?php echo $oaCredentialReady ? '已在 config.php 配置' : '未配置'; ?></p>
+								<p>AMT凭证：<?php echo $oaCredentialReady ? '已在 config.php 配置' : '未配置'; ?></p>
 							</div>
 							<div class="layui-col-md6">
 								<h5>飞书考勤与提醒</h5>
