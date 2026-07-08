@@ -242,14 +242,17 @@ class Migrator {
         }
 
         foreach ($columns as $column) {
-            if (!self::columnExists($table, $column)) {
+            $columnName = is_array($column) ? ($column['name'] ?? '') : $column;
+            if (!self::columnExists($table, $columnName)) {
                 return;
             }
         }
 
         $parts = [];
         foreach ($columns as $column) {
-            $parts[] = "`{$column}`";
+            $columnName = is_array($column) ? ($column['name'] ?? '') : $column;
+            $length = is_array($column) ? intval($column['length'] ?? 0) : self::indexPrefixLength($table, $columnName);
+            $parts[] = "`{$columnName}`" . ($length > 0 ? "({$length})" : "");
         }
         self::exec("ALTER TABLE `{$table}` ADD INDEX `{$index}` (" . implode(',', $parts) . ")", $errors);
     }
@@ -269,6 +272,24 @@ class Migrator {
         $column = mysqli_real_escape_string($conn, $column);
         $rs = mysqli_query($conn, "SHOW COLUMNS FROM `{$table}` LIKE '{$column}'");
         return $rs && mysqli_num_rows($rs) > 0;
+    }
+
+    private static function indexPrefixLength($table, $column)
+    {
+        global $conn;
+        $table = mysqli_real_escape_string($conn, $table);
+        $column = mysqli_real_escape_string($conn, $column);
+        $rs = mysqli_query($conn, "SHOW COLUMNS FROM `{$table}` LIKE '{$column}'");
+        if (!$rs || mysqli_num_rows($rs) === 0) {
+            return 0;
+        }
+
+        $info = mysqli_fetch_assoc($rs);
+        $type = strtolower($info['Type'] ?? '');
+        if (preg_match('/blob|text/', $type)) {
+            return 191;
+        }
+        return 0;
     }
 
     private static function indexExists($table, $index)
