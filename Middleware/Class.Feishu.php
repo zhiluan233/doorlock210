@@ -508,7 +508,8 @@ class appLinkFeishu {
         }
         $defaults = [
             'oauthAuthorize' => 'https://accounts.feishu.cn/open-apis/authen/v1/authorize',
-            'getUserAccessTokenV3' => 'https://accounts.feishu.cn/oauth/v3/token'
+            'getUserAccessTokenV3' => 'https://accounts.feishu.cn/oauth/v3/token',
+            'batchCreateAttendanceFlow' => 'https://open.feishu.cn/open-apis/attendance/v1/user_flows/batch_create'
         ];
         return $defaults[$key] ?? '';
     }

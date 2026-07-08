@@ -237,6 +237,7 @@ class Migrator {
     private static function normalizeRuntimeSettings(&$errors)
     {
         self::exec("UPDATE `system_settings` SET `setting_value`='刷卡成功' WHERE `setting_key`='feishu_message_template' AND `setting_value`='打卡成功：{name} 于 {time} 在 {door} 完成刷卡。'", $errors);
+        self::exec("UPDATE `system_settings` SET `setting_value`='flow' WHERE `setting_key`='feishu_attendance_mode' AND `setting_value`='remedy'", $errors);
         $lastIncrementalEvent = strtolower(Settings::get('feishu_contact_incremental_last_event', ''));
         if (preg_match('/^(attendance|approval|calendar|im|message|task|doc|drive|meeting|vc)\./', $lastIncrementalEvent)) {
             Settings::set('feishu_contact_incremental_last_at', '0');

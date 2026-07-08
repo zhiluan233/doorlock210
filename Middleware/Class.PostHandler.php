@@ -435,6 +435,10 @@ class PostHandler {
 							Header("HTTP/1.1 400 Bad Request");
 							exit("通讯录同步时间格式应为 HH:MM，例如 03:25");
 						}
+						if (isset($data['feishu_attendance_mode']) && !in_array($data['feishu_attendance_mode'], ['flow', 'custom'], true)) {
+							Header("HTTP/1.1 400 Bad Request");
+							exit("飞书考勤推送模式不合法");
+						}
 						if (isset($data['feishu_oauth_prompt']) && !in_array($data['feishu_oauth_prompt'], ['', 'consent'], true)) {
 							Header("HTTP/1.1 400 Bad Request");
 							exit("飞书授权确认参数不合法");

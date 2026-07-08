@@ -66,8 +66,8 @@ function settingValue($key) {
 									<label class="layui-form-label">推送模式</label>
 									<div class="layui-input-block">
 										<select name="feishu_attendance_mode">
+											<option value="flow" <?php echo Settings::get('feishu_attendance_mode') === 'flow' ? 'selected' : ''; ?>>官方打卡流水导入</option>
 											<option value="custom" <?php echo Settings::get('feishu_attendance_mode') === 'custom' ? 'selected' : ''; ?>>自定义端点</option>
-											<option value="remedy" <?php echo Settings::get('feishu_attendance_mode') === 'remedy' ? 'selected' : ''; ?>>官方补卡写入</option>
 										</select>
 									</div>
 								</div>

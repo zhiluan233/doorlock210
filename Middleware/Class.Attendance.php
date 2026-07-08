@@ -202,7 +202,7 @@ class AttendanceService {
             $records[] = [
                 'employeeId' => $row['employee_open_id'],
                 'punchCardDateTime' => $row['punch_time_text'],
-                'location' => $row['location'] ?: $row['door_name']
+                'location' => self::externalAttendanceLocation($row)
             ];
         }
 
@@ -220,12 +220,13 @@ class AttendanceService {
 
     public static function processFeishuQueue($limit = 50, $eventHash = '', $timeout = 10)
     {
+        $limit = min(50, max(1, intval($limit)));
         $rows = self::loadQueueRows('feishu', $limit, $eventHash);
         if (count($rows) === 0) {
             return ['total' => 0, 'sent' => 0, 'failed' => 0];
         }
 
-        $mode = Settings::get('feishu_attendance_mode', 'custom');
+        $mode = Settings::get('feishu_attendance_mode', 'flow');
         $feishu = new appLinkFeishu(true);
         $token = $feishu->getTenantAccessToken();
         if ($token === '') {
@@ -233,15 +234,8 @@ class AttendanceService {
             return ['total' => count($rows), 'sent' => 0, 'failed' => count($rows)];
         }
 
-        $sent = 0;
-        $failed = 0;
-        if ($mode === 'remedy') {
-            foreach ($rows as $row) {
-                $ok = self::pushFeishuRemedy($row, $token, $timeout);
-                $sent += $ok ? 1 : 0;
-                $failed += $ok ? 0 : 1;
-            }
-            return ['total' => count($rows), 'sent' => $sent, 'failed' => $failed];
+        if ($mode !== 'custom') {
+            return self::pushFeishuFlowBatch($rows, $token, $timeout);
         }
 
         $endpoint = Settings::get('feishu_attendance_endpoint', '');
@@ -258,7 +252,7 @@ class AttendanceService {
                 'employee_no' => $row['employee_no'],
                 'name' => $row['employee_name'],
                 'punch_time' => $row['punch_time_text'],
-                'location' => $row['location'] ?: $row['door_name'],
+                'location' => self::externalAttendanceLocation($row),
                 'source' => $row['source'],
                 'event_hash' => $row['event_hash']
             ];
@@ -380,41 +374,71 @@ class AttendanceService {
         return ['ok' => false, 'message' => '设备返回HTTP ' . $httpCode, 'response' => $body];
     }
 
-    private static function pushFeishuRemedy($row, $tenantToken, $timeout)
+    private static function pushFeishuFlowBatch($rows, $tenantToken, $timeout)
     {
         $employeeType = Settings::get('feishu_employee_id_type', 'employee_no');
-        $userId = $employeeType === 'employee_id' ? $row['employee_user_id'] : $row['employee_no'];
-        if ($userId === '') {
-            self::markRowsFailed([$row], 'feishu', '缺少飞书考勤用户ID');
-            return false;
+        if (!in_array($employeeType, ['employee_id', 'employee_no'], true)) {
+            $employeeType = 'employee_no';
         }
 
-        $eventTime = intval($row['punch_time']);
-        $body = [
-            'user_id' => $userId,
-            'remedy_date' => intval(date('Ymd', $eventTime)),
-            'punch_no' => 0,
-            'work_type' => intval(date('G', $eventTime)) < 12 ? 1 : 2,
-            'remedy_time' => date('Y-m-d H:i', $eventTime),
-            'reason' => '门禁刷卡自动同步',
-            'time' => '-'
-        ];
+        $validRows = [];
+        $flowRecords = [];
+        $failed = 0;
+        foreach ($rows as $row) {
+            $userId = $employeeType === 'employee_id' ? ($row['employee_user_id'] ?? '') : ($row['employee_no'] ?? '');
+            if ($userId === '') {
+                self::markRowsFailed([$row], 'feishu', '缺少飞书考勤用户ID');
+                $failed++;
+                continue;
+            }
+
+            $eventTime = intval($row['punch_time']);
+            $eventHash = $row['event_hash'] ?? hash('sha256', implode('|', [$row['employee_open_id'] ?? '', $row['door_id'] ?? '', $row['card_id'] ?? '', $eventTime]));
+            $validRows[] = $row;
+            $flowRecords[] = [
+                'user_id' => $userId,
+                'creator_id' => $userId,
+                'location_name' => self::externalAttendanceLocation($row),
+                'check_time' => (string)$eventTime,
+                'comment' => '门禁刷卡自动同步',
+                'type' => 7,
+                'external_id' => $eventHash,
+                'idempotent_id' => $eventHash
+            ];
+        }
+
+        if (count($flowRecords) === 0) {
+            return ['total' => count($rows), 'sent' => 0, 'failed' => $failed];
+        }
+
         $feishu = new appLinkFeishu(true);
-        $endpoint = $feishu->endpoint('createAttendanceRemedy');
+        $endpoint = $feishu->endpoint('batchCreateAttendanceFlow');
         if ($endpoint === '') {
-            self::markRowsFailed([$row], 'feishu', '飞书 createAttendanceRemedy endpoint 未在 config.php 中配置');
-            return false;
+            self::markRowsFailed($validRows, 'feishu', '飞书 batchCreateAttendanceFlow endpoint 未在 config.php 中配置');
+            return ['total' => count($rows), 'sent' => 0, 'failed' => count($rows)];
         }
         $url = $endpoint . '?employee_type=' . rawurlencode($employeeType);
-        $resp = self::postJson($url, $body, ['Authorization: Bearer ' . $tenantToken], $timeout);
+        $resp = self::postJson($url, ['flow_records' => $flowRecords], ['Authorization: Bearer ' . $tenantToken], $timeout);
         $code = intval($resp['response']['code'] ?? -1);
-        if (($resp['status_code'] ?? 0) >= 200 && ($resp['status_code'] ?? 0) < 300 && ($code === 0 || $code === 1226501)) {
-            self::markRowsSent([$row], 'feishu', json_encode($resp['response'], JSON_UNESCAPED_UNICODE));
-            return true;
+        if (($resp['status_code'] ?? 0) >= 200 && ($resp['status_code'] ?? 0) < 300 && $code === 0) {
+            self::markRowsSent($validRows, 'feishu', json_encode($resp['response'], JSON_UNESCAPED_UNICODE));
+            return ['total' => count($rows), 'sent' => count($validRows), 'failed' => $failed];
         }
 
-        self::markRowsFailed([$row], 'feishu', json_encode($resp, JSON_UNESCAPED_UNICODE));
-        return false;
+        self::markRowsFailed($validRows, 'feishu', json_encode($resp, JSON_UNESCAPED_UNICODE));
+        return ['total' => count($rows), 'sent' => 0, 'failed' => $failed + count($validRows)];
+    }
+
+    private static function externalAttendanceLocation($row)
+    {
+        $location = trim((string)($row['location'] ?? ''));
+        if ($location === '') {
+            $location = trim((string)($row['door_name'] ?? ''));
+        }
+        if ($location === '') {
+            $location = '公司门禁';
+        }
+        return strpos($location, '工牌-') === 0 ? $location : '工牌-' . $location;
     }
 
     private static function getOaToken($baseUrl, $appId, $appSecret)

@@ -28,7 +28,7 @@ class Settings {
             'feishu_attendance_enabled' => 'false',
             'card_as_attendance_enabled' => 'true',
             'swipe_async_feishu_enabled' => 'true',
-            'feishu_attendance_mode' => 'custom',
+            'feishu_attendance_mode' => 'flow',
             'feishu_employee_id_type' => 'employee_no',
             'feishu_attendance_batch_size' => '50',
             'feishu_message_enabled' => 'false',
