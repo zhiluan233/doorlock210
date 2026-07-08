@@ -35,6 +35,23 @@ $authorizeUrl = Settings::get('feishu_oauth_authorize_url', '');
 if ($authorizeUrl === '') {
     exit('飞书 oauthAuthorize endpoint 未在 config.php 中配置');
 }
-$url = $authorizeUrl . '?app_id=' . rawurlencode($appId) . '&redirect_uri=' . rawurlencode($redirectUri) . '&state=' . rawurlencode($state);
+
+$params = [
+    'client_id' => $appId,
+    'response_type' => 'code',
+    'redirect_uri' => $redirectUri,
+    'state' => $state
+];
+$scope = trim(Settings::get('feishu_oauth_scope', ''));
+if ($scope !== '') {
+    $params['scope'] = $scope;
+}
+$prompt = trim(Settings::get('feishu_oauth_prompt', ''));
+if ($prompt !== '') {
+    $params['prompt'] = $prompt;
+}
+
+$separator = strpos($authorizeUrl, '?') === false ? '?' : '&';
+$url = $authorizeUrl . $separator . http_build_query($params, '', '&', PHP_QUERY_RFC3986);
 Header('Location: ' . $url);
 exit;

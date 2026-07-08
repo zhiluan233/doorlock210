@@ -28,9 +28,10 @@ $_config = [
 		'appEndpoint' => [
 			'getTenantToken' => 'https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal',
 			'getAppToken' => 'https://open.feishu.cn/open-apis/auth/v3/app_access_token/internal',
+			'getUserAccessTokenV3' => 'https://accounts.feishu.cn/oauth/v3/token',
 			'getUserAccessToken' => 'https://open.feishu.cn/open-apis/authen/v1/access_token',
 			'getUserInfo' => 'https://open.feishu.cn/open-apis/authen/v1/user_info',
-			'oauthAuthorize' => 'https://open.feishu.cn/open-apis/authen/v1/index',
+			'oauthAuthorize' => 'https://accounts.feishu.cn/open-apis/authen/v1/authorize',
 			'sendMessage' => 'https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=open_id',
 			'createAttendanceRemedy' => 'https://open.feishu.cn/open-apis/attendance/v1/user_task_remedys',
 			'attendanceCustom' => '',

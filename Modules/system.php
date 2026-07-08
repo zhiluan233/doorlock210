@@ -90,6 +90,16 @@ function settingValue($key) {
 								<div class="layui-form-item"><label class="layui-form-label">删除缺失</label><div class="layui-input-block"><input type="checkbox" name="feishu_contact_sync_release_missing" value="true" lay-skin="switch" <?php echo checked('feishu_contact_sync_release_missing'); ?>></div></div>
 								<div class="layui-form-item"><label class="layui-form-label">一键登录</label><div class="layui-input-block"><input type="checkbox" name="feishu_oauth_enabled" value="true" lay-skin="switch" <?php echo checked('feishu_oauth_enabled'); ?>></div></div>
 								<div class="layui-form-item"><label class="layui-form-label">回调地址</label><div class="layui-input-block"><input class="layui-input" name="feishu_oauth_redirect_uri" value="<?php echo settingValue('feishu_oauth_redirect_uri'); ?>" placeholder="留空自动生成"></div></div>
+								<div class="layui-form-item"><label class="layui-form-label">登录Scope</label><div class="layui-input-block"><input class="layui-input" name="feishu_oauth_scope" value="<?php echo settingValue('feishu_oauth_scope'); ?>" placeholder="留空使用应用默认授权范围"></div></div>
+								<div class="layui-form-item">
+									<label class="layui-form-label">授权确认</label>
+									<div class="layui-input-block">
+										<select name="feishu_oauth_prompt">
+											<option value="" <?php echo Settings::get('feishu_oauth_prompt') === '' ? 'selected' : ''; ?>>默认</option>
+											<option value="consent" <?php echo Settings::get('feishu_oauth_prompt') === 'consent' ? 'selected' : ''; ?>>每次显示授权确认</option>
+										</select>
+									</div>
+								</div>
 								<p>飞书登录授权端点：<?php echo $feishuOauthEndpointReady ? '已在 config.php 配置' : '未配置'; ?></p>
 							</div>
 							<div class="layui-col-md6">

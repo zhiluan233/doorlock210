@@ -24,23 +24,34 @@ if (isset($_SESSION['feishu_oauth_state']) && isset($_GET['state']) && $_SESSION
 }
 unset($_SESSION['feishu_oauth_state']);
 
+feishuOauthRenderLoading();
+
+$redirectUri = feishuOauthRedirectUri();
 $feishu = new anim210System\appLinkFeishu(true);
-$tokenResult = $feishu->getUserAccessToken($_GET['code']);
+$tokenResult = $feishu->getUserAccessToken($_GET['code'], $redirectUri);
 if (!$tokenResult['ok']) {
-    exit('飞书登录失败：' . $tokenResult['message']);
+    feishuOauthFail('飞书登录失败：' . $tokenResult['message']);
 }
 
-$userData = $tokenResult['data'];
-if (!empty($userData['access_token'])) {
+$userData = is_array($tokenResult['data'] ?? null) ? $tokenResult['data'] : [];
+if (empty($userData['open_id']) && !empty($userData['access_token'])) {
+    $userInfoResult = $feishu->getUserInfo($userData['access_token']);
+    if (!$userInfoResult['ok']) {
+        feishuOauthFail('飞书登录失败：获取用户信息失败：' . $userInfoResult['message']);
+    }
+    $userInfoData = is_array($userInfoResult['data'] ?? null) ? $userInfoResult['data'] : [];
+    $userData = array_merge($userData, $userInfoData);
+} elseif (!empty($userData['access_token']) && empty($userData['name']) && empty($userData['email'])) {
     $userInfoResult = $feishu->getUserInfo($userData['access_token']);
     if ($userInfoResult['ok']) {
-        $userData = array_merge($userData, $userInfoResult['data']);
+        $userInfoData = is_array($userInfoResult['data'] ?? null) ? $userInfoResult['data'] : [];
+        $userData = array_merge($userData, $userInfoData);
     }
 }
 
 $openId = $userData['open_id'] ?? '';
 if ($openId === '') {
-    exit('飞书登录失败：未返回 open_id');
+    feishuOauthFail('飞书登录失败：未返回 open_id');
 }
 
 $employee = Database::querySingleLine('employee', ['open_id' => $openId]);
@@ -67,7 +78,7 @@ if ($employee) {
 }
 
 if (($employee['status'] ?? 'true') !== 'true') {
-    exit('你的员工通行账号已禁用，无法登录');
+    feishuOauthFail('你的员工通行账号已禁用，无法登录');
 }
 
 $adminUser = Database::querySingleLine('user', ['open_id' => $openId]);
@@ -102,14 +113,70 @@ $token = md5(mt_rand(0, 999999) . time() . $openId);
 if ($adminUser && in_array($adminUser['type'], ['admin', 'readonly'], true)) {
     $_SESSION['user'] = $adminUser['username'];
     $_SESSION['token'] = $token;
-    exit("<script>location='/?page=panel&module=home';</script>");
+    feishuOauthFinish('/?page=panel&module=home');
 }
 
 $_SESSION['member_open_id'] = $openId;
 $_SESSION['member_name'] = $employee['name'] ?: ($userData['name'] ?? '');
 $_SESSION['member_token'] = $token;
 $_SESSION['token'] = $token;
-exit("<script>location='/?page=userpanel';</script>");
+feishuOauthFinish('/?page=userpanel');
+
+function feishuOauthRedirectUri()
+{
+    $redirectUri = Settings::get('feishu_oauth_redirect_uri', '');
+    if ($redirectUri !== '') {
+        return $redirectUri;
+    }
+    $scheme = anim210System\Utils::isHttps() ? 'https://' : 'http://';
+    $host = $_SERVER['HTTP_HOST'] ?? ($_SERVER['SERVER_NAME'] ?? '');
+    return $scheme . $host . '/?page=feishu_oauth_callback';
+}
+
+function feishuOauthRenderLoading()
+{
+    Header('Content-Type: text/html; charset=utf-8');
+    echo '<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">';
+    echo '<title>飞书登录中</title><style>';
+    echo 'body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#f6f7fb;color:#1f2937;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;}';
+    echo '.box{width:min(420px,calc(100vw - 40px));padding:32px 28px;background:#fff;border:1px solid #e5e7eb;box-shadow:0 12px 32px rgba(15,23,42,.08);}';
+    echo '.spin{width:28px;height:28px;border:3px solid #d8f3ea;border-top-color:#14b887;border-radius:50%;animation:spin .9s linear infinite;margin-bottom:18px;}';
+    echo 'h1{font-size:20px;line-height:1.4;margin:0 0 8px;font-weight:600;}p{margin:0;color:#6b7280;line-height:1.8;font-size:14px;word-break:break-word;}';
+    echo 'a{display:inline-block;margin-top:18px;color:#14b887;text-decoration:none;}@keyframes spin{to{transform:rotate(360deg)}}';
+    echo '</style></head><body><div class="box"><div class="spin"></div><h1 id="oauthStatus">正在验证飞书身份</h1><p id="oauthDetail">请稍候，系统正在完成登录。</p><a href="/?page=login" id="oauthBack" style="display:none;">返回登录</a></div>';
+    for ($i = 0, $levels = ob_get_level(); $i < $levels; $i++) {
+        @ob_flush();
+    }
+    @flush();
+}
+
+function feishuOauthFail($message)
+{
+    $messageJson = json_encode($message, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+    if ($messageJson === false) {
+        $messageJson = '"登录失败，请联系管理员查看服务端日志。"';
+    }
+    echo '<script>';
+    echo 'document.getElementById("oauthStatus").innerText="登录失败";';
+    echo 'document.getElementById("oauthDetail").innerText=' . $messageJson . ';';
+    echo 'document.getElementById("oauthBack").style.display="inline-block";';
+    echo '</script></body></html>';
+    exit;
+}
+
+function feishuOauthFinish($url)
+{
+    $urlJson = json_encode($url, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+    if ($urlJson === false) {
+        $urlJson = '"/?page=login"';
+    }
+    echo '<script>';
+    echo 'document.getElementById("oauthStatus").innerText="登录成功";';
+    echo 'document.getElementById("oauthDetail").innerText="正在进入系统。";';
+    echo 'setTimeout(function(){location.href=' . $urlJson . ';},80);';
+    echo '</script></body></html>';
+    exit;
+}
 
 function feishuOauthDisplayName($employee, $userData)
 {

@@ -46,6 +46,8 @@ class Settings {
 
             'feishu_oauth_enabled' => 'true',
             'feishu_oauth_redirect_uri' => '',
+            'feishu_oauth_scope' => '',
+            'feishu_oauth_prompt' => '',
 
             'remote_open_enabled' => 'true',
             'remote_open_path' => '/cdor.cgi?open=0',
@@ -220,8 +222,12 @@ class Settings {
         if ($key === 'feishu_event_encrypt_key' && isset($_config['feishu']['eventEncryptKey'])) {
             return $_config['feishu']['eventEncryptKey'];
         }
-        if ($key === 'feishu_oauth_authorize_url' && isset($_config['feishu']['appEndpoint']['oauthAuthorize'])) {
-            return $_config['feishu']['appEndpoint']['oauthAuthorize'];
+        if ($key === 'feishu_oauth_authorize_url') {
+            $url = $_config['feishu']['appEndpoint']['oauthAuthorize'] ?? '';
+            if ($url === '' || strpos($url, 'open.feishu.cn/open-apis/authen/v1/index') !== false) {
+                return 'https://accounts.feishu.cn/open-apis/authen/v1/authorize';
+            }
+            return $url;
         }
         if ($key === 'feishu_attendance_endpoint' && isset($_config['feishu']['appEndpoint']['attendanceCustom'])) {
             return $_config['feishu']['appEndpoint']['attendanceCustom'];

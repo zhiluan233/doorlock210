@@ -125,26 +125,35 @@ class appLinkFeishu {
         return $this->keyContent['app_access_token'];
     }
 
-    public function getUserAccessToken($code) {
-        $appToken = $this->getAppAccessToken();
-        if ($appToken === '') {
-            return ['ok' => false, 'message' => '无法获取 app_access_token'];
+    public function getUserAccessToken($code, $redirectUri = '') {
+        $appId = Settings::get('feishu_app_id', '');
+        $appSecret = Settings::get('feishu_app_secret', '');
+        if ($appId === '' || $appSecret === '') {
+            return ['ok' => false, 'message' => '飞书 App ID 或 App Secret 未在 config.php 中配置'];
         }
 
-        $url = $this->endpoint('getUserAccessToken');
+        $url = $this->endpoint('getUserAccessTokenV3');
         if ($url === '') {
-            return ['ok' => false, 'message' => '飞书 getUserAccessToken endpoint 未在 config.php 中配置'];
+            return ['ok' => false, 'message' => '飞书 getUserAccessTokenV3 endpoint 未在 config.php 中配置'];
         }
 
-        $data = $this->requestFeishu($url, 'POST', $appToken, [
+        $body = [
             'grant_type' => 'authorization_code',
+            'client_id' => $appId,
+            'client_secret' => $appSecret,
             'code' => $code
-        ], 20);
+        ];
+        if ($redirectUri !== '') {
+            $body['redirect_uri'] = $redirectUri;
+        }
+
+        $data = $this->requestFeishu($url, 'POST', null, $body, 8, 1);
 
         if (($data['status_code'] ?? 0) != 200 || intval($data['response']['code'] ?? -1) !== 0) {
             return ['ok' => false, 'message' => json_encode($data, JSON_UNESCAPED_UNICODE)];
         }
-        return ['ok' => true, 'data' => $data['response']['data']];
+        $tokenData = $data['response']['data'] ?? $data['response'];
+        return ['ok' => true, 'data' => is_array($tokenData) ? $tokenData : []];
     }
 
     public function getUserInfo($userAccessToken) {
@@ -153,7 +162,7 @@ class appLinkFeishu {
             return ['ok' => false, 'message' => '飞书 getUserInfo endpoint 未在 config.php 中配置'];
         }
 
-        $data = $this->requestFeishu($url, 'GET', $userAccessToken, null, 12, 2);
+        $data = $this->requestFeishu($url, 'GET', $userAccessToken, null, 8, 1);
         if (($data['status_code'] ?? 0) != 200 || intval($data['response']['code'] ?? -1) !== 0) {
             return ['ok' => false, 'message' => json_encode($data, JSON_UNESCAPED_UNICODE)];
         }
@@ -493,7 +502,15 @@ class appLinkFeishu {
     }
 
     public function endpoint($key) {
-        return $this->_config['feishu']['appEndpoint'][$key] ?? '';
+        $configured = $this->_config['feishu']['appEndpoint'][$key] ?? '';
+        if ($configured !== '') {
+            return $configured;
+        }
+        $defaults = [
+            'oauthAuthorize' => 'https://accounts.feishu.cn/open-apis/authen/v1/authorize',
+            'getUserAccessTokenV3' => 'https://accounts.feishu.cn/oauth/v3/token'
+        ];
+        return $defaults[$key] ?? '';
     }
 
     private function loadKeyFile() {

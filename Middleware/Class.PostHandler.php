@@ -416,7 +416,7 @@ class PostHandler {
 							'feishu_message_enabled', 'feishu_message_template', 'feishu_message_batch_size',
 							'feishu_event_enabled',
 							'feishu_contact_sync_enabled', 'feishu_contact_sync_daily_time', 'feishu_contact_sync_release_missing',
-							'feishu_oauth_enabled', 'feishu_oauth_redirect_uri',
+							'feishu_oauth_enabled', 'feishu_oauth_redirect_uri', 'feishu_oauth_scope', 'feishu_oauth_prompt',
 							'remote_open_enabled', 'remote_open_path', 'remote_open_timeout',
 							'queue_retry_base_seconds', 'queue_retry_max_seconds'
 						];
@@ -434,6 +434,10 @@ class PostHandler {
 						if (isset($data['feishu_contact_sync_daily_time']) && !preg_match('/^\d{2}:\d{2}$/', $data['feishu_contact_sync_daily_time'])) {
 							Header("HTTP/1.1 400 Bad Request");
 							exit("通讯录同步时间格式应为 HH:MM，例如 03:25");
+						}
+						if (isset($data['feishu_oauth_prompt']) && !in_array($data['feishu_oauth_prompt'], ['', 'consent'], true)) {
+							Header("HTTP/1.1 400 Bad Request");
+							exit("飞书授权确认参数不合法");
 						}
 						$result = Settings::setMany($data);
 						if ($result === true) {
