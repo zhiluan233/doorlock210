@@ -18,6 +18,7 @@ include(ROOT . "/Core/DataBase.php");
 include(ROOT . "/Core/Settings.php");
 include(ROOT . "/Core/Migrator.php");
 include(ROOT . "/Middleware/Class.Feishu.php");
+include(ROOT . "/Middleware/Class.FeishuSync.php");
 include(ROOT . "/Middleware/Class.Attendance.php");
 
 if (PHP_SAPI !== 'cli') {
@@ -29,15 +30,19 @@ if (PHP_SAPI !== 'cli') {
 }
 
 $conn = null;
-$db = new anim210System\Database();
+$db = new Database();
 
-$migration = anim210System\Migrator::ensure();
-$queue = anim210System\AttendanceService::processAllQueues();
+$migration = Migrator::ensure();
+$queue = AttendanceService::processAllQueues();
+$contactSyncSchedule = FeishuContactSync::scheduleDailyIfDue();
+$contactSync = FeishuContactSync::processNextJob(1);
 
 $result = [
     'time' => date('Y-m-d H:i:s'),
     'migration' => $migration,
-    'queue' => $queue
+    'queue' => $queue,
+    'contact_sync_schedule' => $contactSyncSchedule,
+    'contact_sync' => $contactSync
 ];
 
 echo json_encode($result, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT) . PHP_EOL;

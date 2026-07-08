@@ -85,6 +85,9 @@ function settingValue($key) {
 							<div class="layui-col-md6">
 								<h5>飞书事件与登录</h5>
 								<div class="layui-form-item"><label class="layui-form-label">事件订阅</label><div class="layui-input-block"><input type="checkbox" name="feishu_event_enabled" value="true" lay-skin="switch" <?php echo checked('feishu_event_enabled'); ?>></div></div>
+								<div class="layui-form-item"><label class="layui-form-label">通讯录同步</label><div class="layui-input-block"><input type="checkbox" name="feishu_contact_sync_enabled" value="true" lay-skin="switch" <?php echo checked('feishu_contact_sync_enabled'); ?>></div></div>
+								<div class="layui-form-item"><label class="layui-form-label">同步时间</label><div class="layui-input-block"><input class="layui-input" name="feishu_contact_sync_daily_time" value="<?php echo settingValue('feishu_contact_sync_daily_time'); ?>" placeholder="03:25"></div></div>
+								<div class="layui-form-item"><label class="layui-form-label">释放缺失</label><div class="layui-input-block"><input type="checkbox" name="feishu_contact_sync_release_missing" value="true" lay-skin="switch" <?php echo checked('feishu_contact_sync_release_missing'); ?>></div></div>
 								<div class="layui-form-item"><label class="layui-form-label">一键登录</label><div class="layui-input-block"><input type="checkbox" name="feishu_oauth_enabled" value="true" lay-skin="switch" <?php echo checked('feishu_oauth_enabled'); ?>></div></div>
 								<div class="layui-form-item"><label class="layui-form-label">回调地址</label><div class="layui-input-block"><input class="layui-input" name="feishu_oauth_redirect_uri" value="<?php echo settingValue('feishu_oauth_redirect_uri'); ?>" placeholder="留空自动生成"></div></div>
 								<p>飞书登录授权端点：<?php echo $feishuOauthEndpointReady ? '已在 config.php 配置' : '未配置'; ?></p>

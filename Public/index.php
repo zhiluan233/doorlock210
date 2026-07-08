@@ -63,6 +63,7 @@ if (!$is_allowed && !$is_public_callback) {
 //include(ROOT . '/Middleware/Class.Alipay.php');
 //include(ROOT . "/Middleware/Class.TencentSMS.php");
 include(ROOT . "/Middleware/Class.Feishu.php");
+include(ROOT . "/Middleware/Class.FeishuSync.php");
 include(ROOT . "/Middleware/Class.FeishuEvent.php");
 include(ROOT . "/Middleware/Class.DeviceApi.php");
 include(ROOT . "/Middleware/Class.PostHandler.php");

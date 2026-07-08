@@ -96,6 +96,28 @@ class Migrator {
             KEY `idx_open_id` (`open_id`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4", $errors);
 
+        self::exec("CREATE TABLE IF NOT EXISTS `feishu_sync_jobs` (
+            `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+            `job_type` varchar(40) NOT NULL DEFAULT 'full_contact',
+            `source` varchar(40) NOT NULL DEFAULT 'manual',
+            `status` varchar(20) NOT NULL DEFAULT 'pending',
+            `requested_by` varchar(128) NOT NULL DEFAULT '',
+            `total_count` int unsigned NOT NULL DEFAULT 0,
+            `insert_count` int unsigned NOT NULL DEFAULT 0,
+            `update_count` int unsigned NOT NULL DEFAULT 0,
+            `disable_count` int unsigned NOT NULL DEFAULT 0,
+            `release_count` int unsigned NOT NULL DEFAULT 0,
+            `message` text,
+            `locked_at` int unsigned NOT NULL DEFAULT 0,
+            `started_at` int unsigned NOT NULL DEFAULT 0,
+            `finished_at` int unsigned NOT NULL DEFAULT 0,
+            `created_at` int unsigned NOT NULL DEFAULT 0,
+            `updated_at` int unsigned NOT NULL DEFAULT 0,
+            PRIMARY KEY (`id`),
+            KEY `idx_job_status` (`job_type`, `status`, `created_at`),
+            KEY `idx_locked_at` (`locked_at`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4", $errors);
+
         self::addColumn('employee', 'card_id', "varchar(64) NOT NULL DEFAULT ''", $errors);
         self::addColumn('employee', 'department_id', "varchar(128) NOT NULL DEFAULT ''", $errors);
         self::addColumn('employee', 'department_name', "varchar(255) NOT NULL DEFAULT ''", $errors);

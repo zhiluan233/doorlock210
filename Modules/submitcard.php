@@ -578,7 +578,7 @@ $guestData = Database::query("guest", $mainGuestSQL, true);
 	// 同步飞书通讯录
     function syncFeishuMember() {
 	  // 弹出询问框
-		layer.confirm('是否要开始同步？完整同步需要大约2分钟，在同步过程中可能会影响门禁使用。', {
+		layer.confirm('是否提交后台通讯录同步任务？任务会由计划任务执行，不会阻塞当前页面。', {
         btn: ['确定', '取消'],
         icon: 3, // question icon
         title: '确定吗？'
@@ -591,41 +591,6 @@ $guestData = Database::query("guest", $mainGuestSQL, true);
     }
 
 	function startSyncFeishuMember() {
-		// 创建一个带有进度条和加载图标的弹出窗口
-		var loadIndex = layer.open({
-        type: 1,
-        shade: [0.8, '#393D49'], // 半透明遮罩
-        title: false,
-        closeBtn: 0,
-        area: '300px', // 宽度
-        content: `
-            <div style="padding: 20px; text-align: center;">
-                <div style="margin-bottom: 10px;">
-                    <i class="layui-icon layui-icon-loading-1 layui-anim layui-anim-rotate layui-anim-loop" style="font-size: 30px; color: #1E9FFF;"></i>
-                </div>
-                <div>正在同步，请稍等...<br>大约需要1分40秒...</div>
-                <div style="margin-top: 20px; width: 100%; height: 20px; background-color: #f2f2f2;">
-                    <div id="progressBar" style="width: 0; height: 100%; background-color: #1E9FFF;"></div>
-                </div>
-            </div>
-        `,
-        time: 0
-      });
-
-      // 模拟进度条的动画
-      var duration = 110; // 1分30秒
-      var interval = 100; // 每次增加的时间间隔 (毫秒)
-      var increment = 100 / (duration * 1000 / interval); // 每次增加的百分比
-      var currentProgress = 0;
-
-      var progressInterval = setInterval(function() {
-        currentProgress += increment;
-        if (currentProgress >= 100) {
-            currentProgress = 100;
-            clearInterval(progressInterval);
-        }
-        document.getElementById('progressBar').style.width = currentProgress + '%';
-      }, interval);
       var htmlobj = $.ajax({
 		type: 'POST',
 		url: "?action=syncFeishuMember&page=panel&module=submitcard&csrf=<?php echo $_SESSION['token']; ?>",
@@ -634,8 +599,6 @@ $guestData = Database::query("guest", $mainGuestSQL, true);
             csrf: "<?php echo $_SESSION['token']; ?>"
 		},
 		error: function() {
-			clearInterval(progressInterval);
-			layer.close(loadIndex); // 关闭加载提示
 			layer.confirm('遇到错误，详细信息如下，请联系截图后联系@秩乱处理：'+htmlobj.responseText, {
 				icon: 2,
 				title: '提示',
@@ -647,9 +610,7 @@ $guestData = Database::query("guest", $mainGuestSQL, true);
 			return;
 		},
 		success: function() {
-			clearInterval(progressInterval);
-			layer.close(loadIndex); // 关闭加载提示
-			layer.confirm('同步完成！详细信息如下：'+htmlobj.responseText, {
+			layer.confirm('后台同步任务已提交：'+htmlobj.responseText, {
 				icon: 1,
 				title: '提示',
 				btn: ['确定'], // 按钮

@@ -250,66 +250,12 @@ class PostHandler {
 							Header("HTTP/1.1 403 Forbidden");
 							exit("你没有足够的权限这么做");
 						}
-						$feishuMethod = new anim210System\appLinkFeishu();
-						$feishuMembers = $feishuMethod->getFeishuMemberList();
-						$totalSyncNum = 0;
-						$totalUpdateNum = 0;
-						$totalInsertNum = 0;
-						foreach ($feishuMembers as $members) {
-							$totalSyncNum += 1;
-							if ($members['status'] === true) {
-								$memberStatus = 'true';
-							} else {
-								$memberStatus = 'false';
-							}
-							$memberInfo = Database::querySingleLine("employee", Array("open_id" => $members['open_id']));
-							if ($memberInfo == null) {
-								$update = Database::insert("employee", Array(
-									"open_id"      => $members['open_id'],
-									"user_id"      => $members['user_id'],
-									"union_id"     => $members['union_id'],
-									"name"         => $members['name'],
-									"employee_id"  => $members['employee_no'],
-									"realname"     => $members['real_name'],
-									"status"       => $memberStatus,
-									"department_id" => $members['department_id'],
-									"department_name" => $members['department_name'],
-									"department_ids" => json_encode($members['department_ids'], JSON_UNESCAPED_UNICODE),
-									"email"        => $members['email'],
-									"mobile"       => $members['mobile'],
-									"tenant_key"   => $members['tenant_key'],
-									"updated_at"   => time()
-								));
-								if($update !== true) {
-									Header("HTTP/1.1 500 Internal Error");
-									exit("[C]更新数据库时遇到错误，请联系管理员");
-								}
-								$totalInsertNum += 1;
-							} else {
-								$data = Array(
-									"name"         => $members['name'],
-									"user_id"      => $members['user_id'],
-									"union_id"     => $members['union_id'],
-									"employee_id"  => $members['employee_no'],
-									"realname"     => $members['real_name'],
-									"status"       => $memberStatus,
-									"department_id" => $members['department_id'],
-									"department_name" => $members['department_name'],
-									"department_ids" => json_encode($members['department_ids'], JSON_UNESCAPED_UNICODE),
-									"email"        => $members['email'],
-									"mobile"       => $members['mobile'],
-									"tenant_key"   => $members['tenant_key'],
-									"updated_at"   => time()
-								);
-								$update = Database::update("employee", $data, Array("open_id" => $members['open_id']));
-								if($update !== true) {
-									Header("HTTP/1.1 500 Internal Error");
-									exit("[U]更新数据库时遇到错误，请联系管理员");
-								}
-								$totalUpdateNum += 1;
-							}
+						$result = anim210System\FeishuContactSync::enqueueFullSync($us['username'], 'manual');
+						if ($result['ok']) {
+							exit($result['message'].'，任务ID：'.$result['job_id']);
 						}
-						exit ('本次共处理飞书通讯录：'.$totalSyncNum.'人（新增 '.$totalInsertNum.' 人/更新 '.$totalUpdateNum.' 人）');
+						Header("HTTP/1.1 500 Internal Error");
+						exit("提交通讯录同步任务失败：".$result['message']);
 					} else {
 						Header("HTTP/1.1 403");
 						exit("你没有足够的权限这么做");
@@ -416,6 +362,7 @@ class PostHandler {
 							'feishu_employee_id_type', 'feishu_attendance_batch_size',
 							'feishu_message_enabled', 'feishu_message_template', 'feishu_message_batch_size',
 							'feishu_event_enabled',
+							'feishu_contact_sync_enabled', 'feishu_contact_sync_daily_time', 'feishu_contact_sync_release_missing',
 							'feishu_oauth_enabled', 'feishu_oauth_redirect_uri',
 							'remote_open_enabled', 'remote_open_path', 'remote_open_timeout',
 							'queue_retry_base_seconds', 'queue_retry_max_seconds'
@@ -426,10 +373,14 @@ class PostHandler {
 								$data[$key] = $_POST[$key];
 							}
 						}
-						foreach (['oa_attendance_enabled','feishu_attendance_enabled','card_as_attendance_enabled','swipe_async_feishu_enabled','feishu_message_enabled','feishu_event_enabled','feishu_oauth_enabled','remote_open_enabled'] as $boolKey) {
+						foreach (['oa_attendance_enabled','feishu_attendance_enabled','card_as_attendance_enabled','swipe_async_feishu_enabled','feishu_message_enabled','feishu_event_enabled','feishu_contact_sync_enabled','feishu_contact_sync_release_missing','feishu_oauth_enabled','remote_open_enabled'] as $boolKey) {
 							if (!isset($data[$boolKey])) {
 								$data[$boolKey] = 'false';
 							}
+						}
+						if (isset($data['feishu_contact_sync_daily_time']) && !preg_match('/^\d{2}:\d{2}$/', $data['feishu_contact_sync_daily_time'])) {
+							Header("HTTP/1.1 400 Bad Request");
+							exit("通讯录同步时间格式应为 HH:MM，例如 03:25");
 						}
 						$result = Settings::setMany($data);
 						if ($result === true) {

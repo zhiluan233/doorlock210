@@ -36,6 +36,10 @@ class Settings {
             'feishu_message_batch_size' => '50',
 
             'feishu_event_enabled' => 'true',
+            'feishu_contact_sync_enabled' => 'true',
+            'feishu_contact_sync_daily_time' => '03:25',
+            'feishu_contact_sync_release_missing' => 'true',
+            'feishu_contact_sync_last_date' => '',
 
             'feishu_oauth_enabled' => 'true',
             'feishu_oauth_redirect_uri' => '',

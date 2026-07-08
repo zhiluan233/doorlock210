@@ -16,6 +16,7 @@ class appLinkFeishu {
     private $_config;
     private $keyContent = [];
     private $keyFile;
+    private $lastError = '';
 
     public function __construct($skipTenantToken = false) {
         global $_config;
@@ -29,15 +30,26 @@ class appLinkFeishu {
     }
 
     public function getFeishuMemberList() {
+        $this->lastError = '';
         $allDepartments = [];
         $allMembers = [];
         $processedOpenIds = [];
 
         $this->fetchDepartments($allDepartments);
+        if ($this->lastError !== '') {
+            return [];
+        }
         foreach ($allDepartments as $departmentId => $departmentName) {
             $this->fetchMembers($allMembers, $departmentId, $departmentName, $processedOpenIds);
+            if ($this->lastError !== '') {
+                return [];
+            }
         }
         return $allMembers;
+    }
+
+    public function getLastError() {
+        return $this->lastError;
     }
 
     public function verifyFeishuMemberStatus($open_id) {
@@ -197,6 +209,7 @@ class appLinkFeishu {
     private function fetchDepartments(&$allDepartments, $pageToken = null) {
         $token = $this->getTenantAccessToken();
         if ($token === '') {
+            $this->lastError = '无法获取 tenant_access_token';
             return;
         }
 
@@ -205,6 +218,10 @@ class appLinkFeishu {
             $url .= '&page_token='.$pageToken;
         }
         $data = $this->requestFeishu($url, 'GET', $token, null);
+        if (($data['status_code'] ?? 0) < 200 || ($data['status_code'] ?? 0) >= 300 || !isset($data['response']['data'])) {
+            $this->lastError = '拉取飞书部门失败：' . json_encode($data, JSON_UNESCAPED_UNICODE);
+            return;
+        }
         $departmentsData = $data['response'];
 
         if (isset($departmentsData['data']['items'])) {
@@ -225,6 +242,7 @@ class appLinkFeishu {
     private function fetchMembers(&$allMembers, $departmentId, $departmentName, &$processedOpenIds, $pageToken = null) {
         $token = $this->getTenantAccessToken();
         if ($token === '') {
+            $this->lastError = '无法获取 tenant_access_token';
             return;
         }
 
@@ -234,6 +252,10 @@ class appLinkFeishu {
             $url .= '&page_token='.$pageToken;
         }
         $data = $this->requestFeishu($url, 'GET', $token, null);
+        if (($data['status_code'] ?? 0) < 200 || ($data['status_code'] ?? 0) >= 300 || !isset($data['response']['data'])) {
+            $this->lastError = '拉取飞书部门成员失败：' . json_encode($data, JSON_UNESCAPED_UNICODE);
+            return;
+        }
         $membersData = $data['response'];
 
         if (isset($membersData['data']['items'])) {

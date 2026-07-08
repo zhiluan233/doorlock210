@@ -53,60 +53,10 @@ class FeishuEventHandler {
             exit(json_encode(['code' => 0, 'msg' => 'duplicate'], JSON_UNESCAPED_UNICODE));
         }
 
-        $openId = self::applyContactEvent($payload, $eventType);
+        $openId = anim210System\FeishuContactSync::applyUserEvent($payload, $eventType);
         self::storeEvent($eventId ?: hash('sha256', json_encode($payload)), $eventType, $openId, $payload);
 
         exit(json_encode(['code' => 0, 'msg' => 'success'], JSON_UNESCAPED_UNICODE));
-    }
-
-    private static function applyContactEvent($payload, $eventType)
-    {
-        $event = $payload['event'] ?? $payload;
-        $user = $event['user'] ?? $event['object'] ?? $event;
-
-        $openId = $user['open_id'] ?? $user['open_user_id'] ?? $event['open_id'] ?? '';
-        if ($openId === '') {
-            return '';
-        }
-
-        $inactiveByType = preg_match('/deleted|resign|resigned|leave|exit|deactivate|disable/i', $eventType);
-        $active = !$inactiveByType;
-        if (isset($user['status']) && is_array($user['status'])) {
-            $status = $user['status'];
-            $active = !(
-                (isset($status['is_activated']) && $status['is_activated'] !== true) ||
-                (isset($status['is_frozen']) && $status['is_frozen'] == true) ||
-                (isset($status['is_resigned']) && $status['is_resigned'] == true) ||
-                (isset($status['is_exited']) && $status['is_exited'] == true) ||
-                (isset($status['is_unjoin']) && $status['is_unjoin'] == true)
-            );
-        }
-
-        $exists = Database::querySingleLine('employee', ['open_id' => $openId]);
-        $data = [
-            'open_id' => $openId,
-            'name' => $user['name'] ?? $event['name'] ?? ($exists['name'] ?? ''),
-            'employee_id' => $user['employee_no'] ?? $user['employee_id'] ?? ($exists['employee_id'] ?? ''),
-            'realname' => $user['realname'] ?? $user['real_name'] ?? ($exists['realname'] ?? '--'),
-            'status' => $active ? 'true' : 'false',
-            'department_id' => self::firstValue($user['department_ids'] ?? $user['department_id'] ?? ''),
-            'department_ids' => json_encode(self::arrayValue($user['department_ids'] ?? []), JSON_UNESCAPED_UNICODE),
-            'user_id' => $user['user_id'] ?? ($exists['user_id'] ?? ''),
-            'union_id' => $user['union_id'] ?? ($exists['union_id'] ?? ''),
-            'email' => $user['email'] ?? ($exists['email'] ?? ''),
-            'mobile' => $user['mobile'] ?? ($exists['mobile'] ?? ''),
-            'tenant_key' => $payload['header']['tenant_key'] ?? ($exists['tenant_key'] ?? ''),
-            'updated_at' => time()
-        ];
-
-        if ($exists) {
-            unset($data['open_id']);
-            Database::update('employee', $data, ['open_id' => $openId]);
-        } else {
-            Database::insert('employee', $data);
-        }
-
-        return $openId;
     }
 
     private static function verifyToken($payload)
@@ -190,22 +140,4 @@ class FeishuEventHandler {
         return null;
     }
 
-    private static function firstValue($value)
-    {
-        if (is_array($value)) {
-            return $value[0] ?? '';
-        }
-        return (string)$value;
-    }
-
-    private static function arrayValue($value)
-    {
-        if (is_array($value)) {
-            return $value;
-        }
-        if ($value === '') {
-            return [];
-        }
-        return [$value];
-    }
 }
