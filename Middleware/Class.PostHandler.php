@@ -411,9 +411,9 @@ class PostHandler {
 						}
 						$allowedKeys = [
 							'oa_attendance_enabled', 'oa_base_url', 'oa_auth_path', 'oa_upload_path', 'oa_location_default', 'oa_batch_size',
-							'feishu_attendance_enabled', 'card_as_attendance_enabled', 'swipe_async_feishu_enabled', 'feishu_attendance_mode',
+							'feishu_attendance_enabled', 'card_as_attendance_enabled', 'feishu_attendance_mode',
 							'feishu_employee_id_type', 'feishu_attendance_batch_size',
-							'feishu_message_enabled', 'feishu_message_template', 'feishu_message_batch_size',
+							'feishu_message_enabled', 'feishu_message_template', 'feishu_message_card_template', 'feishu_message_batch_size',
 							'feishu_event_enabled',
 							'feishu_contact_sync_enabled', 'feishu_contact_sync_daily_time', 'feishu_contact_sync_release_missing',
 							'feishu_oauth_enabled', 'feishu_oauth_redirect_uri', 'feishu_oauth_scope', 'feishu_oauth_prompt',
@@ -426,7 +426,7 @@ class PostHandler {
 								$data[$key] = $_POST[$key];
 							}
 						}
-						foreach (['oa_attendance_enabled','feishu_attendance_enabled','card_as_attendance_enabled','swipe_async_feishu_enabled','feishu_message_enabled','feishu_event_enabled','feishu_contact_sync_enabled','feishu_contact_sync_release_missing','feishu_oauth_enabled','remote_open_enabled'] as $boolKey) {
+						foreach (['oa_attendance_enabled','feishu_attendance_enabled','card_as_attendance_enabled','feishu_message_enabled','feishu_event_enabled','feishu_contact_sync_enabled','feishu_contact_sync_release_missing','feishu_oauth_enabled','remote_open_enabled'] as $boolKey) {
 							if (!isset($data[$boolKey])) {
 								$data[$boolKey] = 'false';
 							}

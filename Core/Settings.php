@@ -27,12 +27,12 @@ class Settings {
 
             'feishu_attendance_enabled' => 'false',
             'card_as_attendance_enabled' => 'true',
-            'swipe_async_feishu_enabled' => 'true',
             'feishu_attendance_mode' => 'flow',
             'feishu_employee_id_type' => 'employee_no',
             'feishu_attendance_batch_size' => '50',
             'feishu_message_enabled' => 'false',
             'feishu_message_template' => '刷卡成功',
+            'feishu_message_card_template' => "**刷卡方式** 门禁刷卡\n**刷卡设备** {device}\n**刷卡时间** {datetime}",
             'feishu_message_batch_size' => '50',
 
             'feishu_event_enabled' => 'true',
@@ -152,7 +152,8 @@ class Settings {
     {
         return in_array($key, [
             'feishu_oauth_authorize_url',
-            'feishu_attendance_endpoint'
+            'feishu_attendance_endpoint',
+            'feishu_attendance_flow_comment'
         ], true);
     }
 
@@ -231,6 +232,9 @@ class Settings {
         }
         if ($key === 'feishu_attendance_endpoint' && isset($_config['feishu']['appEndpoint']['attendanceCustom'])) {
             return $_config['feishu']['appEndpoint']['attendanceCustom'];
+        }
+        if ($key === 'feishu_attendance_flow_comment') {
+            return $_config['feishu']['attendanceFlowComment'] ?? '门禁刷卡自动同步';
         }
         return null;
     }

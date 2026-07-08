@@ -61,7 +61,6 @@ function settingValue($key) {
 								<h5>飞书考勤与提醒</h5>
 								<div class="layui-form-item"><label class="layui-form-label">考勤推送</label><div class="layui-input-block"><input type="checkbox" name="feishu_attendance_enabled" value="true" lay-skin="switch" <?php echo checked('feishu_attendance_enabled'); ?>></div></div>
 								<div class="layui-form-item"><label class="layui-form-label">刷卡入考勤</label><div class="layui-input-block"><input type="checkbox" name="card_as_attendance_enabled" value="true" lay-skin="switch" <?php echo checked('card_as_attendance_enabled'); ?>></div></div>
-								<div class="layui-form-item"><label class="layui-form-label">刷卡异步推</label><div class="layui-input-block"><input type="checkbox" name="swipe_async_feishu_enabled" value="true" lay-skin="switch" <?php echo checked('swipe_async_feishu_enabled'); ?>></div></div>
 								<div class="layui-form-item">
 									<label class="layui-form-label">推送模式</label>
 									<div class="layui-input-block">
@@ -75,8 +74,10 @@ function settingValue($key) {
 								<div class="layui-form-item"><label class="layui-form-label">批量条数</label><div class="layui-input-block"><input class="layui-input" name="feishu_attendance_batch_size" value="<?php echo settingValue('feishu_attendance_batch_size'); ?>"></div></div>
 								<div class="layui-form-item"><label class="layui-form-label">刷卡提醒</label><div class="layui-input-block"><input type="checkbox" name="feishu_message_enabled" value="true" lay-skin="switch" <?php echo checked('feishu_message_enabled'); ?>></div></div>
 								<div class="layui-form-item"><label class="layui-form-label">卡片标题</label><div class="layui-input-block"><input class="layui-input" name="feishu_message_template" value="<?php echo settingValue('feishu_message_template'); ?>" placeholder="刷卡成功"></div></div>
+								<div class="layui-form-item"><label class="layui-form-label">卡片内容</label><div class="layui-input-block"><textarea class="layui-textarea" name="feishu_message_card_template" rows="7" placeholder="支持 Markdown；也可填写飞书卡片 JSON，变量：{time} {date} {datetime} {name} {device} {location} {card_id} {card_mask}"><?php echo settingValue('feishu_message_card_template'); ?></textarea></div></div>
 								<div class="layui-form-item"><label class="layui-form-label">提醒批量</label><div class="layui-input-block"><input class="layui-input" name="feishu_message_batch_size" value="<?php echo settingValue('feishu_message_batch_size'); ?>"></div></div>
 								<p>飞书凭证：<?php echo $feishuCredentialReady ? '已在 config.php 配置' : '未配置'; ?></p>
+								<p>流水备注：已在 config.php 配置 attendanceFlowComment</p>
 								<p>飞书自定义考勤端点：<?php echo $feishuAttendanceEndpointReady ? '已在 config.php 配置' : '未配置'; ?></p>
 							</div>
 						</div>

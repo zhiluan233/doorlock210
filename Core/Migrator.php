@@ -260,7 +260,8 @@ class Migrator {
             'oa_token',
             'oa_token_expires_at',
             'feishu_oauth_authorize_url',
-            'feishu_attendance_endpoint'
+            'feishu_attendance_endpoint',
+            'feishu_attendance_flow_comment'
         ];
         $escaped = [];
         foreach ($keys as $key) {

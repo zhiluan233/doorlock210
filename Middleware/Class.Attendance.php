@@ -150,19 +150,19 @@ class AttendanceService {
 
         $sql = "INSERT IGNORE INTO `attendance_queue` (" . implode(',', $columns) . ") VALUES (" . implode(',', $values) . ")";
         mysqli_query($conn, $sql);
-        if ($needFeishu && Settings::getBool('swipe_async_feishu_enabled')) {
-            self::scheduleAsyncFeishu($eventHash);
+        if ($needMessage) {
+            self::scheduleAsyncMessage($eventHash);
         }
         return $eventHash;
     }
 
-    public static function scheduleAsyncFeishu($eventHash)
+    public static function scheduleAsyncMessage($eventHash)
     {
         register_shutdown_function(function () use ($eventHash) {
             if (function_exists('fastcgi_finish_request')) {
                 @fastcgi_finish_request();
             }
-            AttendanceService::processFeishuQueue(1, $eventHash, 3);
+            AttendanceService::processMessageQueue(1, $eventHash);
         });
     }
 
@@ -270,9 +270,9 @@ class AttendanceService {
         return ['total' => count($rows), 'sent' => 0, 'failed' => count($rows)];
     }
 
-    public static function processMessageQueue($limit = 50)
+    public static function processMessageQueue($limit = 50, $eventHash = '')
     {
-        $rows = self::loadQueueRows('message', $limit);
+        $rows = self::loadQueueRows('message', $limit, $eventHash);
         if (count($rows) === 0) {
             return ['total' => 0, 'sent' => 0, 'failed' => 0];
         }
@@ -297,12 +297,27 @@ class AttendanceService {
 
     private static function buildSwipeMessageCard($row)
     {
-        $eventTime = intval($row['punch_time']);
         $titleText = Settings::get('feishu_message_template', '刷卡成功');
-        if ($titleText === '' || strpos($titleText, '打卡') !== false) {
+        if ($titleText === '') {
             $titleText = '刷卡成功';
         }
-        $deviceName = $row['door_name'] ?: ($row['location'] ?: '门禁设备');
+        $template = Settings::get('feishu_message_card_template', '');
+        if (trim($template) === '') {
+            $template = "**刷卡方式** 门禁刷卡\n**刷卡设备** {device}\n**刷卡时间** {datetime}";
+        }
+        $rendered = self::renderSwipeMessageTemplate($template, $row);
+        $customCard = json_decode($rendered, true);
+        if (json_last_error() === JSON_ERROR_NONE && is_array($customCard)) {
+            $customCard['config'] = $customCard['config'] ?? ['wide_screen_mode' => true];
+            $customCard['header'] = [
+                'template' => $customCard['header']['template'] ?? 'green',
+                'title' => [
+                    'tag' => 'plain_text',
+                    'content' => self::renderSwipeMessageTemplate($titleText, $row)
+                ]
+            ];
+            return $customCard;
+        }
 
         return [
             'config' => [
@@ -312,23 +327,45 @@ class AttendanceService {
                 'template' => 'green',
                 'title' => [
                     'tag' => 'plain_text',
-                    'content' => date('H:i', $eventTime) . ' ' . $titleText
+                    'content' => self::renderSwipeMessageTemplate($titleText, $row)
                 ]
             ],
             'elements' => [
                 [
                     'tag' => 'markdown',
-                    'content' => '**刷卡方式** 门禁刷卡' . "\n" . '**刷卡设备** ' . $deviceName
-                ],
-                [
-                    'tag' => 'div',
-                    'text' => [
-                        'tag' => 'plain_text',
-                        'content' => date('Y年m月d日', $eventTime)
-                    ]
+                    'content' => $rendered
                 ]
             ]
         ];
+    }
+
+    private static function renderSwipeMessageTemplate($template, $row)
+    {
+        $eventTime = intval($row['punch_time'] ?? time());
+        $deviceName = $row['door_name'] ?: ($row['location'] ?: '门禁设备');
+        $cardId = (string)($row['card_id'] ?? '');
+        $replacements = [
+            '{time}' => date('H:i', $eventTime),
+            '{date}' => date('Y年m月d日', $eventTime),
+            '{datetime}' => date('Y-m-d H:i:s', $eventTime),
+            '{name}' => (string)($row['employee_name'] ?? ''),
+            '{device}' => $deviceName,
+            '{location}' => self::externalAttendanceLocation($row),
+            '{card_id}' => $cardId,
+            '{card_mask}' => self::maskCardId($cardId),
+            '{event_hash}' => (string)($row['event_hash'] ?? '')
+        ];
+        return strtr((string)$template, $replacements);
+    }
+
+    private static function maskCardId($cardId)
+    {
+        $cardId = trim((string)$cardId);
+        $length = strlen($cardId);
+        if ($length <= 4) {
+            return $cardId;
+        }
+        return str_repeat('*', $length - 4) . substr($cardId, -4);
     }
 
     public static function remoteOpen($deviceId, $adminName)
@@ -400,7 +437,7 @@ class AttendanceService {
                 'creator_id' => $userId,
                 'location_name' => self::externalAttendanceLocation($row),
                 'check_time' => (string)$eventTime,
-                'comment' => '门禁刷卡自动同步',
+                'comment' => self::attendanceFlowComment(),
                 'type' => 7,
                 'external_id' => $eventHash,
                 'idempotent_id' => $eventHash
@@ -439,6 +476,12 @@ class AttendanceService {
             $location = '公司门禁';
         }
         return strpos($location, '工牌-') === 0 ? $location : '工牌-' . $location;
+    }
+
+    private static function attendanceFlowComment()
+    {
+        $comment = trim(Settings::get('feishu_attendance_flow_comment', '门禁刷卡自动同步'));
+        return $comment === '' ? '门禁刷卡自动同步' : $comment;
     }
 
     private static function getOaToken($baseUrl, $appId, $appSecret)

@@ -25,6 +25,7 @@ $_config = [
 		'appSecret' => '',
 		'eventToken' => '',
 		'eventEncryptKey' => '',
+		'attendanceFlowComment' => '门禁刷卡自动同步',
 		'appEndpoint' => [
 			'getTenantToken' => 'https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal',
 			'getAppToken' => 'https://open.feishu.cn/open-apis/auth/v3/app_access_token/internal',
