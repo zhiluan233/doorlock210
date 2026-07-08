@@ -84,12 +84,14 @@ $userProfile = [
     'display_name' => $employee['name'] ?: ($userData['name'] ?? ''),
     'mail' => $employee['email'] ?? ($userData['email'] ?? '')
 ];
+$displayName = feishuOauthDisplayName($employee, $userData);
 if ($adminUser) {
+    $userProfile['username'] = feishuOauthUniqueUsername($displayName, $employee['employee_id'] ?? '', $openId, intval($adminUser['id']));
     Database::update('user', $userProfile, ['id' => $adminUser['id']]);
     $adminUser = Database::querySingleLine('user', ['id' => $adminUser['id']]);
 } else {
     $userProfile['id'] = null;
-    $userProfile['username'] = 'fs_' . substr(hash('sha256', $openId), 0, 24);
+    $userProfile['username'] = feishuOauthUniqueUsername($displayName, $employee['employee_id'] ?? '', $openId);
     $userProfile['password'] = md5($openId . time() . mt_rand(1000, 9999));
     $userProfile['type'] = 'user';
     Database::insert('user', $userProfile);
@@ -108,3 +110,56 @@ $_SESSION['member_name'] = $employee['name'] ?: ($userData['name'] ?? '');
 $_SESSION['member_token'] = $token;
 $_SESSION['token'] = $token;
 exit("<script>location='/?page=userpanel';</script>");
+
+function feishuOauthDisplayName($employee, $userData)
+{
+    $name = $employee['name'] ?? '';
+    if ($name === '' && isset($employee['realname']) && $employee['realname'] !== '--') {
+        $name = $employee['realname'];
+    }
+    if ($name === '') {
+        $name = $userData['name'] ?? $userData['en_name'] ?? $userData['nickname'] ?? '';
+    }
+    if ($name === '' && !empty($employee['email'])) {
+        $name = explode('@', $employee['email'])[0];
+    }
+    $name = preg_replace('/[\x00-\x1F\x7F]/u', '', trim($name));
+    return $name !== '' ? $name : '飞书用户';
+}
+
+function feishuOauthUniqueUsername($displayName, $employeeId, $openId, $currentUserId = 0)
+{
+    $base = feishuOauthUtf8Limit($displayName, 24);
+    $suffixes = [''];
+    if ($employeeId !== '') {
+        $suffixes[] = '_' . preg_replace('/[^A-Za-z0-9\_\-]/', '', $employeeId);
+    }
+    $suffixes[] = '_' . substr(hash('sha256', $openId), 0, 6);
+
+    foreach ($suffixes as $suffix) {
+        $candidate = feishuOauthUtf8Limit($base, 32 - feishuOauthUtf8Length($suffix)) . $suffix;
+        $exists = Database::querySingleLine('user', ['username' => $candidate]);
+        if (!$exists || intval($exists['id']) === intval($currentUserId)) {
+            return $candidate;
+        }
+    }
+
+    return '飞书用户_' . substr(hash('sha256', $openId), 0, 8);
+}
+
+function feishuOauthUtf8Limit($value, $limit)
+{
+    $limit = max(1, intval($limit));
+    if (preg_match_all('/./u', $value, $matches) === false) {
+        return substr($value, 0, $limit);
+    }
+    return implode('', array_slice($matches[0], 0, $limit));
+}
+
+function feishuOauthUtf8Length($value)
+{
+    if (preg_match_all('/./u', $value, $matches) === false) {
+        return strlen($value);
+    }
+    return count($matches[0]);
+}

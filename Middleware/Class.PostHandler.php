@@ -155,6 +155,7 @@ class PostHandler {
 						}
 						$data = Array(
 							"type"         => $role,
+							"username"     => $this->feishuReadableUsername($employee, $openId, intval($user['id'] ?? 0)),
 							"open_id"      => $openId,
 							"employee_id"  => $employee['employee_id'] ?? '',
 							"display_name" => $employee['name'] ?: ($employee['realname'] ?? ''),
@@ -163,9 +164,7 @@ class PostHandler {
 						if ($user) {
 							$update = Database::update("user", $data, Array("id" => $user['id']));
 						} else {
-							$username = 'fs_'.substr(hash('sha256', $openId), 0, 24);
 							$data["id"] = null;
-							$data["username"] = $username;
 							$data["password"] = md5($openId.time().mt_rand(1000, 9999));
 							$update = Database::insert("user", $data);
 						}
@@ -656,4 +655,53 @@ class PostHandler {
         return $formattedDateTime;
         
     }
+
+	private function feishuReadableUsername($employee, $openId, $currentUserId = 0)
+	{
+		$displayName = $employee['name'] ?? '';
+		if ($displayName === '' && isset($employee['realname']) && $employee['realname'] !== '--') {
+			$displayName = $employee['realname'];
+		}
+		if ($displayName === '' && !empty($employee['email'])) {
+			$displayName = explode('@', $employee['email'])[0];
+		}
+		$displayName = preg_replace('/[\x00-\x1F\x7F]/u', '', trim($displayName));
+		if ($displayName === '') {
+			$displayName = '飞书用户';
+		}
+
+		$base = $this->utf8Limit($displayName, 24);
+		$suffixes = [''];
+		if (!empty($employee['employee_id'])) {
+			$suffixes[] = '_' . preg_replace('/[^A-Za-z0-9\_\-]/', '', $employee['employee_id']);
+		}
+		$suffixes[] = '_' . substr(hash('sha256', $openId), 0, 6);
+
+		foreach ($suffixes as $suffix) {
+			$candidate = $this->utf8Limit($base, 32 - $this->utf8Length($suffix)) . $suffix;
+			$exists = Database::querySingleLine("user", Array("username" => $candidate));
+			if (!$exists || intval($exists['id']) === intval($currentUserId)) {
+				return $candidate;
+			}
+		}
+
+		return '飞书用户_' . substr(hash('sha256', $openId), 0, 8);
+	}
+
+	private function utf8Limit($value, $limit)
+	{
+		$limit = max(1, intval($limit));
+		if (preg_match_all('/./u', $value, $matches) === false) {
+			return substr($value, 0, $limit);
+		}
+		return implode('', array_slice($matches[0], 0, $limit));
+	}
+
+	private function utf8Length($value)
+	{
+		if (preg_match_all('/./u', $value, $matches) === false) {
+			return strlen($value);
+		}
+		return count($matches[0]);
+	}
 }

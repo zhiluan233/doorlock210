@@ -107,7 +107,7 @@ class appLinkFeishu {
         if ($url === '') {
             return '';
         }
-        $data = $this->requestFeishu($url, 'POST', null, ['app_id' => $appId, 'app_secret' => $appSecret]);
+        $data = $this->requestFeishu($url, 'POST', null, ['app_id' => $appId, 'app_secret' => $appSecret], 10, 2);
         if (($data['status_code'] ?? 0) != 200 || !isset($data['response']['app_access_token'])) {
             return '';
         }
@@ -133,7 +133,7 @@ class appLinkFeishu {
         $data = $this->requestFeishu($url, 'POST', $appToken, [
             'grant_type' => 'authorization_code',
             'code' => $code
-        ], 10);
+        ], 20);
 
         if (($data['status_code'] ?? 0) != 200 || intval($data['response']['code'] ?? -1) !== 0) {
             return ['ok' => false, 'message' => json_encode($data, JSON_UNESCAPED_UNICODE)];
@@ -147,7 +147,7 @@ class appLinkFeishu {
             return ['ok' => false, 'message' => '飞书 getUserInfo endpoint 未在 config.php 中配置'];
         }
 
-        $data = $this->requestFeishu($url, 'GET', $userAccessToken, null, 10);
+        $data = $this->requestFeishu($url, 'GET', $userAccessToken, null, 12, 2);
         if (($data['status_code'] ?? 0) != 200 || intval($data['response']['code'] ?? -1) !== 0) {
             return ['ok' => false, 'message' => json_encode($data, JSON_UNESCAPED_UNICODE)];
         }
@@ -328,12 +328,35 @@ class appLinkFeishu {
         return true;
     }
 
-    public function requestFeishu($url, $method = 'GET', $authorization = '', $body = null, $timeout = 60) {
+    public function requestFeishu($url, $method = 'GET', $authorization = '', $body = null, $timeout = 60, $retries = 1) {
+        $attempts = max(1, intval($retries));
+        $lastResult = null;
+
+        for ($attempt = 1; $attempt <= $attempts; $attempt++) {
+            $lastResult = $this->requestFeishuOnce($url, $method, $authorization, $body, $timeout);
+            $statusCode = intval($lastResult['status_code'] ?? 0);
+            $retryable = ($lastResult['error'] ?? '') !== '' || $statusCode === 0 || $statusCode === 429 || $statusCode >= 500;
+            if (!$retryable || $attempt >= $attempts) {
+                return $lastResult;
+            }
+            usleep(200000 * $attempt);
+        }
+
+        return $lastResult ?: [
+            'status_code' => 0,
+            'response' => null,
+            'raw' => '',
+            'error' => 'request failed before execution'
+        ];
+    }
+
+    private function requestFeishuOnce($url, $method = 'GET', $authorization = '', $body = null, $timeout = 60) {
         $ch = curl_init();
         curl_setopt($ch, CURLOPT_URL, $url);
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
         curl_setopt($ch, CURLOPT_TIMEOUT, $timeout);
         curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, min(5, $timeout));
+        curl_setopt($ch, CURLOPT_NOSIGNAL, true);
 
         $headers = [];
         if (strtoupper($method) == 'POST') {
