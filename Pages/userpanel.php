@@ -20,6 +20,13 @@ if (!$employee) {
     exit('未找到员工资料');
 }
 
+$adminUser = null;
+$canEnterAdmin = false;
+if (!empty($_SESSION['user'])) {
+    $adminUser = Database::querySingleLine('user', ['username' => $_SESSION['user']]);
+    $canEnterAdmin = $adminUser && in_array($adminUser['type'], ['admin', 'readonly'], true);
+}
+
 $cardId = $employee['card_id'] ?? '';
 $rows = [];
 if ($cardId !== '') {
@@ -49,8 +56,13 @@ if ($cardId !== '') {
         .member-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; }
         .member-title h3 { margin: 0 0 6px; font-weight: 500; }
         .member-title p { margin: 0; color: #6b7280; }
+        .member-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
         .panel { border-radius: 6px; }
         .table-wrap { overflow-x: auto; }
+        @media screen and (max-width: 640px) {
+            .member-header { align-items: flex-start; gap: 14px; flex-direction: column; }
+            .member-actions { justify-content: flex-start; }
+        }
     </style>
 </head>
 <body>
@@ -60,7 +72,12 @@ if ($cardId !== '') {
                 <h3>我的刷卡记录</h3>
                 <p><?php echo htmlspecialchars($employee['name']); ?> · <?php echo $cardId === '' ? '未绑定门禁卡' : htmlspecialchars($cardId); ?></p>
             </div>
-            <a class="btn btn-default" href="?page=logout&csrf=<?php echo $_SESSION['token']; ?>">退出</a>
+            <div class="member-actions">
+                <?php if ($canEnterAdmin) { ?>
+                    <a class="btn btn-primary" href="/?page=panel&module=home">进入管理后台</a>
+                <?php } ?>
+                <a class="btn btn-default" href="?page=logout&csrf=<?php echo $_SESSION['token']; ?>">退出</a>
+            </div>
         </div>
 
         <div class="panel panel-white">

@@ -113,7 +113,10 @@ $token = md5(mt_rand(0, 999999) . time() . $openId);
 if ($adminUser && in_array($adminUser['type'], ['admin', 'readonly'], true)) {
     $_SESSION['user'] = $adminUser['username'];
     $_SESSION['token'] = $token;
-    feishuOauthFinish('/?page=panel&module=home');
+    $_SESSION['member_open_id'] = $openId;
+    $_SESSION['member_name'] = $employee['name'] ?: ($userData['name'] ?? '');
+    $_SESSION['member_token'] = $token;
+    feishuOauthFinishByViewport('/?page=userpanel', '/?page=panel&module=home');
 }
 
 $_SESSION['member_open_id'] = $openId;
@@ -174,6 +177,28 @@ function feishuOauthFinish($url)
     echo 'document.getElementById("oauthStatus").innerText="登录成功";';
     echo 'document.getElementById("oauthDetail").innerText="正在进入系统。";';
     echo 'setTimeout(function(){location.href=' . $urlJson . ';},80);';
+    echo '</script></body></html>';
+    exit;
+}
+
+function feishuOauthFinishByViewport($userUrl, $adminUrl)
+{
+    $userUrlJson = json_encode($userUrl, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+    $adminUrlJson = json_encode($adminUrl, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+    if ($userUrlJson === false) {
+        $userUrlJson = '"/?page=userpanel"';
+    }
+    if ($adminUrlJson === false) {
+        $adminUrlJson = '"/?page=panel&module=home"';
+    }
+    echo '<script>';
+    echo 'var userUrl=' . $userUrlJson . ',adminUrl=' . $adminUrlJson . ';';
+    echo 'var isLandscape=window.innerWidth>window.innerHeight;';
+    echo 'var isWideScreen=window.innerWidth>=1024;';
+    echo 'var target=(isLandscape&&isWideScreen)?adminUrl:userUrl;';
+    echo 'document.getElementById("oauthStatus").innerText="登录成功";';
+    echo 'document.getElementById("oauthDetail").innerText=target===adminUrl?"正在进入管理后台。":"正在进入用户视图。";';
+    echo 'setTimeout(function(){location.href=target;},80);';
     echo '</script></body></html>';
     exit;
 }
