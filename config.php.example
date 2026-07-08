@@ -36,7 +36,7 @@ $_config = [
 			'attendanceCustom' => '',
 			'getUsersList' => 'https://open.feishu.cn/open-apis/contact/v3/users/batch',
 			'getAllDepartments' => 'https://open.feishu.cn/open-apis/contact/v3/departments/0/children?department_id_type=department_id&fetch_child=true&user_id_type=open_id&page_size=50',
-			'getDepartmentMemberInfo' => 'https://open.feishu.cn/open-apis/contact/v3/users/find_by_department?user_id_type=open_id&department_id=',
+			'getDepartmentMemberInfo' => 'https://open.feishu.cn/open-apis/contact/v3/users/find_by_department?user_id_type=open_id&department_id_type=department_id&department_id=',
 			'getMemberInfo' => 'https://open.feishu.cn/open-apis/contact/v3/users/'
 		],
 		'keyConfigFile' => ROOT . '/feishu_key.json'

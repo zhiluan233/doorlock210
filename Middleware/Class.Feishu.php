@@ -41,8 +41,8 @@ class appLinkFeishu {
         if ($this->lastError !== '') {
             return [];
         }
-        foreach ($allDepartments as $departmentId => $departmentName) {
-            $this->fetchMembers($allMembers, $departmentId, $departmentName, $processedOpenIds);
+        foreach ($allDepartments as $department) {
+            $this->fetchMembers($allMembers, $department, $processedOpenIds);
             if ($this->lastError !== '') {
                 return [];
             }
@@ -237,7 +237,7 @@ class appLinkFeishu {
                     continue;
                 }
                 $this->departments[$department['department_id']] = $department;
-                $allDepartments[$department['department_id']] = $department['name'];
+                $allDepartments[$department['department_id']] = $department;
             }
         }
 
@@ -278,17 +278,35 @@ class appLinkFeishu {
         ];
     }
 
-    private function fetchMembers(&$allMembers, $departmentId, $departmentName, &$processedOpenIds, $pageToken = null) {
+    private function fetchMembers(&$allMembers, $department, &$processedOpenIds, $pageToken = null) {
         $token = $this->getTenantAccessToken();
         if ($token === '') {
             $this->lastError = '无法获取 tenant_access_token';
             return;
         }
 
-        $url = $this->_config['feishu']['appEndpoint']['getDepartmentMemberInfo'];
-        $url .= $departmentId;
+        $endpoint = $this->_config['feishu']['appEndpoint']['getDepartmentMemberInfo'];
+        $memberDepartmentIdType = $this->urlQueryParam($endpoint, 'department_id_type');
+        if ($memberDepartmentIdType === '') {
+            $memberDepartmentIdType = $this->urlQueryParam($this->_config['feishu']['appEndpoint']['getAllDepartments'] ?? '', 'department_id_type');
+        }
+        if ($memberDepartmentIdType === '') {
+            $memberDepartmentIdType = 'open_department_id';
+        }
+
+        $departmentId = $this->departmentIdForType($department, $memberDepartmentIdType);
+        $departmentName = is_array($department) ? ($department['name'] ?? $departmentId) : $departmentId;
+        $canonicalDepartmentId = is_array($department) ? ($department['department_id'] ?? $departmentId) : $departmentId;
+        if ($departmentId === '') {
+            return;
+        }
+
+        $url = $endpoint . rawurlencode($departmentId);
+        if ($this->urlQueryParam($url, 'department_id_type') === '') {
+            $url .= (strpos($url, '?') === false ? '?' : '&') . 'department_id_type=' . rawurlencode($memberDepartmentIdType);
+        }
         if ($pageToken) {
-            $url .= '&page_token='.$pageToken;
+            $url .= '&page_token='.rawurlencode($pageToken);
         }
         $data = $this->requestFeishu($url, 'GET', $token, null);
         if (($data['status_code'] ?? 0) < 200 || ($data['status_code'] ?? 0) >= 300 || !isset($data['response']['data'])) {
@@ -310,7 +328,7 @@ class appLinkFeishu {
                 $lifecycle = $this->statusLifecycle($statusDetail);
                 $status = $lifecycle === 'active';
                 $realName = $this->extractRealName($item);
-                $departmentIds = $item['department_ids'] ?? [$departmentId];
+                $departmentIds = $item['department_ids'] ?? [$canonicalDepartmentId];
 
                 $allMembers[] = [
                     'open_id' => $item['open_id'],
@@ -333,8 +351,34 @@ class appLinkFeishu {
         }
 
         if (isset($membersData['data']['has_more']) && $membersData['data']['has_more'] === true && isset($membersData['data']['page_token'])) {
-            $this->fetchMembers($allMembers, $departmentId, $departmentName, $processedOpenIds, $membersData['data']['page_token']);
+            $this->fetchMembers($allMembers, $department, $processedOpenIds, $membersData['data']['page_token']);
         }
+    }
+
+    private function departmentIdForType($department, $departmentIdType) {
+        if (!is_array($department)) {
+            return (string)$department;
+        }
+        if ($departmentIdType === 'open_department_id' && !empty($department['open_department_id'])) {
+            return $department['open_department_id'];
+        }
+        if ($departmentIdType === 'department_id' && !empty($department['department_id'])) {
+            return $department['department_id'];
+        }
+        if (!empty($department['department_id'])) {
+            return $department['department_id'];
+        }
+        return $department['open_department_id'] ?? '';
+    }
+
+    private function urlQueryParam($url, $key) {
+        $query = parse_url($url, PHP_URL_QUERY);
+        if ($query === null || $query === false || $query === '') {
+            return '';
+        }
+        $params = [];
+        parse_str($query, $params);
+        return isset($params[$key]) ? (string)$params[$key] : '';
     }
 
     private function extractRealName($item) {
