@@ -267,7 +267,9 @@ class appLinkFeishu {
                     continue;
                 }
                 $processedOpenIds[] = $item['open_id'];
-                $status = $this->isActiveStatus($item['status'] ?? []);
+                $statusDetail = $item['status'] ?? [];
+                $lifecycle = $this->statusLifecycle($statusDetail);
+                $status = $lifecycle === 'active';
                 $realName = $this->extractRealName($item);
                 $departmentIds = $item['department_ids'] ?? [$departmentId];
 
@@ -279,6 +281,8 @@ class appLinkFeishu {
                     'employee_no' => $item['employee_no'] ?? '',
                     'real_name' => $realName,
                     'status' => $status,
+                    'status_detail' => $statusDetail,
+                    'lifecycle' => $lifecycle,
                     'department_id' => $departmentIds[0] ?? $departmentId,
                     'department_name' => $departmentName,
                     'department_ids' => $departmentIds,
@@ -313,19 +317,35 @@ class appLinkFeishu {
     }
 
     private function isActiveStatus($status) {
+        return $this->statusLifecycle($status) === 'active';
+    }
+
+    private function statusLifecycle($status) {
         if (!is_array($status) || count($status) === 0) {
-            return true;
+            $value = strtolower(trim((string)$status));
+            if (in_array($value, ['resigned', 'resign', 'deleted', 'delete', 'terminated', 'terminate', 'offboarded', 'offboarding', 'exited', 'exit'], true)) {
+                return 'deleted';
+            }
+            if (in_array($value, ['inactive', 'disabled', 'disable', 'deactivated', 'frozen', 'unjoin'], true)) {
+                return 'disabled';
+            }
+            return 'active';
+        }
+        if (
+            (isset($status['is_resigned']) && $status['is_resigned'] == true) ||
+            (isset($status['is_exited']) && $status['is_exited'] == true) ||
+            (isset($status['is_deleted']) && $status['is_deleted'] == true)
+        ) {
+            return 'deleted';
         }
         if (
             (isset($status['is_activated']) && $status['is_activated'] !== true) ||
             (isset($status['is_frozen']) && $status['is_frozen'] == true) ||
-            (isset($status['is_resigned']) && $status['is_resigned'] == true) ||
-            (isset($status['is_exited']) && $status['is_exited'] == true) ||
             (isset($status['is_unjoin']) && $status['is_unjoin'] == true)
         ) {
-            return false;
+            return 'disabled';
         }
-        return true;
+        return 'active';
     }
 
     public function requestFeishu($url, $method = 'GET', $authorization = '', $body = null, $timeout = 60, $retries = 1) {

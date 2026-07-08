@@ -106,6 +106,7 @@ class Migrator {
             `insert_count` int unsigned NOT NULL DEFAULT 0,
             `update_count` int unsigned NOT NULL DEFAULT 0,
             `disable_count` int unsigned NOT NULL DEFAULT 0,
+            `delete_count` int unsigned NOT NULL DEFAULT 0,
             `release_count` int unsigned NOT NULL DEFAULT 0,
             `message` text,
             `locked_at` int unsigned NOT NULL DEFAULT 0,
@@ -117,6 +118,8 @@ class Migrator {
             KEY `idx_job_status` (`job_type`, `status`, `created_at`),
             KEY `idx_locked_at` (`locked_at`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4", $errors);
+
+        self::addColumn('feishu_sync_jobs', 'delete_count', "int unsigned NOT NULL DEFAULT 0", $errors);
 
         self::addColumn('employee', 'card_id', "varchar(64) NOT NULL DEFAULT ''", $errors);
         self::addColumn('employee', 'department_id', "varchar(128) NOT NULL DEFAULT ''", $errors);

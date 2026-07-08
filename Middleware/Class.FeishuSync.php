@@ -111,6 +111,15 @@ class FeishuContactSync {
         }
 
         $exists = self::findEmployee($identity);
+        if (self::eventMeansDeleted($payload, $eventType)) {
+            if ($exists) {
+                self::deleteEmployee($exists);
+                self::markIncrementalSync($eventType);
+                return $exists['open_id'] ?: $identity['open_id'];
+            }
+            return $identity['open_id'];
+        }
+
         $active = self::eventMeansActive($payload, $eventType);
         $user = $identity['user'];
         $now = time();
@@ -174,6 +183,7 @@ class FeishuContactSync {
             'insert_count' => 0,
             'update_count' => 0,
             'disable_count' => 0,
+            'delete_count' => 0,
             'release_count' => 0
         ];
         $seenOpenIds = [];
@@ -184,8 +194,15 @@ class FeishuContactSync {
             }
             $stats['total_count']++;
             $seenOpenIds[$member['open_id']] = true;
-            $active = ($member['status'] === true);
             $exists = Database::querySingleLine('employee', ['open_id' => $member['open_id']]);
+            if (($member['lifecycle'] ?? '') === 'deleted') {
+                if ($exists) {
+                    self::deleteEmployee($exists, $stats);
+                }
+                continue;
+            }
+
+            $active = ($member['status'] === true);
             if (!$active && $exists && !empty($exists['card_id'])) {
                 $stats['release_count']++;
             }
@@ -224,10 +241,10 @@ class FeishuContactSync {
         }
 
         if (Settings::getBool('feishu_contact_sync_release_missing', true)) {
-            self::releaseMissingEmployees($seenOpenIds, $stats);
+            self::deleteMissingEmployees($seenOpenIds, $stats);
         }
 
-        $message = '飞书通讯录同步完成：处理 '.$stats['total_count'].' 人，新增 '.$stats['insert_count'].' 人，更新 '.$stats['update_count'].' 人，禁用 '.$stats['disable_count'].' 人，释放卡号 '.$stats['release_count'].' 张';
+        $message = '飞书通讯录同步完成：处理 '.$stats['total_count'].' 人，新增 '.$stats['insert_count'].' 人，更新 '.$stats['update_count'].' 人，禁用 '.$stats['disable_count'].' 人，删除 '.$stats['delete_count'].' 人，释放卡号 '.$stats['release_count'].' 张';
         $finishedAt = time();
         $stats['status'] = 'success';
         $stats['finished_at'] = $finishedAt;
@@ -242,9 +259,9 @@ class FeishuContactSync {
         return ['job_id' => $jobId, 'status' => 'success', 'message' => $message];
     }
 
-    private static function releaseMissingEmployees($seenOpenIds, &$stats)
+    private static function deleteMissingEmployees($seenOpenIds, &$stats)
     {
-        $rs = Database::query('employee', "SELECT * FROM `employee` WHERE `open_id`<>'' AND `status`='true'", '', true);
+        $rs = Database::query('employee', "SELECT * FROM `employee` WHERE `open_id`<>''", '', true);
         if (!$rs || !($rs instanceof \mysqli_result)) {
             return;
         }
@@ -253,15 +270,87 @@ class FeishuContactSync {
             if (isset($seenOpenIds[$employee['open_id']])) {
                 continue;
             }
+            self::deleteEmployee($employee, $stats);
+        }
+    }
+
+    private static function deleteEmployee($employee, &$stats = null)
+    {
+        $openId = $employee['open_id'] ?? '';
+        $employeeId = $employee['employee_id'] ?? '';
+
+        if (is_array($stats)) {
+            $stats['delete_count'] = ($stats['delete_count'] ?? 0) + 1;
             if (!empty($employee['card_id'])) {
-                $stats['release_count']++;
+                $stats['release_count'] = ($stats['release_count'] ?? 0) + 1;
             }
-            $stats['disable_count']++;
-            Database::update('employee', [
-                'status' => 'false',
-                'card_id' => '',
-                'updated_at' => time()
-            ], ['id' => $employee['id']]);
+        }
+
+        if ($openId !== '') {
+            Database::delete('access_policies', [
+                'subject_kind' => 'employee',
+                'subject_type' => 'employee',
+                'subject_value' => $openId
+            ]);
+            self::removeEmployeeFromLegacyDeviceLists($openId);
+        }
+        self::deleteLinkedPanelUsers($openId, $employeeId);
+        Database::delete('employee', ['id' => $employee['id']]);
+    }
+
+    private static function deleteLinkedPanelUsers($openId, $employeeId)
+    {
+        if ($openId !== '') {
+            Database::delete('user', ['open_id' => $openId]);
+        }
+        if ($employeeId === '') {
+            return;
+        }
+
+        $employeeId = Database::escape($employeeId);
+        $rs = Database::query('user', "SELECT * FROM `user` WHERE `employee_id`='{$employeeId}'", '', true);
+        if (!$rs || !($rs instanceof \mysqli_result)) {
+            return;
+        }
+
+        while ($user = mysqli_fetch_assoc($rs)) {
+            if (!empty($user['open_id']) || strpos($user['username'] ?? '', 'fs_') === 0) {
+                Database::delete('user', ['id' => $user['id']]);
+            }
+        }
+    }
+
+    private static function removeEmployeeFromLegacyDeviceLists($openId)
+    {
+        if ($openId === '') {
+            return;
+        }
+
+        $rs = Database::query('devices', "SELECT `id`, `allowedEmployee` FROM `devices` WHERE `allowedEmployee`<>''", '', true);
+        if (!$rs || !($rs instanceof \mysqli_result)) {
+            return;
+        }
+
+        while ($device = mysqli_fetch_assoc($rs)) {
+            $list = json_decode($device['allowedEmployee'] ?? '[]', true);
+            if (!is_array($list)) {
+                continue;
+            }
+            $filtered = [];
+            $changed = false;
+            foreach ($list as $item) {
+                $value = is_array($item) ? ($item['value'] ?? '') : $item;
+                if ($value === $openId) {
+                    $changed = true;
+                    continue;
+                }
+                $filtered[] = $item;
+            }
+            if ($changed) {
+                Database::update('devices', [
+                    'allowedEmployee' => json_encode($filtered, JSON_UNESCAPED_UNICODE)
+                ], ['id' => $device['id']]);
+            }
         }
     }
 
@@ -348,7 +437,10 @@ class FeishuContactSync {
         $user = $event['user'] ?? $event['object'] ?? $event['employee'] ?? $event['employment'] ?? $event;
         $eventText = strtolower($eventType);
 
-        if (preg_match('/deleted|delete|resign|resigned|leave|exit|exited|deactivate|deactivated|disable|disabled|freeze|frozen|terminate|terminated|offboard/i', $eventText)) {
+        if (self::eventMeansDeleted($payload, $eventType)) {
+            return false;
+        }
+        if (preg_match('/deactivate|deactivated|disable|disabled|freeze|frozen/i', $eventText)) {
             return false;
         }
         if (preg_match('/created|create|enable|enabled|activate|activated|unfreeze|onboard|hire|hired|join|reinstated/i', $eventText)) {
@@ -368,14 +460,33 @@ class FeishuContactSync {
         return true;
     }
 
+    private static function eventMeansDeleted($payload, $eventType)
+    {
+        $event = $payload['event'] ?? $payload;
+        $user = $event['user'] ?? $event['object'] ?? $event['employee'] ?? $event['employment'] ?? $event;
+        $eventText = strtolower($eventType);
+
+        if (preg_match('/deleted|delete|resign|resigned|resignation|exit|exited|terminate|terminated|offboard|offboarding|offboarded/i', $eventText)) {
+            return true;
+        }
+
+        foreach (['status', 'employee_status', 'employment_status', 'account_status'] as $field) {
+            if (isset($user[$field]) && self::statusValueMeansDeleted($user[$field])) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private static function statusValueIsActive($status)
     {
         if (is_array($status)) {
+            if (self::statusValueMeansDeleted($status)) {
+                return false;
+            }
             if (
                 (isset($status['is_activated']) && $status['is_activated'] !== true) ||
                 (isset($status['is_frozen']) && $status['is_frozen'] == true) ||
-                (isset($status['is_resigned']) && $status['is_resigned'] == true) ||
-                (isset($status['is_exited']) && $status['is_exited'] == true) ||
                 (isset($status['is_unjoin']) && $status['is_unjoin'] == true)
             ) {
                 return false;
@@ -384,10 +495,23 @@ class FeishuContactSync {
         }
 
         $value = strtolower(trim((string)$status));
-        if (in_array($value, ['resigned', 'resign', 'inactive', 'disabled', 'disable', 'deleted', 'delete', 'terminated', 'terminate', 'offboarded', 'frozen'], true)) {
+        if (self::statusValueMeansDeleted($value) || in_array($value, ['inactive', 'disabled', 'disable', 'deactivated', 'frozen', 'unjoin'], true)) {
             return false;
         }
         return true;
+    }
+
+    private static function statusValueMeansDeleted($status)
+    {
+        if (is_array($status)) {
+            return
+                (isset($status['is_resigned']) && $status['is_resigned'] == true) ||
+                (isset($status['is_exited']) && $status['is_exited'] == true) ||
+                (isset($status['is_deleted']) && $status['is_deleted'] == true);
+        }
+
+        $value = strtolower(trim((string)$status));
+        return in_array($value, ['resigned', 'resign', 'deleted', 'delete', 'terminated', 'terminate', 'offboarded', 'offboarding', 'exited', 'exit'], true);
     }
 
     private static function firstValue($value)
