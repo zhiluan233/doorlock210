@@ -170,10 +170,52 @@ class AttendanceService {
     {
         $result = [
             'oa' => self::processOaQueue(Settings::getInt('oa_batch_size', 100)),
-            'feishu' => self::processFeishuQueue(Settings::getInt('feishu_attendance_batch_size', 50)),
+            'feishu' => self::processFeishuQueueCron(),
             'message' => self::processMessageQueue(Settings::getInt('feishu_message_batch_size', 50))
         ];
         return $result;
+    }
+
+    public static function processFeishuQueueCron()
+    {
+        $batchSize = min(50, max(1, Settings::getInt('feishu_attendance_batch_size', 50)));
+        $maxBatches = min(100, max(1, Settings::getInt('feishu_attendance_cron_max_batches', 20)));
+        $intervalMs = min(2000, max(0, Settings::getInt('feishu_attendance_batch_interval_ms', 100)));
+        $summary = [
+            'total' => 0,
+            'sent' => 0,
+            'failed' => 0,
+            'batches' => 0,
+            'batch_size' => $batchSize,
+            'max_batches' => $maxBatches,
+            'limited' => false
+        ];
+
+        for ($i = 0; $i < $maxBatches; $i++) {
+            $result = self::processFeishuQueue($batchSize);
+            $total = intval($result['total'] ?? 0);
+            if ($total === 0) {
+                break;
+            }
+
+            $summary['total'] += $total;
+            $summary['sent'] += intval($result['sent'] ?? 0);
+            $summary['failed'] += intval($result['failed'] ?? 0);
+            $summary['batches']++;
+
+            if ($total < $batchSize) {
+                break;
+            }
+            if ($i < $maxBatches - 1 && $intervalMs > 0) {
+                usleep($intervalMs * 1000);
+            }
+        }
+
+        if ($summary['batches'] >= $maxBatches) {
+            $summary['limited'] = self::hasDueQueueRows('feishu');
+        }
+
+        return $summary;
     }
 
     public static function processOaQueue($limit = 100)
@@ -575,6 +617,20 @@ class AttendanceService {
             }
         }
         return $rows;
+    }
+
+    private static function hasDueQueueRows($target)
+    {
+        global $conn;
+
+        $now = time();
+        $target = mysqli_real_escape_string($conn, $target);
+        $sql = "SELECT `id` FROM `attendance_queue` WHERE `need_{$target}`=1 AND `{$target}_status`<>'sent' AND `{$target}_next_retry` <= {$now} LIMIT 1";
+        $rs = Database::query('attendance_queue', $sql, '', true);
+        if ($rs && mysqli_fetch_assoc($rs)) {
+            return true;
+        }
+        return false;
     }
 
     private static function markRowsSent($rows, $target, $response)

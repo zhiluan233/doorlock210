@@ -412,7 +412,7 @@ class PostHandler {
 						$allowedKeys = [
 							'oa_attendance_enabled', 'oa_base_url', 'oa_auth_path', 'oa_upload_path', 'oa_location_default', 'oa_batch_size',
 							'feishu_attendance_enabled', 'card_as_attendance_enabled', 'feishu_attendance_mode',
-							'feishu_employee_id_type', 'feishu_attendance_batch_size',
+							'feishu_employee_id_type', 'feishu_attendance_batch_size', 'feishu_attendance_cron_max_batches', 'feishu_attendance_batch_interval_ms',
 							'feishu_message_enabled', 'feishu_message_template', 'feishu_message_card_template', 'feishu_message_batch_size',
 							'feishu_event_enabled',
 							'feishu_contact_sync_enabled', 'feishu_contact_sync_daily_time', 'feishu_contact_sync_release_missing',
@@ -442,6 +442,26 @@ class PostHandler {
 						if (isset($data['feishu_oauth_prompt']) && !in_array($data['feishu_oauth_prompt'], ['', 'consent'], true)) {
 							Header("HTTP/1.1 400 Bad Request");
 							exit("飞书授权确认参数不合法");
+						}
+						$intRanges = [
+							'feishu_attendance_batch_size' => [1, 50, '飞书考勤单批条数应为 1-50'],
+							'feishu_attendance_cron_max_batches' => [1, 100, '飞书考勤每轮批次应为 1-100'],
+							'feishu_attendance_batch_interval_ms' => [0, 2000, '飞书考勤批次间隔应为 0-2000 毫秒']
+						];
+						foreach ($intRanges as $intKey => $range) {
+							if (!isset($data[$intKey]) || $data[$intKey] === '') {
+								continue;
+							}
+							if (!is_numeric($data[$intKey])) {
+								Header("HTTP/1.1 400 Bad Request");
+								exit($range[2]);
+							}
+							$value = intval($data[$intKey]);
+							if ($value < $range[0] || $value > $range[1]) {
+								Header("HTTP/1.1 400 Bad Request");
+								exit($range[2]);
+							}
+							$data[$intKey] = (string)$value;
 						}
 						$result = Settings::setMany($data);
 						if ($result === true) {

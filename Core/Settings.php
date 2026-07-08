@@ -30,6 +30,8 @@ class Settings {
             'feishu_attendance_mode' => 'flow',
             'feishu_employee_id_type' => 'employee_no',
             'feishu_attendance_batch_size' => '50',
+            'feishu_attendance_cron_max_batches' => '20',
+            'feishu_attendance_batch_interval_ms' => '100',
             'feishu_message_enabled' => 'false',
             'feishu_message_template' => '刷卡成功',
             'feishu_message_card_template' => "**刷卡方式** 门禁刷卡\n**刷卡设备** {device}\n**刷卡时间** {datetime}",
