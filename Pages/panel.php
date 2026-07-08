@@ -139,6 +139,9 @@ if ($isReadonly && !in_array($module, ['home', 'admininfo', 'accesslog', ''], tr
 							<li class="<?php echo $module == "doorcontrol" || $module == "" ? "active-page" : ""; ?>">
 								<a href="/?page=panel&module=doorcontrol"><i class="fa-solid fa-cubes" style="padding-left: 2.5px; padding-right: 2px"></i><span>门禁控制</span></a>
 							</li>
+							<li class="<?php echo $module == "role" || $module == "" ? "active-page" : ""; ?>">
+								<a href="/?page=panel&module=role"><i class="fa-solid fa-users-gear" style="padding-left: 2.5px; padding-right: 2px"></i><span>角色管理</span></a>
+							</li>
                             <?php } ?>
 							<li class="<?php echo $module == "accesslog" || $module == "" ? "active-page" : ""; ?>">
                                 <a href="/?page=panel&module=accesslog"><i class="fa-solid fa-file-text" style="padding-left: 2.5px; padding-right: 2px"></i><span> 出入日志</span></a>

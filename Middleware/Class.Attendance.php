@@ -619,13 +619,44 @@ class AttendanceService {
             return self::valueMatches($value, self::listValues($employeeInfo['groups'] ?? ''));
         }
         if ($type === 'role') {
-            return self::valueMatches($value, self::listValues($employeeInfo['roles'] ?? ''));
+            return self::employeeMatchesRole($value, $employeeInfo);
         }
         if ($type === 'department_group') {
             return self::valueMatches($value, self::employeeDepartments($employeeInfo))
                 && self::valueMatches($extra, self::listValues($employeeInfo['groups'] ?? ''));
         }
         return false;
+    }
+
+    private static function employeeMatchesRole($roleId, $employeeInfo)
+    {
+        $roleId = trim((string)$roleId);
+        if ($roleId === '') {
+            return false;
+        }
+
+        if (!preg_match('/^[0-9]+$/', $roleId)) {
+            return self::valueMatches($roleId, self::listValues($employeeInfo['roles'] ?? ''));
+        }
+
+        $role = Database::querySingleLine('access_roles', ['id' => intval($roleId), 'enabled' => 1]);
+        if (!$role) {
+            return false;
+        }
+        if (intval($role['allow_all'] ?? 0) === 1) {
+            return true;
+        }
+
+        $openId = $employeeInfo['open_id'] ?? '';
+        if ($openId === '') {
+            return false;
+        }
+
+        $member = Database::querySingleLine('access_role_members', [
+            'role_id' => intval($roleId),
+            'employee_open_id' => $openId
+        ]);
+        return (bool)$member;
     }
 
     private static function employeeDepartments($employeeInfo)

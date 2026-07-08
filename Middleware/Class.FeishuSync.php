@@ -178,6 +178,8 @@ class FeishuContactSync {
             return ['job_id' => $jobId, 'status' => 'failed', 'message' => $message];
         }
 
+        self::syncDepartments($feishu->getLastDepartments());
+
         $stats = [
             'total_count' => 0,
             'insert_count' => 0,
@@ -259,6 +261,54 @@ class FeishuContactSync {
         return ['job_id' => $jobId, 'status' => 'success', 'message' => $message];
     }
 
+    private static function syncDepartments($departments)
+    {
+        global $conn;
+
+        if (!is_array($departments) || count($departments) === 0) {
+            return;
+        }
+
+        $now = time();
+        $seen = [];
+        foreach ($departments as $department) {
+            $departmentId = trim((string)($department['department_id'] ?? ''));
+            if ($departmentId === '') {
+                continue;
+            }
+            $seen[] = "'" . mysqli_real_escape_string($conn, $departmentId) . "'";
+            $row = [
+                'department_id' => $departmentId,
+                'open_department_id' => $department['open_department_id'] ?? '',
+                'parent_department_id' => $department['parent_department_id'] ?? '',
+                'name' => $department['name'] ?? $departmentId,
+                'i18n_name' => json_encode($department['i18n_name'] ?? [], JSON_UNESCAPED_UNICODE),
+                'leader_user_id' => $department['leader_user_id'] ?? '',
+                'member_count' => intval($department['member_count'] ?? 0),
+                'status' => 'active',
+                'raw_payload' => json_encode($department['raw_payload'] ?? $department, JSON_UNESCAPED_UNICODE),
+                'created_at' => $now,
+                'updated_at' => $now
+            ];
+            $columns = [];
+            $values = [];
+            $updates = [];
+            foreach ($row as $key => $value) {
+                $columns[] = "`" . mysqli_real_escape_string($conn, $key) . "`";
+                $values[] = "'" . mysqli_real_escape_string($conn, (string)$value) . "'";
+                if ($key !== 'department_id' && $key !== 'created_at') {
+                    $updates[] = "`" . mysqli_real_escape_string($conn, $key) . "`=VALUES(`" . mysqli_real_escape_string($conn, $key) . "`)";
+                }
+            }
+            $sql = "INSERT INTO `feishu_departments` (" . implode(',', $columns) . ") VALUES (" . implode(',', $values) . ") ON DUPLICATE KEY UPDATE " . implode(',', $updates);
+            mysqli_query($conn, $sql);
+        }
+
+        if (count($seen) > 0) {
+            mysqli_query($conn, "UPDATE `feishu_departments` SET `status`='deleted', `updated_at`={$now} WHERE `status`<>'deleted' AND `department_id` NOT IN (" . implode(',', $seen) . ")");
+        }
+    }
+
     private static function deleteMissingEmployees($seenOpenIds, &$stats)
     {
         $rs = Database::query('employee', "SELECT * FROM `employee` WHERE `open_id`<>''", '', true);
@@ -292,6 +342,7 @@ class FeishuContactSync {
                 'subject_type' => 'employee',
                 'subject_value' => $openId
             ]);
+            Database::delete('access_role_members', ['employee_open_id' => $openId]);
             self::removeEmployeeFromLegacyDeviceLists($openId);
         }
         self::deleteLinkedPanelUsers($openId, $employeeId);

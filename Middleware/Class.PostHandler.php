@@ -464,6 +464,104 @@ class PostHandler {
 					Header("HTTP/1.1 403 Forbidden");
 					exit("登录会话已超时，请重新登录");
 				break;
+				case "saveAccessRole":
+					$us = $this->requireAdminUser();
+					$roleId = intval($_POST['role_id'] ?? 0);
+					$name = trim($_POST['name'] ?? '');
+					$description = trim($_POST['description'] ?? '');
+					$allowAll = $this->truthy($_POST['allow_all'] ?? 'false') ? 1 : 0;
+					$members = json_decode($_POST['members'] ?? '[]', true);
+					if (!is_array($members)) {
+						Header("HTTP/1.1 400 Bad Request");
+						exit("角色成员格式错误");
+					}
+					if ($name === '') {
+						Header("HTTP/1.1 400 Bad Request");
+						exit("角色名称不能为空");
+					}
+					if ($this->utf8Length($name) > 100) {
+						Header("HTTP/1.1 400 Bad Request");
+						exit("角色名称过长");
+					}
+					if ($roleId > 0 && !Database::querySingleLine('access_roles', ['id' => $roleId])) {
+						Header("HTTP/1.1 404 Not Found");
+						exit("角色不存在");
+					}
+
+					$nameEsc = Database::escape($name);
+					$duplicateSql = "SELECT * FROM `access_roles` WHERE `name`='{$nameEsc}' AND `id`<>{$roleId} LIMIT 1";
+					if (Database::querySingleLine('access_roles', $duplicateSql, true)) {
+						Header("HTTP/1.1 400 Bad Request");
+						exit("角色名称已存在");
+					}
+
+					$now = time();
+					$data = [
+						'name' => $name,
+						'description' => $description,
+						'allow_all' => $allowAll,
+						'enabled' => 1,
+						'updated_at' => $now
+					];
+					if ($roleId > 0) {
+						$result = Database::update('access_roles', $data, ['id' => $roleId]);
+					} else {
+						global $conn;
+						$data['created_at'] = $now;
+						$result = Database::insert('access_roles', $data);
+						$roleId = intval(mysqli_insert_id($conn));
+					}
+					if ($result !== true) {
+						Header("HTTP/1.1 500 Internal Error");
+						exit("角色保存失败：".$result);
+					}
+
+					Database::delete('access_role_members', ['role_id' => $roleId]);
+					if ($allowAll === 0) {
+						$seenMembers = [];
+						foreach ($members as $openId) {
+							$openId = trim((string)$openId);
+							if ($openId === '' || isset($seenMembers[$openId])) {
+								continue;
+							}
+							$employee = Database::querySingleLine('employee', [
+								'open_id' => $openId
+							]);
+							if (!$employee) {
+								continue;
+							}
+							$seenMembers[$openId] = true;
+							Database::insert('access_role_members', [
+								'role_id' => $roleId,
+								'employee_open_id' => $openId,
+								'created_at' => $now
+							]);
+						}
+					}
+					exit("门禁角色已保存");
+				break;
+				case "deleteAccessRole":
+					$this->requireAdminUser();
+					$roleId = intval($_POST['role_id'] ?? 0);
+					if ($roleId <= 0) {
+						Header("HTTP/1.1 400 Bad Request");
+						exit("角色ID不能为空");
+					}
+					$role = Database::querySingleLine('access_roles', ['id' => $roleId]);
+					if (!$role) {
+						Header("HTTP/1.1 404 Not Found");
+						exit("角色不存在");
+					}
+					Database::delete('access_role_members', ['role_id' => $roleId]);
+					$roleIdEsc = Database::escape((string)$roleId);
+					Database::delete('access_policies', "DELETE FROM `access_policies` WHERE `subject_kind`='employee' AND `subject_type`='role' AND `subject_value`='{$roleIdEsc}'", '', true);
+					$result = Database::delete('access_roles', ['id' => $roleId]);
+					if ($result === true) {
+						exit("门禁角色已删除");
+					}
+					Header("HTTP/1.1 500 Internal Error");
+					exit("门禁角色删除失败：".$result);
+				break;
 				case "saveAccessPolicy":
 					$um = new anim210System\UserCheck();
 					if($um->isLogged()) {
@@ -505,6 +603,30 @@ class PostHandler {
 							}
 							if ($type !== 'all' && $value === '') {
 								continue;
+							}
+							if (in_array($type, ['department', 'group', 'role', 'department_group'], true) && $kind !== 'employee') {
+								continue;
+							}
+							if ($type === 'department') {
+								$department = Database::querySingleLine('feishu_departments', [
+									'department_id' => $value,
+									'status' => 'active'
+								]);
+								if (!$department) {
+									continue;
+								}
+							}
+							if ($type === 'role') {
+								if (!preg_match('/^[0-9]+$/', $value)) {
+									continue;
+								}
+								$role = Database::querySingleLine('access_roles', [
+									'id' => intval($value),
+									'enabled' => 1
+								]);
+								if (!$role) {
+									continue;
+								}
 							}
 							Database::insert('access_policies', [
 								'device_id' => $deviceId,
@@ -615,7 +737,7 @@ class PostHandler {
 		}
 	}
 
-	function getDateFormat() {
+    function getDateFormat() {
 
         date_default_timezone_set('Asia/Shanghai');
 
@@ -655,6 +777,27 @@ class PostHandler {
         return $formattedDateTime;
         
     }
+
+	private function requireAdminUser()
+	{
+		$um = new anim210System\UserCheck();
+		if(!$um->isLogged()) {
+			Header("HTTP/1.1 403 Forbidden");
+			exit("登录会话已超时，请重新登录");
+		}
+		anim210System\Utils::checkCsrf();
+		$us = $um->getInfoByUser($_SESSION['user']);
+		if(!$us || $us['type'] !== "admin") {
+			Header("HTTP/1.1 403 Forbidden");
+			exit("你没有足够的权限这么做");
+		}
+		return $us;
+	}
+
+	private function truthy($value)
+	{
+		return $value === true || $value === 1 || $value === '1' || $value === 'true' || $value === 'on';
+	}
 
 	private function feishuReadableUsername($employee, $openId, $currentUserId = 0)
 	{

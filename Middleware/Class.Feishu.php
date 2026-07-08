@@ -17,6 +17,7 @@ class appLinkFeishu {
     private $keyContent = [];
     private $keyFile;
     private $lastError = '';
+    private $departments = [];
 
     public function __construct($skipTenantToken = false) {
         global $_config;
@@ -31,6 +32,7 @@ class appLinkFeishu {
 
     public function getFeishuMemberList() {
         $this->lastError = '';
+        $this->departments = [];
         $allDepartments = [];
         $allMembers = [];
         $processedOpenIds = [];
@@ -46,6 +48,10 @@ class appLinkFeishu {
             }
         }
         return $allMembers;
+    }
+
+    public function getLastDepartments() {
+        return array_values($this->departments);
     }
 
     public function getLastError() {
@@ -226,17 +232,50 @@ class appLinkFeishu {
 
         if (isset($departmentsData['data']['items'])) {
             foreach ($departmentsData['data']['items'] as $item) {
-                if (isset($item['open_department_id'])) {
-                    $allDepartments[$item['open_department_id']] = $item['name'] ?? '';
-                } elseif (isset($item['department_id'])) {
-                    $allDepartments[$item['department_id']] = $item['name'] ?? '';
+                $department = $this->normalizeDepartment($item);
+                if (!$department) {
+                    continue;
                 }
+                $this->departments[$department['department_id']] = $department;
+                $allDepartments[$department['department_id']] = $department['name'];
             }
         }
 
         if (isset($departmentsData['data']['has_more']) && $departmentsData['data']['has_more'] === true && isset($departmentsData['data']['page_token'])) {
             $this->fetchDepartments($allDepartments, $departmentsData['data']['page_token']);
         }
+    }
+
+    private function normalizeDepartment($item) {
+        $departmentId = $item['department_id'] ?? ($item['open_department_id'] ?? '');
+        $departmentId = trim((string)$departmentId);
+        if ($departmentId === '') {
+            return null;
+        }
+
+        $name = trim((string)($item['name'] ?? ''));
+        if ($name === '' && isset($item['i18n_name']) && is_array($item['i18n_name'])) {
+            $name = $item['i18n_name']['zh_cn'] ?? ($item['i18n_name']['en_us'] ?? '');
+        }
+        if ($name === '') {
+            $name = $departmentId;
+        }
+
+        $leaderUserId = $item['leader_user_id'] ?? ($item['leader_open_id'] ?? '');
+        if (is_array($leaderUserId)) {
+            $leaderUserId = $leaderUserId[0] ?? '';
+        }
+
+        return [
+            'department_id' => $departmentId,
+            'open_department_id' => trim((string)($item['open_department_id'] ?? '')),
+            'parent_department_id' => trim((string)($item['parent_department_id'] ?? ($item['parent_open_department_id'] ?? ''))),
+            'name' => $name,
+            'i18n_name' => $item['i18n_name'] ?? [],
+            'leader_user_id' => trim((string)$leaderUserId),
+            'member_count' => intval($item['member_count'] ?? 0),
+            'raw_payload' => $item
+        ];
     }
 
     private function fetchMembers(&$allMembers, $departmentId, $departmentName, &$processedOpenIds, $pageToken = null) {

@@ -45,6 +45,48 @@ class Migrator {
             KEY `idx_device_kind` (`device_id`, `subject_kind`, `enabled`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4", $errors);
 
+        self::exec("CREATE TABLE IF NOT EXISTS `feishu_departments` (
+            `department_id` varchar(128) NOT NULL,
+            `open_department_id` varchar(128) NOT NULL DEFAULT '',
+            `parent_department_id` varchar(128) NOT NULL DEFAULT '',
+            `name` varchar(255) NOT NULL DEFAULT '',
+            `i18n_name` text,
+            `leader_user_id` varchar(128) NOT NULL DEFAULT '',
+            `member_count` int unsigned NOT NULL DEFAULT 0,
+            `status` varchar(32) NOT NULL DEFAULT 'active',
+            `raw_payload` mediumtext,
+            `created_at` int unsigned NOT NULL DEFAULT 0,
+            `updated_at` int unsigned NOT NULL DEFAULT 0,
+            PRIMARY KEY (`department_id`),
+            KEY `idx_department_parent` (`parent_department_id`),
+            KEY `idx_department_open` (`open_department_id`),
+            KEY `idx_department_status` (`status`),
+            KEY `idx_department_name` (`name`(191))
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4", $errors);
+
+        self::exec("CREATE TABLE IF NOT EXISTS `access_roles` (
+            `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+            `name` varchar(100) NOT NULL,
+            `description` varchar(255) NOT NULL DEFAULT '',
+            `allow_all` tinyint(1) NOT NULL DEFAULT 0,
+            `enabled` tinyint(1) NOT NULL DEFAULT 1,
+            `created_at` int unsigned NOT NULL DEFAULT 0,
+            `updated_at` int unsigned NOT NULL DEFAULT 0,
+            PRIMARY KEY (`id`),
+            UNIQUE KEY `uniq_access_role_name` (`name`),
+            KEY `idx_access_role_enabled` (`enabled`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4", $errors);
+
+        self::exec("CREATE TABLE IF NOT EXISTS `access_role_members` (
+            `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+            `role_id` bigint unsigned NOT NULL,
+            `employee_open_id` varchar(128) NOT NULL,
+            `created_at` int unsigned NOT NULL DEFAULT 0,
+            PRIMARY KEY (`id`),
+            UNIQUE KEY `uniq_access_role_member` (`role_id`, `employee_open_id`),
+            KEY `idx_access_role_employee` (`employee_open_id`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4", $errors);
+
         self::exec("CREATE TABLE IF NOT EXISTS `attendance_queue` (
             `id` bigint unsigned NOT NULL AUTO_INCREMENT,
             `event_hash` char(64) NOT NULL,

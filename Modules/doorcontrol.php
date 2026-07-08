@@ -32,17 +32,14 @@ function fetchAssocRows($sql, $table = 'devices') {
 $devices = fetchAssocRows('SELECT * FROM `devices` ORDER BY `id` ASC', 'devices');
 $employeesRaw = fetchAssocRows("SELECT * FROM `employee` WHERE `status`='true' ORDER BY `name` ASC", 'employee');
 $guestsRaw = fetchAssocRows("SELECT * FROM `guest` WHERE `status`='true' ORDER BY `name` ASC", 'guest');
+$departmentsRaw = fetchAssocRows("SELECT * FROM `feishu_departments` WHERE `status`='active' ORDER BY `name` ASC, `department_id` ASC", 'feishu_departments');
+$rolesRaw = fetchAssocRows("SELECT r.*, (SELECT COUNT(*) FROM `access_role_members` m WHERE m.`role_id`=r.`id`) AS member_count FROM `access_roles` r WHERE r.`enabled`=1 ORDER BY r.`id` ASC", 'access_roles');
 $policiesRaw = fetchAssocRows('SELECT * FROM `access_policies` WHERE `enabled`=1 ORDER BY `id` ASC', 'access_policies');
 
 $employees = [];
-$departments = [];
 $groups = [];
-$roles = [];
 foreach ($employeesRaw as $employee) {
 	$employees[] = ['value' => $employee['open_id'], 'title' => $employee['name'].'（'.($employee['employee_id'] ?: '无工号').'）'];
-	foreach ([$employee['department_id'] ?? '', $employee['department_name'] ?? ''] as $dept) {
-		if ($dept !== '') { $departments[$dept] = $dept; }
-	}
 	$groupItems = json_decode($employee['groups'] ?? '', true);
 	if (!is_array($groupItems)) {
 		$groupItems = array_filter(array_map('trim', explode(',', $employee['groups'] ?? '')));
@@ -50,13 +47,21 @@ foreach ($employeesRaw as $employee) {
 	foreach ($groupItems as $item) {
 		if ($item !== '') { $groups[$item] = $item; }
 	}
-	$roleItems = json_decode($employee['roles'] ?? '', true);
-	if (!is_array($roleItems)) {
-		$roleItems = array_filter(array_map('trim', explode(',', $employee['roles'] ?? '')));
-	}
-	foreach ($roleItems as $item) {
-		if ($item !== '') { $roles[$item] = $item; }
-	}
+}
+
+$departments = [];
+foreach ($departmentsRaw as $department) {
+	$departmentId = $department['department_id'] ?? '';
+	if ($departmentId === '') { continue; }
+	$title = ($department['name'] ?: $departmentId).'（'.$departmentId.'）';
+	$departments[] = ['value' => $departmentId, 'title' => $title];
+}
+
+$roles = [];
+foreach ($rolesRaw as $role) {
+	$roleId = (string)$role['id'];
+	$scope = intval($role['allow_all'] ?? 0) === 1 ? '全员' : (intval($role['member_count'] ?? 0).'人');
+	$roles[] = ['value' => $roleId, 'title' => $role['name'].'（'.$scope.'）'];
 }
 
 $guests = [];
@@ -174,6 +179,8 @@ foreach ($policyMap as $deviceId => $policy) {
 var csrf_token = "<?php echo $_SESSION['token']; ?>";
 var employeeList = <?php echo json_encode($employees, JSON_UNESCAPED_UNICODE); ?>;
 var guestList = <?php echo json_encode($guests, JSON_UNESCAPED_UNICODE); ?>;
+var departmentList = <?php echo json_encode($departments, JSON_UNESCAPED_UNICODE); ?>;
+var roleList = <?php echo json_encode($roles, JSON_UNESCAPED_UNICODE); ?>;
 var policyMap = <?php echo json_encode($policyMap, JSON_UNESCAPED_UNICODE); ?>;
 var deviceMap = <?php echo json_encode(array_column($devices, 'name', 'id'), JSON_UNESCAPED_UNICODE); ?>;
 
@@ -203,9 +210,9 @@ layui.use(['layer', 'util', 'form', 'transfer'], function(){
 			+ '<hr><div class="layui-form-item"><input type="checkbox" id="all_guest" title="允许全体访客通行" lay-skin="primary" ' + (policy.all_guest ? 'checked' : '') + '></div>'
 			+ '<div id="guestTransfer"></div>'
 			+ '<hr>'
-			+ '<div class="layui-form-item"><label class="layui-form-label">部门</label><div class="layui-input-block"><textarea id="departments" class="layui-textarea" placeholder="每行一个部门ID或部门名">' + escapeHtml((policy.departments || []).join("\n")) + '</textarea></div></div>'
+			+ '<div id="departmentTransfer"></div>'
 			+ '<div class="layui-form-item"><label class="layui-form-label">组</label><div class="layui-input-block"><textarea id="groups" class="layui-textarea" placeholder="每行一个组名">' + escapeHtml((policy.groups || []).join("\n")) + '</textarea></div></div>'
-			+ '<div class="layui-form-item"><label class="layui-form-label">角色</label><div class="layui-input-block"><textarea id="roles" class="layui-textarea" placeholder="每行一个角色名">' + escapeHtml((policy.roles || []).join("\n")) + '</textarea></div></div>'
+			+ '<div id="roleTransfer"></div>'
 			+ '<div class="layui-form-item"><label class="layui-form-label">部门+组</label><div class="layui-input-block"><textarea id="department_groups" class="layui-textarea" placeholder="每行一个：部门|组">' + escapeHtml((policy.department_groups || []).join("\n")) + '</textarea></div></div>'
 			+ '<div style="text-align:center;"><button class="layui-btn layui-btn-normal" onclick="savePolicy(' + deviceId + ')">保存</button><button class="layui-btn layui-btn-primary" onclick="layui.layer.closeAll()">取消</button></div>'
 			+ '</div>';
@@ -236,6 +243,26 @@ layui.use(['layer', 'util', 'form', 'transfer'], function(){
 					showSearch: true,
 					id: 'guestPolicy'
 				});
+				transfer.render({
+					elem: '#departmentTransfer',
+					title: ['可选部门', '已允许部门'],
+					data: departmentList,
+					value: policy.departments || [],
+					width: 300,
+					height: 220,
+					showSearch: true,
+					id: 'departmentPolicy'
+				});
+				transfer.render({
+					elem: '#roleTransfer',
+					title: ['可选角色', '已允许角色'],
+					data: roleList,
+					value: policy.roles || [],
+					width: 300,
+					height: 220,
+					showSearch: true,
+					id: 'rolePolicy'
+				});
 				form.render();
 			}
 		});
@@ -255,14 +282,14 @@ layui.use(['layer', 'util', 'form', 'transfer'], function(){
 		transfer.getData('guestPolicy').forEach(function(item) {
 			policies.push({subject_kind: 'guest', subject_type: 'guest', subject_value: item.value, title: item.title});
 		});
-		lines('#departments').forEach(function(value) {
-			policies.push({subject_kind: 'employee', subject_type: 'department', subject_value: value});
+		transfer.getData('departmentPolicy').forEach(function(item) {
+			policies.push({subject_kind: 'employee', subject_type: 'department', subject_value: item.value, title: item.title});
 		});
 		lines('#groups').forEach(function(value) {
 			policies.push({subject_kind: 'employee', subject_type: 'group', subject_value: value});
 		});
-		lines('#roles').forEach(function(value) {
-			policies.push({subject_kind: 'employee', subject_type: 'role', subject_value: value});
+		transfer.getData('rolePolicy').forEach(function(item) {
+			policies.push({subject_kind: 'employee', subject_type: 'role', subject_value: item.value, title: item.title});
 		});
 		lines('#department_groups').forEach(function(value) {
 			var parts = value.split('|');
