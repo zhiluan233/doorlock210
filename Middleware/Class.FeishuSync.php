@@ -105,13 +105,21 @@ class FeishuContactSync {
 
     public static function applyUserEvent($payload, $eventType)
     {
+        if (!self::shouldApplyUserLifecycleEvent($payload, $eventType)) {
+            return '';
+        }
+
         $identity = self::extractEventIdentity($payload);
         if (!$identity['open_id'] && !$identity['user_id'] && !$identity['employee_id']) {
             return '';
         }
 
         $exists = self::findEmployee($identity);
-        if (self::eventMeansDeleted($payload, $eventType)) {
+        $lifecycle = self::eventLifecycle($payload, $eventType);
+        if ($lifecycle === 'unknown') {
+            return '';
+        }
+        if ($lifecycle === 'deleted') {
             if ($exists) {
                 self::deleteEmployee($exists);
                 self::markIncrementalSync($eventType);
@@ -120,7 +128,7 @@ class FeishuContactSync {
             return $identity['open_id'];
         }
 
-        $active = self::eventMeansActive($payload, $eventType);
+        $active = $lifecycle === 'active';
         $user = $identity['user'];
         $now = time();
         $data = [
@@ -482,39 +490,95 @@ class FeishuContactSync {
         ];
     }
 
-    private static function eventMeansActive($payload, $eventType)
+    private static function shouldApplyUserLifecycleEvent($payload, $eventType)
+    {
+        $eventText = strtolower(trim((string)$eventType));
+        if ($eventText === '') {
+            return self::payloadHasLifecycleStatus($payload);
+        }
+
+        if (preg_match('/^(attendance|approval|calendar|im|message|task|doc|drive|meeting|vc)\./', $eventText)) {
+            return false;
+        }
+        if (preg_match('/^contact\.(user|employee)\./', $eventText)) {
+            return true;
+        }
+        if (preg_match('/^(corehr|ehr|personnel|employee|employment|staff)\./', $eventText)) {
+            return true;
+        }
+        if (
+            preg_match('/(resign|resigned|resignation|exit|exited|terminate|terminated|offboard|offboarding|offboarded|delete|deleted|deactivate|deactivated|disable|disabled|freeze|frozen|activate|activated|enable|enabled|unfreeze|onboard|hire|hired|join|reinstated)/', $eventText)
+            && preg_match('/(user|employee|employment|staff|person)/', $eventText)
+        ) {
+            return true;
+        }
+
+        return self::payloadHasLifecycleStatus($payload);
+    }
+
+    private static function payloadHasLifecycleStatus($payload)
+    {
+        $user = self::eventUserPayload($payload);
+        foreach (['status', 'employee_status', 'employment_status', 'account_status'] as $field) {
+            if (isset($user[$field])) {
+                return true;
+            }
+        }
+        foreach (['active', 'is_active', 'enabled', 'is_enabled', 'is_activated', 'is_frozen', 'is_unjoin', 'is_resigned', 'is_exited', 'is_deleted'] as $field) {
+            if (isset($user[$field])) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static function eventUserPayload($payload)
     {
         $event = $payload['event'] ?? $payload;
-        $user = $event['user'] ?? $event['object'] ?? $event['employee'] ?? $event['employment'] ?? $event;
+        foreach (['user', 'object', 'employee', 'employment'] as $field) {
+            if (isset($event[$field]) && is_array($event[$field])) {
+                return $event[$field];
+            }
+        }
+        return is_array($event) ? $event : [];
+    }
+
+    private static function eventLifecycle($payload, $eventType)
+    {
+        $user = self::eventUserPayload($payload);
         $eventText = strtolower($eventType);
 
         if (self::eventMeansDeleted($payload, $eventType)) {
-            return false;
+            return 'deleted';
         }
         if (preg_match('/deactivate|deactivated|disable|disabled|freeze|frozen/i', $eventText)) {
-            return false;
+            return 'disabled';
         }
         if (preg_match('/created|create|enable|enabled|activate|activated|unfreeze|onboard|hire|hired|join|reinstated/i', $eventText)) {
-            return true;
+            return 'active';
         }
 
         foreach (['status', 'employee_status', 'employment_status', 'account_status'] as $field) {
             if (isset($user[$field])) {
-                return self::statusValueIsActive($user[$field]);
+                return self::statusValueIsActive($user[$field]) ? 'active' : 'disabled';
             }
         }
         foreach (['active', 'is_active', 'enabled', 'is_enabled', 'is_activated'] as $field) {
             if (isset($user[$field])) {
-                return $user[$field] === true || $user[$field] === 'true' || $user[$field] === 1 || $user[$field] === '1';
+                return ($user[$field] === true || $user[$field] === 'true' || $user[$field] === 1 || $user[$field] === '1') ? 'active' : 'disabled';
             }
         }
-        return true;
+        foreach (['is_frozen', 'is_unjoin'] as $field) {
+            if (isset($user[$field]) && ($user[$field] === true || $user[$field] === 'true' || $user[$field] === 1 || $user[$field] === '1')) {
+                return 'disabled';
+            }
+        }
+        return 'unknown';
     }
 
     private static function eventMeansDeleted($payload, $eventType)
     {
-        $event = $payload['event'] ?? $payload;
-        $user = $event['user'] ?? $event['object'] ?? $event['employee'] ?? $event['employment'] ?? $event;
+        $user = self::eventUserPayload($payload);
         $eventText = strtolower($eventType);
 
         if (preg_match('/deleted|delete|resign|resigned|resignation|exit|exited|terminate|terminated|offboard|offboarding|offboarded/i', $eventText)) {

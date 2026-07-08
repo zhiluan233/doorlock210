@@ -213,7 +213,7 @@ function submitcardLatestSyncJobText($job) {
 					<div class="text-muted" style="margin-top: 12px; line-height: 1.8;">
 						<span>最后一次全量同步：<strong><?php echo submitcardH(submitcardFormatSyncTime($lastFullSyncAt, '暂未同步')); ?></strong></span>
 						<span style="margin-left: 24px;">最近全量任务：<strong><?php echo submitcardH(submitcardLatestSyncJobText($latestFullSyncJob)); ?></strong></span>
-						<span style="margin-left: 24px;">最后一次增量状态更新：<strong><?php echo submitcardH(submitcardFormatSyncTime($lastIncrementalAt, '暂未接收')); ?></strong></span>
+						<span style="margin-left: 24px;">最后一次有效增量状态更新：<strong><?php echo submitcardH(submitcardFormatSyncTime($lastIncrementalAt, '暂未接收')); ?></strong></span>
 						<span style="margin-left: 24px;">增量事件：<strong><?php echo submitcardH($lastIncrementalEvent !== '' ? $lastIncrementalEvent : '暂无事件'); ?></strong></span>
 					</div>
 
