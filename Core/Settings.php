@@ -40,6 +40,9 @@ class Settings {
             'feishu_contact_sync_daily_time' => '03:25',
             'feishu_contact_sync_release_missing' => 'true',
             'feishu_contact_sync_last_date' => '',
+            'feishu_contact_sync_last_full_at' => '0',
+            'feishu_contact_incremental_last_at' => '0',
+            'feishu_contact_incremental_last_event' => '',
 
             'feishu_oauth_enabled' => 'true',
             'feishu_oauth_redirect_uri' => '',

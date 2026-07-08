@@ -138,6 +138,7 @@ class FeishuContactSync {
         if ($exists) {
             unset($data['open_id']);
             Database::update('employee', $data, ['id' => $exists['id']]);
+            self::markIncrementalSync($eventType);
             return $exists['open_id'] ?: $identity['open_id'];
         }
 
@@ -145,6 +146,7 @@ class FeishuContactSync {
             return '';
         }
         Database::insert('employee', $data);
+        self::markIncrementalSync($eventType);
         return $identity['open_id'];
     }
 
@@ -226,10 +228,12 @@ class FeishuContactSync {
         }
 
         $message = '飞书通讯录同步完成：处理 '.$stats['total_count'].' 人，新增 '.$stats['insert_count'].' 人，更新 '.$stats['update_count'].' 人，禁用 '.$stats['disable_count'].' 人，释放卡号 '.$stats['release_count'].' 张';
+        $finishedAt = time();
         $stats['status'] = 'success';
-        $stats['finished_at'] = time();
+        $stats['finished_at'] = $finishedAt;
         $stats['message'] = $message;
         self::updateJob($jobId, $stats);
+        Settings::set('feishu_contact_sync_last_full_at', (string)$finishedAt);
 
         if (($job['source'] ?? '') === 'daily') {
             Settings::set('feishu_contact_sync_last_date', date('Y-m-d'));
@@ -297,6 +301,13 @@ class FeishuContactSync {
     {
         $data['updated_at'] = time();
         return Database::update('feishu_sync_jobs', $data, ['id' => $jobId]);
+    }
+
+    private static function markIncrementalSync($eventType)
+    {
+        $now = time();
+        Settings::set('feishu_contact_incremental_last_at', (string)$now);
+        Settings::set('feishu_contact_incremental_last_event', $eventType);
     }
 
     private static function findEmployee($identity)

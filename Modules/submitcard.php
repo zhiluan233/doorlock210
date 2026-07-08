@@ -132,6 +132,49 @@ $mainEmployeeSQL = 'SELECT * FROM `employee`';
 $employeeData = Database::query("employee", $mainEmployeeSQL, true);
 $mainGuestSQL = 'SELECT * FROM `guest`';
 $guestData = Database::query("guest", $mainGuestSQL, true);
+$latestFullSyncJob = Database::querySingleLine("feishu_sync_jobs", "SELECT * FROM `feishu_sync_jobs` WHERE `job_type`='full_contact' ORDER BY `id` DESC LIMIT 1", true);
+$lastSuccessfulFullSyncJob = Database::querySingleLine("feishu_sync_jobs", "SELECT * FROM `feishu_sync_jobs` WHERE `job_type`='full_contact' AND `status`='success' AND `finished_at`>0 ORDER BY `finished_at` DESC, `id` DESC LIMIT 1", true);
+$lastFullSyncAt = intval(Settings::get('feishu_contact_sync_last_full_at', '0'));
+if ($lastSuccessfulFullSyncJob && intval($lastSuccessfulFullSyncJob['finished_at']) > $lastFullSyncAt) {
+	$lastFullSyncAt = intval($lastSuccessfulFullSyncJob['finished_at']);
+}
+$lastIncrementalAt = intval(Settings::get('feishu_contact_incremental_last_at', '0'));
+$lastIncrementalEvent = Settings::get('feishu_contact_incremental_last_event', '');
+
+function submitcardH($value) {
+	return htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8');
+}
+
+function submitcardFormatSyncTime($timestamp, $emptyText) {
+	$timestamp = intval($timestamp);
+	if ($timestamp <= 0) {
+		return $emptyText;
+	}
+	return date('Y-m-d H:i:s', $timestamp);
+}
+
+function submitcardLatestSyncJobText($job) {
+	if (!$job) {
+		return '暂无任务';
+	}
+
+	$statusMap = [
+		'pending' => '等待执行',
+		'running' => '执行中',
+		'success' => '已完成',
+		'failed' => '失败'
+	];
+	$status = $statusMap[$job['status']] ?? $job['status'];
+	$time = intval($job['finished_at']) > 0 ? intval($job['finished_at']) : intval($job['updated_at']);
+	$text = $status;
+	if ($time > 0) {
+		$text .= '，'.date('Y-m-d H:i:s', $time);
+	}
+	if (!empty($job['message'])) {
+		$text .= '，'.$job['message'];
+	}
+	return $text;
+}
 ?>
 <div class="page-title">
 	<h3 class="breadcrumb-header">您好, 门禁管理员：<?php echo $rs['username'] ?></h3>
@@ -143,6 +186,12 @@ $guestData = Database::query("guest", $mainGuestSQL, true);
 				<div class="panel-body" style="font-weight: 400;overflow-x: auto;">
 					<h4 style="font-weight: 400">管理飞书租户通讯录成员</h4><br />
 					<button class="btn btn-default" onclick="syncFeishuMember()">同步飞书通讯录</button>
+					<div class="text-muted" style="margin-top: 12px; line-height: 1.8;">
+						<span>最后一次全量同步：<strong><?php echo submitcardH(submitcardFormatSyncTime($lastFullSyncAt, '暂未同步')); ?></strong></span>
+						<span style="margin-left: 24px;">最近全量任务：<strong><?php echo submitcardH(submitcardLatestSyncJobText($latestFullSyncJob)); ?></strong></span>
+						<span style="margin-left: 24px;">最后一次增量状态更新：<strong><?php echo submitcardH(submitcardFormatSyncTime($lastIncrementalAt, '暂未接收')); ?></strong></span>
+						<span style="margin-left: 24px;">增量事件：<strong><?php echo submitcardH($lastIncrementalEvent !== '' ? $lastIncrementalEvent : '暂无事件'); ?></strong></span>
+					</div>
 
                     <table id="employee1" class="table table-bordered table-auto" data-toggle="table" data-pagination="true" data-page-size="10" data-page-list="[5, 10, 20, 30, 40, 50, 'All']" data-sortable="true" data-search="true" style="clear: both;margin-top: 20px;">
                         <thead>
