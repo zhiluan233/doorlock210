@@ -98,9 +98,9 @@ class PostHandler {
 						anim210System\Utils::checkCsrf();
 						$us = $um->getInfoByUser($_SESSION['user']);
 						if($us['type'] == "admin") {
-							if (!in_array($_POST['group'], ['admin', 'user', 'readonly'], true)) {
+							if (!in_array($_POST['group'], ['admin', 'readonly'], true)) {
 								Header("HTTP/1.1 400 Bad Request");
-								exit("用户组只允许 admin、readonly、user");
+								exit("本地管理员只允许 admin、readonly");
 							}
 								$update = Database::insert("user", Array(
 			                    "id"             => null,
@@ -108,12 +108,12 @@ class PostHandler {
 			                    "password"       => $_POST['password'],
 			                    "mail"          => $_POST['mail'],
 			                    "type"           => $_POST['group'],
-								"open_id"        => $_POST['open_id'] ?? '',
-								"employee_id"    => $_POST['employee_id'] ?? '',
+								"open_id"        => '',
+								"employee_id"    => '',
 								"display_name"   => $_POST['display_name'] ?? ''
 	                    	));
 								if($update === true) {
-									exit("创建新用户 ".$_POST['username']." 成功！");
+									exit("创建本地管理员 ".$_POST['username']." 成功！");
 								} else {
 									Header("HTTP/1.1 404 Not Found");
 									exit("无法创建用户！{$update}");
@@ -124,6 +124,60 @@ class PostHandler {
 					} else {
 						exit("登录会话已超时，请重新登录");
 					}
+				break;
+				case "setFeishuUserRole":
+					$um = new anim210System\UserCheck();
+					if($um->isLogged()) {
+						anim210System\Utils::checkCsrf();
+						$us = $um->getInfoByUser($_SESSION['user']);
+						if($us['type'] !== "admin") {
+							Header("HTTP/1.1 403 Forbidden");
+							exit("你没有足够的权限这么做");
+						}
+						$openId = trim($_POST['open_id'] ?? '');
+						$role = $_POST['role'] ?? 'user';
+						if ($openId === '') {
+							Header("HTTP/1.1 400 Bad Request");
+							exit("飞书 OpenID 不能为空");
+						}
+						if (!in_array($role, ['admin', 'readonly', 'user'], true)) {
+							Header("HTTP/1.1 400 Bad Request");
+							exit("用户组只允许 admin、readonly、user");
+						}
+						$employee = Database::querySingleLine("employee", Array("open_id" => $openId));
+						if (!$employee) {
+							Header("HTTP/1.1 404 Not Found");
+							exit("未找到飞书成员，请先同步通讯录");
+						}
+						$user = Database::querySingleLine("user", Array("open_id" => $openId));
+						if (!$user && !empty($employee['employee_id'])) {
+							$user = Database::querySingleLine("user", Array("employee_id" => $employee['employee_id']));
+						}
+						$data = Array(
+							"type"         => $role,
+							"open_id"      => $openId,
+							"employee_id"  => $employee['employee_id'] ?? '',
+							"display_name" => $employee['name'] ?: ($employee['realname'] ?? ''),
+							"mail"         => $employee['email'] ?? ''
+						);
+						if ($user) {
+							$update = Database::update("user", $data, Array("id" => $user['id']));
+						} else {
+							$username = 'fs_'.substr(hash('sha256', $openId), 0, 24);
+							$data["id"] = null;
+							$data["username"] = $username;
+							$data["password"] = md5($openId.time().mt_rand(1000, 9999));
+							$update = Database::insert("user", $data);
+						}
+						if($update === true) {
+							$roleName = $role === 'admin' ? '管理员' : ($role === 'readonly' ? '只读管理员' : '普通用户');
+							exit("飞书成员后台权限已设置为 ".$roleName);
+						}
+						Header("HTTP/1.1 500 Internal Error");
+						exit("飞书成员后台权限设置失败：".$update);
+					}
+					Header("HTTP/1.1 403 Forbidden");
+					exit("登录会话已超时，请重新登录");
 				break;
 				case "deleteuser":
 					$um = new anim210System\UserCheck();
@@ -154,10 +208,10 @@ class PostHandler {
 							Header("HTTP/1.1 403 Forbidden");
 							exit("你没有足够的权限这么做");
 						}
-						$open_id = '210-door-sys_'.$_POST['phone'].'_'.time();
+						$localGuestId = 'local-guest_'.preg_replace('/[^0-9A-Za-z\_\-]/', '', $_POST['phone']).'_'.time();
 						$update = Database::insert("guest", Array(
 			                    "id"         => null,
-								"open_id"    => $open_id,
+								"open_id"    => $localGuestId,
 			                    "name"       => $_POST['name'],
 			                    "phone"      => $_POST['phone'],
 								"status"     => 'true'

@@ -73,6 +73,30 @@ if(isset($_GET['updateGuestId']) && isset($_GET['updateGuestAction']) && preg_ma
 				exit("用户资料更新失败");
 			}
 		break;
+		case 'deactivateGuest':
+			anim210System\Utils::checkCsrf();
+			$update = Database::update("guest", Array("status" => 'false'), Array("id" => $_GET['updateGuestId']));
+			if($update == true) {
+				ob_clean();
+				exit("访客权限禁用成功");
+			} else {
+				ob_clean();
+				Header("HTTP/1.1 404 Not Found");
+				exit("访客资料更新失败");
+			}
+		break;
+		case 'activateGuest':
+			anim210System\Utils::checkCsrf();
+			$update = Database::update("guest", Array("status" => 'true'), Array("id" => $_GET['updateGuestId']));
+			if($update == true) {
+				ob_clean();
+				exit("访客权限启用成功");
+			} else {
+				ob_clean();
+				Header("HTTP/1.1 404 Not Found");
+				exit("访客资料更新失败");
+			}
+		break;
 		default:
 			ob_clean();
 			Header("HTTP/1.1 404 Not Found");
@@ -257,8 +281,10 @@ function submitcardLatestSyncJobText($job) {
 							<?php
                                 foreach ($guestData as $gData) {
                                     $gStatus = '已启用';
+									$gStatusBtn = '<button class="btn btn-default" onclick="deactivateGuest('.$gData['id'].')">禁用</button>';
                                     if ($gData['status'] != 'true') {
                                         $gStatus = '已禁用';
+										$gStatusBtn = '<button class="btn btn-default" onclick="activateGuest('.$gData['id'].')">启用</button>';
                                     }
                                     echo "<tr>
                                     <td>{$gData['id']}</td>
@@ -266,7 +292,7 @@ function submitcardLatestSyncJobText($job) {
                                     <td>{$gData['phone']}</td>
                                     <td>{$gStatus}</td>
                                     <td>{$gData['card_id']}</td>
-                                    <td><button class=\"btn btn-default\" onclick=\"submitguestcard({$gData['id']})\">发卡</button>&nbsp<button class=\"btn btn-default\" onclick=\"deleteGuest({$gData['id']})\">删除</button></td>
+                                    <td><button class=\"btn btn-default\" onclick=\"submitguestcard({$gData['id']})\">发卡</button>&nbsp{$gStatusBtn}&nbsp<button class=\"btn btn-default\" onclick=\"deleteGuest({$gData['id']})\">删除</button></td>
                                     </tr>";
                                 }
                             ?>
@@ -371,6 +397,66 @@ function submitcardLatestSyncJobText($job) {
 						},
 						btn2: function(index, layero){ // 点击取消按钮的回调函数
 						layer.close(index); // 关闭询问框
+						}
+					});
+				} catch(e) {
+					alert("错误：无法解析服务器返回的数据");
+				}
+				return;
+			}
+		});
+	}
+
+	function deactivateGuest(id) {
+		updateGuestStatus(id, 'deactivateGuest', '是否禁用该访客的门禁通行权限？');
+	}
+
+	function activateGuest(id) {
+		updateGuestStatus(id, 'activateGuest', '是否启用该访客的门禁通行权限？');
+	}
+
+	function updateGuestStatus(id, action, message) {
+		var htmlobj = $.ajax({
+			type: 'GET',
+			url: "?page=panel&module=submitcard&getguest=" + id + "&csrf=" + "<?php echo $_SESSION['token']; ?>",
+			async:true,
+			error: function() {
+				alert("错误：" + htmlobj.responseText);
+				return;
+			},
+			success: function() {
+				try {
+					var json = JSON.parse(htmlobj.responseText);
+					guestid = json.id;
+					guestname = json.name;
+
+					layer.confirm(message + '：' + guestname, {
+						icon: 3,
+						title: '确定吗？',
+						btn: ['确定', '取消'],
+						yes: function(index, layero){
+							var updateObj = $.ajax({
+								type: 'GET',
+								url: "?page=panel&module=submitcard&updateGuestAction="+action+"&updateGuestId="+guestid+"&csrf=" + "<?php echo $_SESSION['token']; ?>",
+								async:true,
+								error: function() {
+									vt.error("错误：" + updateObj.responseText, {
+										position: "top-center",
+									});
+									return;
+								},
+								success: function() {
+									vt.success(updateObj.responseText, {
+										position: "top-center",
+									});
+									layer.close(index);
+									location.reload();
+									return;
+								}
+							});
+						},
+						btn2: function(index, layero){
+							layer.close(index);
 						}
 					});
 				} catch(e) {
@@ -675,6 +761,8 @@ function submitcardLatestSyncJobText($job) {
 
 	// global
 	window.deleteGuest = deleteGuest;
+	window.deactivateGuest = deactivateGuest;
+	window.activateGuest = activateGuest;
 	window.deactivate = deactivate;
 	window.activate = activate;
 	window.createGuest = createGuest;

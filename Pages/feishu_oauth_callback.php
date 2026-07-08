@@ -78,6 +78,24 @@ if (!$adminUser) {
     $adminUser = Database::querySingleLine('user', ['username' => $openId]);
 }
 
+$userProfile = [
+    'open_id' => $openId,
+    'employee_id' => $employee['employee_id'] ?? '',
+    'display_name' => $employee['name'] ?: ($userData['name'] ?? ''),
+    'mail' => $employee['email'] ?? ($userData['email'] ?? '')
+];
+if ($adminUser) {
+    Database::update('user', $userProfile, ['id' => $adminUser['id']]);
+    $adminUser = Database::querySingleLine('user', ['id' => $adminUser['id']]);
+} else {
+    $userProfile['id'] = null;
+    $userProfile['username'] = 'fs_' . substr(hash('sha256', $openId), 0, 24);
+    $userProfile['password'] = md5($openId . time() . mt_rand(1000, 9999));
+    $userProfile['type'] = 'user';
+    Database::insert('user', $userProfile);
+    $adminUser = Database::querySingleLine('user', ['open_id' => $openId]);
+}
+
 $token = md5(mt_rand(0, 999999) . time() . $openId);
 if ($adminUser && in_array($adminUser['type'], ['admin', 'readonly'], true)) {
     $_SESSION['user'] = $adminUser['username'];

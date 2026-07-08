@@ -146,7 +146,7 @@ if ($isReadonly && !in_array($module, ['home', 'admininfo', 'accesslog', ''], tr
                             <?php if($isAdmin) { ?>
                                 <li class="menu-divider"></li>
                                 <li class="<?php echo $module == "useropt" || $module == "" ? "active-page" : ""; ?>">
-                                    <a href="/?page=panel&module=useropt"><i class="fa-solid fa-user" style="padding-left: 2.5px; padding-right: 2px"></i><span>管理员编辑</span></a>
+                                    <a href="/?page=panel&module=useropt"><i class="fa-solid fa-user" style="padding-left: 2.5px; padding-right: 2px"></i><span>本地管理员</span></a>
                                 </li>
 								<li class="<?php echo $module == "system" || $module == "" ? "active-page" : ""; ?>">
                                     <a href="/?page=panel&module=system"><i class="fa-solid fa-cog" style="padding-left: 2.5px; padding-right: 2px"></i><span>系统设置</span></a>
