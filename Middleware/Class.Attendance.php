@@ -88,6 +88,15 @@ class AttendanceService {
         ]);
     }
 
+    public static function normalizeCardNumber($cardId)
+    {
+        $cardId = trim((string)$cardId);
+        if ($cardId !== '' && ctype_digit($cardId) && strlen($cardId) < 10) {
+            return str_pad($cardId, 10, '0', STR_PAD_LEFT);
+        }
+        return $cardId;
+    }
+
     public static function enqueueSwipe($employeeInfo, $deviceInfo, $cardId, $source = 'card', $eventTime = null)
     {
         global $conn;
@@ -427,7 +436,7 @@ class AttendanceService {
         if (!in_array($method, ['GET', 'POST'], true)) {
             $method = 'GET';
         }
-        $path = self::renderRemoteOpenTemplate(Settings::get('remote_open_path', '/cdor.cgi?open=0'), $device);
+        $path = self::renderRemoteOpenTemplate(Settings::get('remote_open_path', '/cdor.cgi?open=1&door=0?'), $device);
         $url = self::remoteOpenUrl($device['ip'], $path);
         $body = self::renderRemoteOpenTemplate(Settings::get('remote_open_body', ''), $device);
         $timeout = Settings::getInt('remote_open_timeout', 3);

@@ -236,18 +236,19 @@ class PostHandler {
 						}
 						$id = $_POST['id'];
 						$type = $_POST['type'];
-						$employeeInfo = Database::querySingleLine("employee", Array("card_id" => $_POST['cardid']));
-						$guestInfo = Database::querySingleLine("guest", Array("card_id" => $_POST['cardid']));
-						if ($employeeInfo !== null && $_POST['cardid'] !== '') {
+						$cardId = AttendanceService::normalizeCardNumber($_POST['cardid'] ?? '');
+						$employeeInfo = Database::querySingleLine("employee", Array("card_id" => $cardId));
+						$guestInfo = Database::querySingleLine("guest", Array("card_id" => $cardId));
+						if ($employeeInfo !== null && $cardId !== '') {
 							Header("HTTP/1.1 400 Bad Request");
 							exit("卡已经发给了员工 ".$employeeInfo['name']);
 						}
-						if ($guestInfo !== null && $_POST['cardid'] !== '') {
+						if ($guestInfo !== null && $cardId !== '') {
 							Header("HTTP/1.1 400 Bad Request");
 							exit("卡已经发给了访客 ".$guestInfo['name']);
 						}
 						$data = Array(
-						    "card_id" => $_POST['cardid'],
+						    "card_id" => $cardId,
 						);
 						$update = false;
 						if ($type == 'guest') {

@@ -53,7 +53,7 @@ class Settings {
 
             'remote_open_enabled' => 'true',
             'remote_open_method' => 'GET',
-            'remote_open_path' => '/cdor.cgi?open=0',
+            'remote_open_path' => '/cdor.cgi?open=1&door=0?',
             'remote_open_body' => '',
             'remote_open_success_text' => '',
             'remote_open_timeout' => '3',

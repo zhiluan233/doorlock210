@@ -87,10 +87,7 @@ class deviceApi {
                         if ($this->is_base64($data['Card'])) {
                             $card = base64_decode($data['Card']);
                         }
-                        $card = trim((string)$card);
-                        if (ctype_digit($card) && strlen($card) < 10) {
-                            $card = str_pad($card, 10, '0', STR_PAD_LEFT);
-                        }
+                        $card = AttendanceService::normalizeCardNumber($card);
 
                         $employeeInfo = Database::querySingleLine("employee", Array("card_id" => $card));
                         $guestInfo = Database::querySingleLine("guest", Array("card_id" => $card));
