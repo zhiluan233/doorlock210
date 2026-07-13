@@ -52,7 +52,10 @@ class Settings {
             'feishu_oauth_prompt' => '',
 
             'remote_open_enabled' => 'true',
+            'remote_open_method' => 'GET',
             'remote_open_path' => '/cdor.cgi?open=0',
+            'remote_open_body' => '',
+            'remote_open_success_text' => '',
             'remote_open_timeout' => '3',
 
             'queue_retry_base_seconds' => '60',

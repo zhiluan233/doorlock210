@@ -50,7 +50,7 @@ $_config = [
 		'appSecret' => ''
 	],
 
-	// 门禁控制器远程开门 Basic Auth 凭证，路径和开关在系统设置页维护
+	// 门禁控制器远程开门 HTTP 鉴权凭证，路径、请求方式、请求体和成功判断在系统设置页维护
 	'remoteOpen' => [
 		'username' => 'admin',
 		'password' => '888888'

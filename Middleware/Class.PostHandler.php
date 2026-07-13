@@ -417,7 +417,7 @@ class PostHandler {
 							'feishu_event_enabled',
 							'feishu_contact_sync_enabled', 'feishu_contact_sync_daily_time', 'feishu_contact_sync_release_missing',
 							'feishu_oauth_enabled', 'feishu_oauth_redirect_uri', 'feishu_oauth_scope', 'feishu_oauth_prompt',
-							'remote_open_enabled', 'remote_open_path', 'remote_open_timeout',
+							'remote_open_enabled', 'remote_open_method', 'remote_open_path', 'remote_open_body', 'remote_open_success_text', 'remote_open_timeout',
 							'queue_retry_base_seconds', 'queue_retry_max_seconds'
 						];
 						$data = [];
@@ -443,10 +443,18 @@ class PostHandler {
 							Header("HTTP/1.1 400 Bad Request");
 							exit("飞书授权确认参数不合法");
 						}
+						if (isset($data['remote_open_method'])) {
+							$data['remote_open_method'] = strtoupper($data['remote_open_method']);
+							if (!in_array($data['remote_open_method'], ['GET', 'POST'], true)) {
+								Header("HTTP/1.1 400 Bad Request");
+								exit("远程开门请求方式只允许 GET 或 POST");
+							}
+						}
 						$intRanges = [
 							'feishu_attendance_batch_size' => [1, 50, '飞书考勤单批条数应为 1-50'],
 							'feishu_attendance_cron_max_batches' => [1, 100, '飞书考勤每轮批次应为 1-100'],
-							'feishu_attendance_batch_interval_ms' => [0, 2000, '飞书考勤批次间隔应为 0-2000 毫秒']
+							'feishu_attendance_batch_interval_ms' => [0, 2000, '飞书考勤批次间隔应为 0-2000 毫秒'],
+							'remote_open_timeout' => [1, 30, '远程开门超时秒数应为 1-30']
 						];
 						foreach ($intRanges as $intKey => $range) {
 							if (!isset($data[$intKey]) || $data[$intKey] === '') {
