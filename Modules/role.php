@@ -2,7 +2,7 @@
 /*
 
 门禁角色管理模块
-Ver 1.0.0.0 20260708
+Ver 1.1.0.0 20260714
 Code by Jason / Codex
 
 */
@@ -31,11 +31,15 @@ function roleH($value) {
 	return htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8');
 }
 
-Database::delete('access_role_members', "DELETE m FROM `access_role_members` m LEFT JOIN `employee` e ON e.`open_id`=m.`employee_open_id` WHERE e.`open_id` IS NULL", '', true);
+Database::delete('access_role_members', "DELETE m FROM `access_role_members` m LEFT JOIN `employee` e ON e.`open_id`=m.`employee_open_id` WHERE IFNULL(m.`member_kind`, 'employee')='employee' AND e.`open_id` IS NULL", '', true);
+Database::delete('access_role_members', "DELETE m FROM `access_role_members` m LEFT JOIN `guest` g ON g.`open_id`=m.`employee_open_id` WHERE m.`member_kind`='guest' AND g.`open_id` IS NULL", '', true);
 
 $employeesRaw = roleFetchRows("SELECT `open_id`, `name`, `employee_id`, `status` FROM `employee` WHERE `open_id`<>'' ORDER BY `status` DESC, `name` ASC", 'employee');
-$rolesRaw = roleFetchRows("SELECT r.*, (SELECT COUNT(*) FROM `access_role_members` m WHERE m.`role_id`=r.`id`) AS member_count FROM `access_roles` r WHERE r.`enabled`=1 ORDER BY r.`id` ASC", 'access_roles');
-$membersRaw = roleFetchRows("SELECT m.`role_id`, m.`employee_open_id` FROM `access_role_members` m INNER JOIN `access_roles` r ON r.`id`=m.`role_id` INNER JOIN `employee` e ON e.`open_id`=m.`employee_open_id` WHERE r.`enabled`=1 ORDER BY m.`role_id` ASC, e.`name` ASC", 'access_role_members');
+$guestsRaw = roleFetchRows("SELECT `open_id`, `name`, `status` FROM `guest` WHERE `open_id`<>'' ORDER BY `status` DESC, `name` ASC", 'guest');
+$devicesRaw = roleFetchRows("SELECT `id`, `name`, `ip` FROM `devices` ORDER BY `id` ASC", 'devices');
+$rolesRaw = roleFetchRows("SELECT r.*, (SELECT COUNT(*) FROM `access_role_members` m WHERE m.`role_id`=r.`id`) AS member_count FROM `access_roles` r WHERE r.`enabled`=1 ORDER BY r.`builtin_key` DESC, r.`id` ASC", 'access_roles');
+$membersRaw = roleFetchRows("SELECT m.`role_id`, IFNULL(m.`member_kind`, 'employee') AS `member_kind`, m.`employee_open_id` FROM `access_role_members` m INNER JOIN `access_roles` r ON r.`id`=m.`role_id` WHERE r.`enabled`=1 ORDER BY m.`role_id` ASC, m.`id` ASC", 'access_role_members');
+$rolePoliciesRaw = roleFetchRows("SELECT `device_id`, `subject_value` FROM `access_policies` WHERE `enabled`=1 AND `subject_type`='role' ORDER BY `device_id` ASC", 'access_policies');
 
 $employees = [];
 foreach ($employeesRaw as $employee) {
@@ -43,6 +47,23 @@ foreach ($employeesRaw as $employee) {
 	$employees[] = [
 		'value' => $employee['open_id'],
 		'title' => $employee['name'].'（'.($employee['employee_id'] ?: '无工号').$statusText.'）'
+	];
+}
+
+$guests = [];
+foreach ($guestsRaw as $guest) {
+	$statusText = ($guest['status'] ?? '') === 'true' ? '' : '，禁用';
+	$guests[] = [
+		'value' => $guest['open_id'],
+		'title' => $guest['name'].$statusText
+	];
+}
+
+$devices = [];
+foreach ($devicesRaw as $device) {
+	$devices[] = [
+		'value' => (string)$device['id'],
+		'title' => $device['name'].'（'.($device['ip'] ?: '无IP').'）'
 	];
 }
 
@@ -55,16 +76,29 @@ foreach ($membersRaw as $member) {
 	$membersByRole[$roleId][] = $member['employee_open_id'];
 }
 
+$devicesByRole = [];
+foreach ($rolePoliciesRaw as $policy) {
+	$roleId = intval($policy['subject_value']);
+	if (!isset($devicesByRole[$roleId])) {
+		$devicesByRole[$roleId] = [];
+	}
+	$devicesByRole[$roleId][] = (string)$policy['device_id'];
+}
+
 $roles = [];
 foreach ($rolesRaw as $role) {
 	$roleId = intval($role['id']);
+	$subjectKind = ($role['subject_kind'] ?? 'employee') === 'guest' ? 'guest' : 'employee';
 	$roles[] = [
 		'id' => $roleId,
 		'name' => $role['name'],
 		'description' => $role['description'],
+		'subject_kind' => $subjectKind,
 		'allow_all' => intval($role['allow_all']),
+		'builtin_key' => $role['builtin_key'] ?? '',
 		'member_count' => intval($role['member_count']),
-		'members' => $membersByRole[$roleId] ?? []
+		'members' => $membersByRole[$roleId] ?? [],
+		'device_ids' => array_values(array_unique($devicesByRole[$roleId] ?? []))
 	];
 }
 
@@ -84,8 +118,10 @@ foreach ($rolesRaw as $role) {
                             <tr>
                                 <th>ID</th>
                                 <th>角色名</th>
+								<th>对象</th>
 								<th>范围</th>
 								<th>成员数</th>
+								<th>已下发门禁</th>
 								<th>备注</th>
                                 <th>操作</th>
 							</tr>
@@ -95,12 +131,19 @@ foreach ($rolesRaw as $role) {
 								<tr>
 									<td><?php echo intval($role['id']); ?></td>
 									<td><?php echo roleH($role['name']); ?></td>
-									<td><?php echo intval($role['allow_all']) === 1 ? '全员' : '指定成员'; ?></td>
-									<td><?php echo intval($role['allow_all']) === 1 ? '动态全员' : intval($role['member_count']); ?></td>
+									<td><?php echo $role['subject_kind'] === 'guest' ? '访客' : '员工'; ?></td>
+									<td><?php echo intval($role['allow_all']) === 1 ? ($role['subject_kind'] === 'guest' ? '全体访客' : '全体员工') : '指定成员'; ?></td>
+									<td><?php echo intval($role['allow_all']) === 1 ? '动态全体' : intval($role['member_count']); ?></td>
+									<td><?php echo count($role['device_ids']); ?></td>
 									<td><?php echo roleH($role['description']); ?></td>
 									<td>
-										<button class="btn btn-default" onclick="openRoleDialog(<?php echo intval($role['id']); ?>)">编辑</button>
-										<button class="btn btn-default" onclick="deleteAccessRole(<?php echo intval($role['id']); ?>)">删除</button>
+										<?php if ($role['builtin_key'] === '') { ?>
+											<button class="btn btn-default" onclick="openRoleDialog(<?php echo intval($role['id']); ?>)">编辑</button>
+											<button class="btn btn-default" onclick="deleteAccessRole(<?php echo intval($role['id']); ?>)">删除</button>
+										<?php } else { ?>
+											<button class="btn btn-default" onclick="openRoleDeployDialog(<?php echo intval($role['id']); ?>)">下发门禁</button>
+											<span>系统内置</span>
+										<?php } ?>
 									</td>
 								</tr>
 							<?php } ?>
@@ -115,6 +158,8 @@ foreach ($rolesRaw as $role) {
 <script>
 var csrf_token = "<?php echo $_SESSION['token']; ?>";
 var employeeList = <?php echo json_encode($employees, JSON_UNESCAPED_UNICODE); ?>;
+var guestList = <?php echo json_encode($guests, JSON_UNESCAPED_UNICODE); ?>;
+var deviceList = <?php echo json_encode($devices, JSON_UNESCAPED_UNICODE); ?>;
 var roleData = <?php echo json_encode($roles, JSON_UNESCAPED_UNICODE); ?>;
 
 layui.use(['layer', 'form', 'transfer'], function(){
@@ -137,6 +182,25 @@ layui.use(['layer', 'form', 'transfer'], function(){
 		return null;
 	}
 
+	function currentSubjectKind() {
+		return $('#subject_kind').val() === 'guest' ? 'guest' : 'employee';
+	}
+
+	function renderMemberTransfer(values) {
+		var kind = currentSubjectKind();
+		$('#roleMemberTransfer').empty();
+		transfer.render({
+			elem: '#roleMemberTransfer',
+			title: [kind === 'guest' ? '可选访客' : '可选员工', '角色成员'],
+			data: kind === 'guest' ? guestList : employeeList,
+			value: values || [],
+			width: 300,
+			height: 300,
+			showSearch: true,
+			id: 'roleMembers'
+		});
+	}
+
 	function setMemberVisible() {
 		if ($('#allow_all').is(':checked')) {
 			$('#roleMemberWrap').hide();
@@ -147,34 +211,45 @@ layui.use(['layer', 'form', 'transfer'], function(){
 
 	window.openRoleDialog = function(roleId) {
 		var role = roleId ? findRole(roleId) : null;
+		if (role && role.builtin_key) {
+			layer.msg('系统内置角色不可编辑');
+			return;
+		}
 		if (!role) {
-			role = {id: 0, name: '', description: '', allow_all: 0, members: []};
+			role = {id: 0, name: '', description: '', subject_kind: 'employee', allow_all: 0, members: [], device_ids: []};
 		}
 		var html = '<div class="layui-form layui-form-pane" style="padding:16px;">'
 			+ '<div class="layui-form-item"><label class="layui-form-label">角色名</label><div class="layui-input-block"><input type="text" id="role_name" class="layui-input" value="' + escapeHtml(role.name) + '"></div></div>'
+			+ '<div class="layui-form-item"><label class="layui-form-label">对象</label><div class="layui-input-block"><select id="subject_kind"><option value="employee" ' + (role.subject_kind === 'guest' ? '' : 'selected') + '>员工</option><option value="guest" ' + (role.subject_kind === 'guest' ? 'selected' : '') + '>访客</option></select></div></div>'
 			+ '<div class="layui-form-item"><label class="layui-form-label">备注</label><div class="layui-input-block"><input type="text" id="role_description" class="layui-input" value="' + escapeHtml(role.description) + '"></div></div>'
-			+ '<div class="layui-form-item"><input type="checkbox" id="allow_all" title="全员角色" lay-skin="primary" ' + (parseInt(role.allow_all, 10) === 1 ? 'checked' : '') + '></div>'
+			+ '<div class="layui-form-item"><input type="checkbox" id="allow_all" title="全体角色" lay-skin="primary" ' + (parseInt(role.allow_all, 10) === 1 ? 'checked' : '') + '></div>'
 			+ '<div id="roleMemberWrap"><div id="roleMemberTransfer"></div></div>'
+			+ '<hr><div id="roleDeviceTransfer"></div>'
 			+ '<div style="text-align:center;margin-top:16px;"><button class="layui-btn layui-btn-normal" onclick="saveAccessRole(' + parseInt(role.id, 10) + ')">保存</button><button class="layui-btn layui-btn-primary" onclick="layui.layer.closeAll()">取消</button></div>'
 			+ '</div>';
 
 		layer.open({
 			type: 1,
 			title: role.id ? '编辑门禁角色' : '创建门禁角色',
-			area: ['760px', '620px'],
+			area: ['760px', '760px'],
 			content: html,
 			success: function() {
+				renderMemberTransfer(role.members || []);
 				transfer.render({
-					elem: '#roleMemberTransfer',
-					title: ['可选员工', '角色成员'],
-					data: employeeList,
-					value: role.members || [],
+					elem: '#roleDeviceTransfer',
+					title: ['可选门禁', '允许通行门禁'],
+					data: deviceList,
+					value: role.device_ids || [],
 					width: 300,
-					height: 340,
+					height: 220,
 					showSearch: true,
-					id: 'roleMembers'
+					id: 'roleDevices'
 				});
 				$('#allow_all').on('change', setMemberVisible);
+				$('#subject_kind').on('change', function() {
+					renderMemberTransfer([]);
+					form.render();
+				});
 				setMemberVisible();
 				form.render();
 			}
@@ -183,11 +258,15 @@ layui.use(['layer', 'form', 'transfer'], function(){
 
 	window.saveAccessRole = function(roleId) {
 		var members = [];
+		var devices = [];
 		if (!$('#allow_all').is(':checked')) {
 			transfer.getData('roleMembers').forEach(function(item) {
 				members.push(item.value);
 			});
 		}
+		transfer.getData('roleDevices').forEach(function(item) {
+			devices.push(item.value);
+		});
 		$.ajax({
 			type: 'POST',
 			url: '?action=saveAccessRole&page=panel&module=role&csrf=' + csrf_token,
@@ -195,8 +274,63 @@ layui.use(['layer', 'form', 'transfer'], function(){
 				role_id: roleId,
 				name: $('#role_name').val(),
 				description: $('#role_description').val(),
+				subject_kind: currentSubjectKind(),
 				allow_all: $('#allow_all').is(':checked') ? 'true' : 'false',
-				members: JSON.stringify(members)
+				members: JSON.stringify(members),
+				devices: JSON.stringify(devices)
+			},
+			success: function(resp) {
+				layer.msg(resp);
+				setTimeout(function(){ location.reload(); }, 600);
+			},
+			error: function(xhr) {
+				layer.msg('保存失败：' + xhr.responseText);
+			}
+		});
+	};
+
+	window.openRoleDeployDialog = function(roleId) {
+		var role = findRole(roleId);
+		if (!role) {
+			layer.msg('角色不存在');
+			return;
+		}
+		var html = '<div class="layui-form layui-form-pane" style="padding:16px;">'
+			+ '<div id="builtinRoleDeviceTransfer"></div>'
+			+ '<div style="text-align:center;margin-top:16px;"><button class="layui-btn layui-btn-normal" onclick="saveAccessRoleDevices(' + parseInt(role.id, 10) + ')">保存</button><button class="layui-btn layui-btn-primary" onclick="layui.layer.closeAll()">取消</button></div>'
+			+ '</div>';
+		layer.open({
+			type: 1,
+			title: '下发门禁 - ' + escapeHtml(role.name),
+			area: ['760px', '520px'],
+			content: html,
+			success: function() {
+				transfer.render({
+					elem: '#builtinRoleDeviceTransfer',
+					title: ['可选门禁', '允许通行门禁'],
+					data: deviceList,
+					value: role.device_ids || [],
+					width: 300,
+					height: 320,
+					showSearch: true,
+					id: 'builtinRoleDevices'
+				});
+				form.render();
+			}
+		});
+	};
+
+	window.saveAccessRoleDevices = function(roleId) {
+		var devices = [];
+		transfer.getData('builtinRoleDevices').forEach(function(item) {
+			devices.push(item.value);
+		});
+		$.ajax({
+			type: 'POST',
+			url: '?action=saveAccessRoleDevices&page=panel&module=role&csrf=' + csrf_token,
+			data: {
+				role_id: roleId,
+				devices: JSON.stringify(devices)
 			},
 			success: function(resp) {
 				layer.msg(resp);

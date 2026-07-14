@@ -69,6 +69,10 @@ class AttendanceService {
                 $reason = '访客名单权限';
                 return true;
             }
+            if (($policy['subject_type'] ?? '') === 'role' && self::guestMatchesRole($policy['subject_value'] ?? '', $guestInfo)) {
+                $reason = self::policyLabel($policy);
+                return true;
+            }
         }
 
         $reason = '没有权限';
@@ -887,6 +891,9 @@ class AttendanceService {
         if (!$role) {
             return false;
         }
+        if (($role['subject_kind'] ?? 'employee') !== 'employee') {
+            return false;
+        }
         if (intval($role['allow_all'] ?? 0) === 1) {
             return true;
         }
@@ -898,6 +905,35 @@ class AttendanceService {
 
         $member = Database::querySingleLine('access_role_members', [
             'role_id' => intval($roleId),
+            'member_kind' => 'employee',
+            'employee_open_id' => $openId
+        ]);
+        return (bool)$member;
+    }
+
+    private static function guestMatchesRole($roleId, $guestInfo)
+    {
+        $roleId = trim((string)$roleId);
+        if ($roleId === '' || !preg_match('/^[0-9]+$/', $roleId)) {
+            return false;
+        }
+
+        $role = Database::querySingleLine('access_roles', ['id' => intval($roleId), 'enabled' => 1]);
+        if (!$role || ($role['subject_kind'] ?? '') !== 'guest') {
+            return false;
+        }
+        if (intval($role['allow_all'] ?? 0) === 1) {
+            return true;
+        }
+
+        $openId = $guestInfo['open_id'] ?? '';
+        if ($openId === '') {
+            return false;
+        }
+
+        $member = Database::querySingleLine('access_role_members', [
+            'role_id' => intval($roleId),
+            'member_kind' => 'guest',
             'employee_open_id' => $openId
         ]);
         return (bool)$member;
@@ -925,9 +961,9 @@ class AttendanceService {
         }
         $json = json_decode($value, true);
         if (json_last_error() === JSON_ERROR_NONE && is_array($json)) {
-            return $json;
+            return array_values(array_filter(array_map('strval', array_filter($json, 'is_scalar')), function($item) { return $item !== ''; }));
         }
-        return array_values(array_filter(array_map('trim', explode(',', $value))));
+        return array_values(array_filter(array_map('trim', explode(',', $value)), function($item) { return $item !== ''; }));
     }
 
     private static function valueMatches($needle, $haystack)

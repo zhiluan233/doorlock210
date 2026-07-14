@@ -63,6 +63,12 @@ if(isset($_GET['updateGuestId']) && isset($_GET['updateGuestAction']) && preg_ma
 	switch($_GET['updateGuestAction']) {
 		case 'deleteGuest':
 			anim210System\Utils::checkCsrf();
+			if (!empty($userInfo['open_id'])) {
+				Database::delete("access_role_members", Array(
+					"member_kind" => "guest",
+					"employee_open_id" => $userInfo['open_id']
+				));
+			}
 			$update = Database::delete("guest", Array("id" => $_GET['updateGuestId']));
 			if($update == true) {
 				ob_clean();

@@ -506,11 +506,17 @@ class PostHandler {
 					$roleId = intval($_POST['role_id'] ?? 0);
 					$name = trim($_POST['name'] ?? '');
 					$description = trim($_POST['description'] ?? '');
+					$subjectKind = ($_POST['subject_kind'] ?? 'employee') === 'guest' ? 'guest' : 'employee';
 					$allowAll = $this->truthy($_POST['allow_all'] ?? 'false') ? 1 : 0;
 					$members = json_decode($_POST['members'] ?? '[]', true);
+					$devices = json_decode($_POST['devices'] ?? '[]', true);
 					if (!is_array($members)) {
 						Header("HTTP/1.1 400 Bad Request");
 						exit("角色成员格式错误");
+					}
+					if (!is_array($devices)) {
+						Header("HTTP/1.1 400 Bad Request");
+						exit("下发门禁格式错误");
 					}
 					if ($name === '') {
 						Header("HTTP/1.1 400 Bad Request");
@@ -520,9 +526,17 @@ class PostHandler {
 						Header("HTTP/1.1 400 Bad Request");
 						exit("角色名称过长");
 					}
-					if ($roleId > 0 && !Database::querySingleLine('access_roles', ['id' => $roleId])) {
-						Header("HTTP/1.1 404 Not Found");
-						exit("角色不存在");
+					$currentRole = null;
+					if ($roleId > 0) {
+						$currentRole = Database::querySingleLine('access_roles', ['id' => $roleId]);
+						if (!$currentRole) {
+							Header("HTTP/1.1 404 Not Found");
+							exit("角色不存在");
+						}
+						if (($currentRole['builtin_key'] ?? '') !== '') {
+							Header("HTTP/1.1 403 Forbidden");
+							exit("系统内置角色不可编辑");
+						}
 					}
 
 					$nameEsc = Database::escape($name);
@@ -536,7 +550,9 @@ class PostHandler {
 					$data = [
 						'name' => $name,
 						'description' => $description,
+						'subject_kind' => $subjectKind,
 						'allow_all' => $allowAll,
+						'builtin_key' => '',
 						'enabled' => 1,
 						'updated_at' => $now
 					];
@@ -561,21 +577,91 @@ class PostHandler {
 							if ($openId === '' || isset($seenMembers[$openId])) {
 								continue;
 							}
-							$employee = Database::querySingleLine('employee', [
+							$member = Database::querySingleLine($subjectKind === 'guest' ? 'guest' : 'employee', [
 								'open_id' => $openId
 							]);
-							if (!$employee) {
+							if (!$member) {
 								continue;
 							}
 							$seenMembers[$openId] = true;
 							Database::insert('access_role_members', [
 								'role_id' => $roleId,
+								'member_kind' => $subjectKind,
 								'employee_open_id' => $openId,
 								'created_at' => $now
 							]);
 						}
 					}
+					$roleIdEsc = Database::escape((string)$roleId);
+					Database::delete('access_policies', "DELETE FROM `access_policies` WHERE `subject_type`='role' AND `subject_value`='{$roleIdEsc}'", '', true);
+					$seenDevices = [];
+					foreach ($devices as $deviceId) {
+						$deviceId = intval($deviceId);
+						if ($deviceId <= 0 || isset($seenDevices[$deviceId])) {
+							continue;
+						}
+						if (!Database::querySingleLine('devices', ['id' => $deviceId])) {
+							continue;
+						}
+						$seenDevices[$deviceId] = true;
+						Database::insert('access_policies', [
+							'device_id' => $deviceId,
+							'subject_kind' => $subjectKind,
+							'subject_type' => 'role',
+							'subject_value' => (string)$roleId,
+							'subject_extra' => '',
+							'enabled' => 1,
+							'note' => '角色管理批量下发',
+							'created_at' => $now,
+							'updated_at' => $now
+						]);
+					}
 					exit("门禁角色已保存");
+				break;
+				case "saveAccessRoleDevices":
+					$this->requireAdminUser();
+					$roleId = intval($_POST['role_id'] ?? 0);
+					$devices = json_decode($_POST['devices'] ?? '[]', true);
+					if ($roleId <= 0) {
+						Header("HTTP/1.1 400 Bad Request");
+						exit("角色ID不能为空");
+					}
+					if (!is_array($devices)) {
+						Header("HTTP/1.1 400 Bad Request");
+						exit("下发门禁格式错误");
+					}
+					$role = Database::querySingleLine('access_roles', ['id' => $roleId, 'enabled' => 1]);
+					if (!$role) {
+						Header("HTTP/1.1 404 Not Found");
+						exit("角色不存在");
+					}
+					$now = time();
+					$subjectKind = ($role['subject_kind'] ?? 'employee') === 'guest' ? 'guest' : 'employee';
+					$roleIdEsc = Database::escape((string)$roleId);
+					Database::delete('access_policies', "DELETE FROM `access_policies` WHERE `subject_type`='role' AND `subject_value`='{$roleIdEsc}'", '', true);
+					$seenDevices = [];
+					foreach ($devices as $deviceId) {
+						$deviceId = intval($deviceId);
+						if ($deviceId <= 0 || isset($seenDevices[$deviceId])) {
+							continue;
+						}
+						if (!Database::querySingleLine('devices', ['id' => $deviceId])) {
+							continue;
+						}
+						$seenDevices[$deviceId] = true;
+						Database::insert('access_policies', [
+							'device_id' => $deviceId,
+							'subject_kind' => $subjectKind,
+							'subject_type' => 'role',
+							'subject_value' => (string)$roleId,
+							'subject_extra' => '',
+							'enabled' => 1,
+							'note' => '角色管理批量下发',
+							'created_at' => $now,
+							'updated_at' => $now
+						]);
+					}
+					exit("角色门禁下发已保存");
 				break;
 				case "deleteAccessRole":
 					$this->requireAdminUser();
@@ -589,9 +675,13 @@ class PostHandler {
 						Header("HTTP/1.1 404 Not Found");
 						exit("角色不存在");
 					}
+					if (($role['builtin_key'] ?? '') !== '') {
+						Header("HTTP/1.1 403 Forbidden");
+						exit("系统内置角色不可删除");
+					}
 					Database::delete('access_role_members', ['role_id' => $roleId]);
 					$roleIdEsc = Database::escape((string)$roleId);
-					Database::delete('access_policies', "DELETE FROM `access_policies` WHERE `subject_kind`='employee' AND `subject_type`='role' AND `subject_value`='{$roleIdEsc}'", '', true);
+					Database::delete('access_policies', "DELETE FROM `access_policies` WHERE `subject_type`='role' AND `subject_value`='{$roleIdEsc}'", '', true);
 					$result = Database::delete('access_roles', ['id' => $roleId]);
 					if ($result === true) {
 						exit("门禁角色已删除");
@@ -641,7 +731,7 @@ class PostHandler {
 							if ($type !== 'all' && $value === '') {
 								continue;
 							}
-							if (in_array($type, ['department', 'group', 'role', 'department_group'], true) && $kind !== 'employee') {
+							if (in_array($type, ['department', 'group', 'department_group'], true) && $kind !== 'employee') {
 								continue;
 							}
 							if ($type === 'department') {
@@ -661,7 +751,7 @@ class PostHandler {
 									'id' => intval($value),
 									'enabled' => 1
 								]);
-								if (!$role) {
+								if (!$role || ($role['subject_kind'] ?? 'employee') !== $kind) {
 									continue;
 								}
 							}

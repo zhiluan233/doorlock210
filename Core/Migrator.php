@@ -68,7 +68,9 @@ class Migrator {
             `id` bigint unsigned NOT NULL AUTO_INCREMENT,
             `name` varchar(100) NOT NULL,
             `description` varchar(255) NOT NULL DEFAULT '',
+            `subject_kind` varchar(20) NOT NULL DEFAULT 'employee',
             `allow_all` tinyint(1) NOT NULL DEFAULT 0,
+            `builtin_key` varchar(64) NOT NULL DEFAULT '',
             `enabled` tinyint(1) NOT NULL DEFAULT 1,
             `created_at` int unsigned NOT NULL DEFAULT 0,
             `updated_at` int unsigned NOT NULL DEFAULT 0,
@@ -80,6 +82,7 @@ class Migrator {
         self::exec("CREATE TABLE IF NOT EXISTS `access_role_members` (
             `id` bigint unsigned NOT NULL AUTO_INCREMENT,
             `role_id` bigint unsigned NOT NULL,
+            `member_kind` varchar(20) NOT NULL DEFAULT 'employee',
             `employee_open_id` varchar(128) NOT NULL,
             `created_at` int unsigned NOT NULL DEFAULT 0,
             PRIMARY KEY (`id`),
@@ -178,6 +181,10 @@ class Migrator {
 
         self::addColumn('guest', 'card_id', "varchar(64) NOT NULL DEFAULT ''", $errors);
 
+        self::addColumn('access_roles', 'subject_kind', "varchar(20) NOT NULL DEFAULT 'employee'", $errors);
+        self::addColumn('access_roles', 'builtin_key', "varchar(64) NOT NULL DEFAULT ''", $errors);
+        self::addColumn('access_role_members', 'member_kind', "varchar(20) NOT NULL DEFAULT 'employee'", $errors);
+
         self::addColumn('devices', 'allowedEmployee', "longtext", $errors);
         self::addColumn('devices', 'allowedGuest', "longtext", $errors);
         self::addColumn('devices', 'dtype', "varchar(32) NOT NULL DEFAULT 'card_http'", $errors);
@@ -199,9 +206,13 @@ class Migrator {
         self::addIndex('devices', 'idx_devices_did', ['did'], $errors);
         self::addIndex('devices', 'idx_devices_ip', ['ip'], $errors);
         self::addIndex('user', 'idx_user_open_id', ['open_id'], $errors);
+        self::addIndex('access_roles', 'idx_access_role_subject', ['subject_kind'], $errors);
+        self::addIndex('access_roles', 'idx_access_role_builtin', ['builtin_key'], $errors);
+        self::addIndex('access_role_members', 'idx_access_role_member_kind', ['member_kind'], $errors);
 
         self::seedDefaults();
         self::normalizeRuntimeSettings($errors);
+        self::seedDefaultAccessRoles($errors);
         self::cleanupCredentialSettings($errors);
         self::ensureFeishuKeyFile($_config['feishu']['keyConfigFile'] ?? ROOT . '/feishu_key.json');
         Settings::set('schema_version', self::SCHEMA_VERSION);
@@ -242,12 +253,42 @@ class Migrator {
         self::exec("UPDATE `employee` SET `card_id`=LPAD(`card_id`, 10, '0') WHERE `card_id`<>'' AND `card_id` REGEXP '^[0-9]+$' AND CHAR_LENGTH(`card_id`)<10", $errors);
         self::exec("UPDATE `guest` SET `card_id`=LPAD(`card_id`, 10, '0') WHERE `card_id`<>'' AND `card_id` REGEXP '^[0-9]+$' AND CHAR_LENGTH(`card_id`)<10", $errors);
         self::exec("UPDATE `logs` SET `cardid`=LPAD(`cardid`, 10, '0') WHERE `cardid`<>'' AND `cardid` REGEXP '^[0-9]+$' AND CHAR_LENGTH(`cardid`)<10", $errors);
+        self::exec("UPDATE `access_roles` SET `subject_kind`='employee' WHERE `subject_kind`=''", $errors);
+        self::exec("UPDATE `access_role_members` SET `member_kind`='employee' WHERE `member_kind`=''", $errors);
         $lastIncrementalEvent = strtolower(Settings::get('feishu_contact_incremental_last_event', ''));
         if (preg_match('/^(attendance|approval|calendar|im|message|task|doc|drive|meeting|vc)\./', $lastIncrementalEvent)) {
             Settings::set('feishu_contact_incremental_last_at', '0');
             Settings::set('feishu_contact_incremental_last_event', '');
         }
         Settings::invalidate();
+    }
+
+    private static function seedDefaultAccessRoles(&$errors)
+    {
+        $now = time();
+        $roles = [
+            [
+                'name' => '全体员工角色',
+                'description' => '系统内置角色，动态包含所有启用员工',
+                'subject_kind' => 'employee',
+                'builtin_key' => 'all_employee'
+            ],
+            [
+                'name' => '全体访客角色',
+                'description' => '系统内置角色，动态包含所有启用访客',
+                'subject_kind' => 'guest',
+                'builtin_key' => 'all_guest'
+            ]
+        ];
+
+        foreach ($roles as $role) {
+            $name = Database::escape($role['name']);
+            $description = Database::escape($role['description']);
+            $subjectKind = Database::escape($role['subject_kind']);
+            $builtinKey = Database::escape($role['builtin_key']);
+            self::exec("INSERT INTO `access_roles` (`name`, `description`, `subject_kind`, `allow_all`, `builtin_key`, `enabled`, `created_at`, `updated_at`) SELECT '{$name}', '{$description}', '{$subjectKind}', 1, '{$builtinKey}', 1, {$now}, {$now} WHERE NOT EXISTS (SELECT 1 FROM `access_roles` WHERE `builtin_key`='{$builtinKey}' OR `name`='{$name}')", $errors);
+            self::exec("UPDATE `access_roles` SET `description`='{$description}', `subject_kind`='{$subjectKind}', `allow_all`=1, `builtin_key`='{$builtinKey}', `enabled`=1, `updated_at`={$now} WHERE `builtin_key`='{$builtinKey}' OR `name`='{$name}'", $errors);
+        }
     }
 
     private static function cleanupCredentialSettings(&$errors)

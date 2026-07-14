@@ -29,6 +29,21 @@ function fetchAssocRows($sql, $table = 'devices') {
 	return $rows;
 }
 
+function dcListValues($value) {
+	if (is_array($value)) {
+		return $value;
+	}
+	$value = trim((string)$value);
+	if ($value === '') {
+		return [];
+	}
+	$json = json_decode($value, true);
+	if (json_last_error() === JSON_ERROR_NONE && is_array($json)) {
+		return array_values(array_filter(array_map('strval', array_filter($json, 'is_scalar')), function($item) { return $item !== ''; }));
+	}
+	return array_values(array_filter(array_map('trim', explode(',', $value)), function($item) { return $item !== ''; }));
+}
+
 $devices = fetchAssocRows('SELECT * FROM `devices` ORDER BY `id` ASC', 'devices');
 $employeesRaw = fetchAssocRows("SELECT * FROM `employee` WHERE `status`='true' ORDER BY `name` ASC", 'employee');
 $guestsRaw = fetchAssocRows("SELECT * FROM `guest` WHERE `status`='true' ORDER BY `name` ASC", 'guest');
@@ -40,28 +55,57 @@ $employees = [];
 $groups = [];
 foreach ($employeesRaw as $employee) {
 	$employees[] = ['value' => $employee['open_id'], 'title' => $employee['name'].'（'.($employee['employee_id'] ?: '无工号').'）'];
-	$groupItems = json_decode($employee['groups'] ?? '', true);
-	if (!is_array($groupItems)) {
-		$groupItems = array_filter(array_map('trim', explode(',', $employee['groups'] ?? '')));
-	}
+	$groupItems = dcListValues($employee['groups'] ?? '');
 	foreach ($groupItems as $item) {
 		if ($item !== '') { $groups[$item] = $item; }
 	}
 }
 
 $departments = [];
+$departmentNames = [];
 foreach ($departmentsRaw as $department) {
 	$departmentId = $department['department_id'] ?? '';
 	if ($departmentId === '') { continue; }
 	$title = ($department['name'] ?: $departmentId).'（'.$departmentId.'）';
+	$departmentNames[$departmentId] = $department['name'] ?: $departmentId;
 	$departments[] = ['value' => $departmentId, 'title' => $title];
+}
+
+$groupList = [];
+foreach ($groups as $group) {
+	$groupList[] = ['value' => $group, 'title' => $group];
+}
+
+$departmentGroups = [];
+foreach ($employeesRaw as $employee) {
+	$groupItems = dcListValues($employee['groups'] ?? '');
+	if (count($groupItems) === 0) {
+		continue;
+	}
+	$departmentIds = dcListValues($employee['department_ids'] ?? '');
+	if (!empty($employee['department_id'])) {
+		$departmentIds[] = $employee['department_id'];
+	}
+	$departmentIds = array_values(array_unique(array_filter($departmentIds)));
+	foreach ($departmentIds as $departmentId) {
+		foreach ($groupItems as $group) {
+			$key = $departmentId.'|'.$group;
+			$departmentName = $departmentNames[$departmentId] ?? $departmentId;
+			$departmentGroups[$key] = $departmentName.' / '.$group;
+		}
+	}
+}
+$departmentGroupList = [];
+foreach ($departmentGroups as $value => $title) {
+	$departmentGroupList[] = ['value' => $value, 'title' => $title];
 }
 
 $roles = [];
 foreach ($rolesRaw as $role) {
 	$roleId = (string)$role['id'];
-	$scope = intval($role['allow_all'] ?? 0) === 1 ? '全员' : (intval($role['member_count'] ?? 0).'人');
-	$roles[] = ['value' => $roleId, 'title' => $role['name'].'（'.$scope.'）'];
+	$subjectKind = ($role['subject_kind'] ?? 'employee') === 'guest' ? 'guest' : 'employee';
+	$scope = intval($role['allow_all'] ?? 0) === 1 ? ($subjectKind === 'guest' ? '全体访客' : '全体员工') : (intval($role['member_count'] ?? 0).'人');
+	$roles[] = ['value' => $roleId, 'title' => $role['name'].'（'.($subjectKind === 'guest' ? '访客，' : '员工，').$scope.'）', 'subject_kind' => $subjectKind];
 }
 
 $guests = [];
@@ -133,6 +177,31 @@ foreach ($policyMap as $deviceId => $policy) {
 	}
 }
 
+$knownGroups = [];
+foreach ($groupList as $item) {
+	$knownGroups[$item['value']] = true;
+}
+$knownDepartmentGroups = [];
+foreach ($departmentGroupList as $item) {
+	$knownDepartmentGroups[$item['value']] = true;
+}
+foreach ($policyMap as $policy) {
+	foreach ($policy['groups'] as $group) {
+		if ($group !== '' && !isset($knownGroups[$group])) {
+			$groupList[] = ['value' => $group, 'title' => $group];
+			$knownGroups[$group] = true;
+		}
+	}
+	foreach ($policy['department_groups'] as $departmentGroup) {
+		if ($departmentGroup !== '' && !isset($knownDepartmentGroups[$departmentGroup])) {
+			$parts = explode('|', $departmentGroup, 2);
+			$title = count($parts) === 2 ? (($departmentNames[$parts[0]] ?? $parts[0]).' / '.$parts[1]) : $departmentGroup;
+			$departmentGroupList[] = ['value' => $departmentGroup, 'title' => $title];
+			$knownDepartmentGroups[$departmentGroup] = true;
+		}
+	}
+}
+
 ?>
 <div class="page-title">
 	<h3 class="breadcrumb-header">您好, <?php echo $rs['username'] ?>！</h3>
@@ -180,6 +249,8 @@ var csrf_token = "<?php echo $_SESSION['token']; ?>";
 var employeeList = <?php echo json_encode($employees, JSON_UNESCAPED_UNICODE); ?>;
 var guestList = <?php echo json_encode($guests, JSON_UNESCAPED_UNICODE); ?>;
 var departmentList = <?php echo json_encode($departments, JSON_UNESCAPED_UNICODE); ?>;
+var groupList = <?php echo json_encode($groupList, JSON_UNESCAPED_UNICODE); ?>;
+var departmentGroupList = <?php echo json_encode($departmentGroupList, JSON_UNESCAPED_UNICODE); ?>;
 var roleList = <?php echo json_encode($roles, JSON_UNESCAPED_UNICODE); ?>;
 var policyMap = <?php echo json_encode($policyMap, JSON_UNESCAPED_UNICODE); ?>;
 var deviceMap = <?php echo json_encode(array_column($devices, 'name', 'id'), JSON_UNESCAPED_UNICODE); ?>;
@@ -211,9 +282,9 @@ layui.use(['layer', 'util', 'form', 'transfer'], function(){
 			+ '<div id="guestTransfer"></div>'
 			+ '<hr>'
 			+ '<div id="departmentTransfer"></div>'
-			+ '<div class="layui-form-item"><label class="layui-form-label">组</label><div class="layui-input-block"><textarea id="groups" class="layui-textarea" placeholder="每行一个组名">' + escapeHtml((policy.groups || []).join("\n")) + '</textarea></div></div>'
+			+ '<div id="groupTransfer"></div>'
 			+ '<div id="roleTransfer"></div>'
-			+ '<div class="layui-form-item"><label class="layui-form-label">部门+组</label><div class="layui-input-block"><textarea id="department_groups" class="layui-textarea" placeholder="每行一个：部门|组">' + escapeHtml((policy.department_groups || []).join("\n")) + '</textarea></div></div>'
+			+ '<div id="departmentGroupTransfer"></div>'
 			+ '<div style="text-align:center;"><button class="layui-btn layui-btn-normal" onclick="savePolicy(' + deviceId + ')">保存</button><button class="layui-btn layui-btn-primary" onclick="layui.layer.closeAll()">取消</button></div>'
 			+ '</div>';
 
@@ -254,6 +325,16 @@ layui.use(['layer', 'util', 'form', 'transfer'], function(){
 					id: 'departmentPolicy'
 				});
 				transfer.render({
+					elem: '#groupTransfer',
+					title: ['可选组', '已允许组'],
+					data: groupList,
+					value: policy.groups || [],
+					width: 300,
+					height: 220,
+					showSearch: true,
+					id: 'groupPolicy'
+				});
+				transfer.render({
 					elem: '#roleTransfer',
 					title: ['可选角色', '已允许角色'],
 					data: roleList,
@@ -262,6 +343,16 @@ layui.use(['layer', 'util', 'form', 'transfer'], function(){
 					height: 220,
 					showSearch: true,
 					id: 'rolePolicy'
+				});
+				transfer.render({
+					elem: '#departmentGroupTransfer',
+					title: ['可选部门+组', '已允许部门+组'],
+					data: departmentGroupList,
+					value: policy.department_groups || [],
+					width: 300,
+					height: 220,
+					showSearch: true,
+					id: 'departmentGroupPolicy'
 				});
 				form.render();
 			}
@@ -285,16 +376,16 @@ layui.use(['layer', 'util', 'form', 'transfer'], function(){
 		transfer.getData('departmentPolicy').forEach(function(item) {
 			policies.push({subject_kind: 'employee', subject_type: 'department', subject_value: item.value, title: item.title});
 		});
-		lines('#groups').forEach(function(value) {
-			policies.push({subject_kind: 'employee', subject_type: 'group', subject_value: value});
+		transfer.getData('groupPolicy').forEach(function(item) {
+			policies.push({subject_kind: 'employee', subject_type: 'group', subject_value: item.value, title: item.title});
 		});
 		transfer.getData('rolePolicy').forEach(function(item) {
-			policies.push({subject_kind: 'employee', subject_type: 'role', subject_value: item.value, title: item.title});
+			policies.push({subject_kind: item.subject_kind || 'employee', subject_type: 'role', subject_value: item.value, title: item.title});
 		});
-		lines('#department_groups').forEach(function(value) {
-			var parts = value.split('|');
+		transfer.getData('departmentGroupPolicy').forEach(function(item) {
+			var parts = String(item.value || '').split('|');
 			if (parts.length >= 2) {
-				policies.push({subject_kind: 'employee', subject_type: 'department_group', subject_value: parts[0].trim(), subject_extra: parts.slice(1).join('|').trim()});
+				policies.push({subject_kind: 'employee', subject_type: 'department_group', subject_value: parts[0].trim(), subject_extra: parts.slice(1).join('|').trim(), title: item.title});
 			}
 		});
 		$.ajax({
@@ -311,13 +402,5 @@ layui.use(['layer', 'util', 'form', 'transfer'], function(){
 		});
 	};
 
-	function lines(selector) {
-		return ($(selector).val() || '').split(/\n|,/).map(function(item) { return item.trim(); }).filter(Boolean);
-	}
-	function escapeHtml(text) {
-		return String(text || '').replace(/[&<>"']/g, function(s) {
-			return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[s];
-		});
-	}
 });
 </script>

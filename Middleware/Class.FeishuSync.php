@@ -350,7 +350,10 @@ class FeishuContactSync {
                 'subject_type' => 'employee',
                 'subject_value' => $openId
             ]);
-            Database::delete('access_role_members', ['employee_open_id' => $openId]);
+            Database::delete('access_role_members', [
+                'member_kind' => 'employee',
+                'employee_open_id' => $openId
+            ]);
             self::removeEmployeeFromLegacyDeviceLists($openId);
         }
         self::deleteLinkedPanelUsers($openId, $employeeId);
