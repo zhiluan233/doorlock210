@@ -16,7 +16,8 @@ global $_config;
 $rawUid = openfeishuNormalizeUid($_GET['cardid'] ?? '');
 $cardId = $rawUid !== '' ? AttendanceService::uidToWiegand34Card($rawUid) : '';
 $targetPath = $rawUid !== '' ? '/?page=badgecard&cardid=' . rawurlencode($rawUid) : '/?page=badgecard';
-$appPath = $rawUid !== '' ? '/badgecard/' . rawurlencode($rawUid) : '/badgecard';
+$entryPath = $rawUid !== '' ? '/?page=openfeishu&cardid=' . rawurlencode($rawUid) : '/?page=openfeishu';
+$entryUrl = openfeishuAbsoluteUrl($entryPath);
 $targetUrl = openfeishuAbsoluteUrl($targetPath);
 
 if ($rawUid !== '') {
@@ -31,8 +32,8 @@ if (openfeishuIsFeishuClient() && $rawUid !== '') {
 }
 
 $appId = Settings::get('feishu_app_id', '');
-$appLink = $rawUid !== '' ? openfeishuBuildAppLink($targetPath, $targetUrl, $appPath, $rawUid, $cardId, $appId) : '';
-$canOpenApp = $appLink !== '' && $appId !== '';
+$appLink = $rawUid !== '' ? openfeishuBuildAppLink($targetPath, $targetUrl, $entryPath, $entryUrl, $rawUid, $cardId, $appId) : '';
+$canOpenApp = $appLink !== '';
 
 Header('Content-Type: text/html; charset=utf-8');
 ?>
@@ -140,7 +141,7 @@ Header('Content-Type: text/html; charset=utf-8');
                 <p>NDEF 链接缺少有效的卡片 UID。</p>
             <?php } else { ?>
                 <h1><?php echo $canOpenApp ? '正在打开飞书门禁' : '需要配置飞书应用链接'; ?></h1>
-                <p><?php echo $canOpenApp ? '请稍候，系统正在尝试拉起飞书并进入工牌查询页。' : '请在 config.php 中配置 feishu.appId 和 feishu.badgeLookup.appLinkTemplate。'; ?></p>
+                <p><?php echo $canOpenApp ? '请稍候，系统正在尝试拉起飞书并进入工牌查询页。' : '请在 config.php 中配置 feishu.badgeLookup.appLinkTemplate。'; ?></p>
                 <div class="meta">
                     UID：<?php echo openfeishuH($rawUid); ?><br>
                     WG34：<?php echo $cardId !== '' ? openfeishuH($cardId) : '无法转换'; ?>
@@ -179,20 +180,24 @@ function openfeishuNormalizeUid($value)
     return AttendanceService::normalizeUidValue($value);
 }
 
-function openfeishuBuildAppLink($targetPath, $targetUrl, $appPath, $rawUid, $cardId, $appId)
+function openfeishuBuildAppLink($targetPath, $targetUrl, $entryPath, $entryUrl, $rawUid, $cardId, $appId)
 {
     global $_config;
 
     $template = $_config['feishu']['badgeLookup']['appLinkTemplate'] ?? '';
-    if ($template === '') {
-        $template = 'https://applink.feishu.cn/client/web_app/open?appId={appId}&path={pathRaw}';
+    if ($template === '' || openfeishuIsUnsafeWebAppPathTemplate($template)) {
+        $template = 'https://applink.feishu.cn/client/web_url/open?url={entryUrl}';
     }
 
     $replacements = [
         '{appId}' => rawurlencode($appId),
-        '{path}' => $appPath,
-        '{pathRaw}' => $appPath,
-        '{pathEncoded}' => rawurlencode($appPath),
+        '{path}' => $targetPath,
+        '{pathRaw}' => $targetPath,
+        '{pathEncoded}' => rawurlencode($targetPath),
+        '{entryPath}' => rawurlencode($entryPath),
+        '{entryPathRaw}' => $entryPath,
+        '{entryUrl}' => rawurlencode($entryUrl),
+        '{entryUrlRaw}' => $entryUrl,
         '{browserPath}' => rawurlencode($targetPath),
         '{browserPathRaw}' => $targetPath,
         '{url}' => rawurlencode($targetUrl),
@@ -202,6 +207,18 @@ function openfeishuBuildAppLink($targetPath, $targetUrl, $appPath, $rawUid, $car
     ];
 
     return strtr($template, $replacements);
+}
+
+function openfeishuIsUnsafeWebAppPathTemplate($template)
+{
+    $template = trim((string)$template);
+    if ($template === '') {
+        return false;
+    }
+    if (stripos($template, 'applink.feishu.cn/client/web_app/open') === false) {
+        return false;
+    }
+    return preg_match('/[?&]path=\{(?:path|pathRaw|pathEncoded|browserPath|browserPathRaw)\}/i', $template) === 1;
 }
 
 function openfeishuAbsoluteUrl($path)

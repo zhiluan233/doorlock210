@@ -1,4 +1,0 @@
-<IfModule mod_rewrite.c>
-    RewriteEngine On
-    RewriteRule ^(openfeishu|badgecard)/([0-9A-Fa-f]{8,32}|[0-9]{10})/?$ index.php?page=$1&cardid=$2 [L,QSA]
-</IfModule>

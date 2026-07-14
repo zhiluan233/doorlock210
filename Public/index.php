@@ -19,8 +19,6 @@ include(ROOT . "/Core/Settings.php");
 include(ROOT . "/Core/Migrator.php");
 include(ROOT . "/Core/UserCheck.php");
 
-doorlockNormalizeMobileBadgeRoute();
-
 /*
 
 // 获取客户端IP地址
@@ -65,40 +63,6 @@ if (!$is_allowed && !$is_public_callback && !$is_public_page) {
 }
 
 */
-
-function doorlockNormalizeMobileBadgeRoute()
-{
-    $uri = $_SERVER['REQUEST_URI'] ?? '';
-    if ($uri === '') {
-        return;
-    }
-    $path = parse_url($uri, PHP_URL_PATH);
-    if (!is_string($path) || $path === '') {
-        return;
-    }
-
-    $decodedPath = rawurldecode($path);
-    $decodedPath = preg_replace('#/+#', '/', $decodedPath);
-    if (preg_match('#^/(openfeishu|badgecard)/([0-9A-Fa-f]{8,32}|[0-9]{10})/?$#', $decodedPath, $matches)) {
-        $_GET['page'] = $matches[1];
-        $_GET['cardid'] = strtoupper($matches[2]);
-        $_REQUEST['page'] = $_GET['page'];
-        $_REQUEST['cardid'] = $_GET['cardid'];
-        return;
-    }
-
-    if (preg_match('#^/\?(.+)$#', $decodedPath, $matches)) {
-        parse_str($matches[1], $params);
-        if (in_array($params['page'] ?? '', ['openfeishu', 'badgecard'], true)) {
-            $_GET['page'] = $params['page'];
-            $_REQUEST['page'] = $params['page'];
-            if (isset($params['cardid'])) {
-                $_GET['cardid'] = (string)$params['cardid'];
-                $_REQUEST['cardid'] = (string)$params['cardid'];
-            }
-        }
-    }
-}
 
 //中间件
 //include(ROOT . '/Middleware/Class.Alipay.php');
