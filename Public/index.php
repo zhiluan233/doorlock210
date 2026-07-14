@@ -49,6 +49,23 @@ function ip_in_range($ip, $range) {
     return (($ip_decimal & $netmask_decimal) == ($range_decimal & $netmask_decimal));
 }
 
+// 检查客户端IP是否在白名单中
+$is_allowed = false;
+foreach ($whitelist as $range) {
+    if (ip_in_range($client_ip, $range)) {
+        $is_allowed = true;
+        break;
+    }
+}
+
+// 如果不在白名单中，返回403
+if (!$is_allowed && !$is_public_callback && !$is_public_page) {
+    header('HTTP/1.1 403 Forbidden');
+    exit('内网系统，不支持公网访问！');
+}
+
+*/
+
 function doorlockNormalizeMobileBadgeRoute()
 {
     $uri = $_SERVER['REQUEST_URI'] ?? '';
@@ -82,23 +99,6 @@ function doorlockNormalizeMobileBadgeRoute()
         }
     }
 }
-
-// 检查客户端IP是否在白名单中
-$is_allowed = false;
-foreach ($whitelist as $range) {
-    if (ip_in_range($client_ip, $range)) {
-        $is_allowed = true;
-        break;
-    }
-}
-
-// 如果不在白名单中，返回403
-if (!$is_allowed && !$is_public_callback && !$is_public_page) {
-    header('HTTP/1.1 403 Forbidden');
-    exit('内网系统，不支持公网访问！');
-}
-
-*/
 
 //中间件
 //include(ROOT . '/Middleware/Class.Alipay.php');
