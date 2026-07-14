@@ -955,6 +955,131 @@ function submitcardLatestSyncJobText($job) {
 		return bytes;
 	}
 
+	function binaryValueToBytes(value) {
+		if (!value) {
+			return [];
+		}
+		if (typeof ArrayBuffer !== 'undefined' && value instanceof ArrayBuffer) {
+			return Array.prototype.slice.call(new Uint8Array(value));
+		}
+		if (typeof ArrayBuffer !== 'undefined' && ArrayBuffer.isView && ArrayBuffer.isView(value)) {
+			return Array.prototype.slice.call(new Uint8Array(value.buffer, value.byteOffset, value.byteLength));
+		}
+		if (Array.isArray(value)) {
+			return normalizeBytes(value);
+		}
+		if (typeof value === 'object') {
+			if (typeof value.base64 === 'string') {
+				return base64ToBytes(value.base64);
+			}
+			if (typeof value.value !== 'undefined') {
+				return binaryValueToBytes(value.value);
+			}
+			if (typeof value.data !== 'undefined') {
+				return binaryValueToBytes(value.data);
+			}
+		}
+		return [];
+	}
+
+	function bytesToUtf8Text(bytes) {
+		bytes = normalizeBytes(bytes);
+		if (!bytes.length) {
+			return '';
+		}
+		try {
+			if (typeof TextDecoder !== 'undefined') {
+				return new TextDecoder('utf-8').decode(new Uint8Array(bytes)).replace(/\u0000/g, '').trim();
+			}
+		} catch (e) {}
+		var encoded = '';
+		for (var i = 0; i < bytes.length; i++) {
+			encoded += '%' + ('0' + bytes[i].toString(16)).slice(-2);
+		}
+		try {
+			return decodeURIComponent(encoded).replace(/\u0000/g, '').trim();
+		} catch (e) {}
+		var text = '';
+		for (var j = 0; j < bytes.length; j++) {
+			if (bytes[j] >= 32 && bytes[j] <= 126) {
+				text += String.fromCharCode(bytes[j]);
+			}
+		}
+		return text.trim();
+	}
+
+	function pushNdefTextVariants(bytes, texts) {
+		bytes = normalizeBytes(bytes);
+		if (!bytes.length) {
+			return;
+		}
+		var plain = bytesToUtf8Text(bytes);
+		if (plain !== '') {
+			texts.push(plain);
+		}
+		if (bytes.length > 2) {
+			var langLength = bytes[0] & 63;
+			if (langLength > 0 && (langLength + 1) < bytes.length) {
+				var textRecord = bytesToUtf8Text(bytes.slice(langLength + 1));
+				if (textRecord !== '') {
+					texts.push(textRecord);
+				}
+			}
+			var uriRecord = bytesToUtf8Text(bytes.slice(1));
+			if (uriRecord !== '') {
+				texts.push(uriRecord);
+			}
+		}
+	}
+
+	function collectNdefTextCandidates(payload, texts, depth) {
+		if (!payload || depth > 5) {
+			return;
+		}
+		if (typeof payload === 'string') {
+			texts.push(payload);
+			pushNdefTextVariants(base64ToBytes(payload), texts);
+			return;
+		}
+		var bytes = binaryValueToBytes(payload);
+		if (bytes.length) {
+			pushNdefTextVariants(bytes, texts);
+		}
+		if (typeof payload !== 'object') {
+			return;
+		}
+		if (Array.isArray(payload)) {
+			for (var a = 0; a < payload.length; a++) {
+				collectNdefTextCandidates(payload[a], texts, depth + 1);
+			}
+			return;
+		}
+		var textKeys = ['text', 'uri', 'cardId', 'card_id', 'cardNo', 'card_no', 'cardNumber', 'card_number', 'cardnum', 'uid'];
+		for (var t = 0; t < textKeys.length; t++) {
+			if (typeof payload[textKeys[t]] !== 'undefined') {
+				collectNdefTextCandidates(payload[textKeys[t]], texts, depth + 1);
+			}
+		}
+		var nestedKeys = ['records', 'messages', 'ndefMessage', 'message', 'payload', 'data', 'value', 'result', 'detail'];
+		for (var n = 0; n < nestedKeys.length; n++) {
+			if (typeof payload[nestedKeys[n]] !== 'undefined') {
+				collectNdefTextCandidates(payload[nestedKeys[n]], texts, depth + 1);
+			}
+		}
+	}
+
+	function extractCardFromNdefMessages(payload) {
+		var texts = [];
+		collectNdefTextCandidates(payload, texts, 0);
+		for (var i = 0; i < texts.length; i++) {
+			var card = normalizeNfcCandidate(texts[i]);
+			if (card !== '' && /^[0-9]{10}$/.test(card)) {
+				return card;
+			}
+		}
+		return '';
+	}
+
 	function uidBytesToWiegand34Card(bytes) {
 		bytes = normalizeBytes(bytes);
 		if (!bytes.length) {
@@ -1169,7 +1294,7 @@ function submitcardLatestSyncJobText($job) {
 			try {
 				return {
 					kind: 'sdk',
-					label: 'adapter.getNdef().connect',
+					label: 'adapter.getNdef().connect/readNdefMessage',
 					reader: adapter.getNdef()
 				};
 			} catch (e) {
@@ -1216,36 +1341,62 @@ function submitcardLatestSyncJobText($job) {
 
 			var ndefPath = ndefInfo.label || ndefInfo.kind || 'NDEF';
 			if (typeof onStatus === 'function') {
-				onStatus('iOS NDEF模式：正在调用 ' + ndefPath);
+				onStatus('iOS NDEF直接模式：正在调用 ' + ndefPath);
 			}
+
+			function resolveAfterRead(card, path, message) {
+				closeNdefQuietly(ndefInfo.reader);
+				resolve({
+					card: card || '',
+					path: path || ndefPath,
+					message: card ? '' : message
+				});
+			}
+
+			function readNdefMessage(connectResult) {
+				var connectCard = extractCardFromNfcPayload(connectResult);
+				if (connectCard !== '') {
+					resolveAfterRead(connectCard, ndefPath, '');
+					return;
+				}
+				if (!ndefInfo.reader || typeof ndefInfo.reader.readNdefMessage !== 'function') {
+					resolveAfterRead('', ndefPath, 'NDEF 连接成功，但当前飞书 SDK 未暴露 readNdefMessage');
+					return;
+				}
+				if (typeof onStatus === 'function') {
+					onStatus('iOS NDEF直接模式：NDEF 已连接，正在读取 NDEF message');
+				}
+				try {
+					ndefInfo.reader.readNdefMessage({
+						success: function(res) {
+							var card = extractCardFromNdefMessages(res);
+							var discoveredCard = extractCardFromNfcPayload(payload);
+							var message = 'NDEF message 读取成功，但内容中没有可识别的 UID、16进制 UID 或10位工牌号';
+							if (discoveredCard) {
+								message += '；onDiscovered 诊断回调里有 UID，但当前 iOS NDEF 直接模式未使用该回调值';
+							}
+							resolveAfterRead(card, ndefPath + ' -> readNdefMessage', message);
+						},
+						fail: function(error) {
+							resolveAfterRead('', ndefPath + ' -> readNdefMessage', 'NDEF message 读取失败：' + compactErrorMessage(error));
+						}
+					});
+				} catch (e) {
+					resolveAfterRead('', ndefPath + ' -> readNdefMessage', 'NDEF message 读取异常：' + compactErrorMessage(e));
+				}
+			}
+
 			try {
 				ndefInfo.reader.connect({
 					success: function(res) {
-						var card = extractCardFromNfcPayload(res);
-						var discoveredCard = extractCardFromNfcPayload(payload);
-						closeNdefQuietly(ndefInfo.reader);
-						resolve({
-							card: card,
-							path: ndefPath,
-							message: card ? '' : (discoveredCard ? 'NDEF 连接成功，但 NDEF 返回未包含 UID；onDiscovered 回调里有 UID，当前纯 NDEF 测试模式未使用该 UID' : 'NDEF 连接成功，但 NDEF 返回未包含 UID')
-						});
+						readNdefMessage(res);
 					},
 					fail: function(error) {
-						closeNdefQuietly(ndefInfo.reader);
-						resolve({
-							card: '',
-							path: ndefPath,
-							message: 'NDEF 连接失败：' + compactErrorMessage(error)
-						});
+						resolveAfterRead('', ndefPath, 'NDEF 连接失败：' + compactErrorMessage(error));
 					}
 				});
 			} catch (e) {
-				closeNdefQuietly(ndefInfo.reader);
-				resolve({
-					card: '',
-					path: ndefPath,
-					message: 'NDEF 读取异常：' + compactErrorMessage(e)
-				});
+				resolveAfterRead('', ndefPath, 'NDEF 读取异常：' + compactErrorMessage(e));
 			}
 		});
 	}
@@ -1358,23 +1509,35 @@ function submitcardLatestSyncJobText($job) {
 					}, 80);
 				}
 
+				var iosDiscoveredPayload = null;
+				var iosNdefStarted = false;
+				function startIosDirectNdef(reason) {
+					if (!isIosClient() || settled || iosNdefStarted) {
+						return;
+					}
+					iosNdefStarted = true;
+					showNfcRuntimeStatus($input, adapter, 'iOS NDEF直接模式：' + reason + '，不等待 onDiscovered，正在连接 NDEF');
+					readCardByNdef(adapter, null, function(message) {
+						showNfcRuntimeStatus($input, adapter, message);
+					}).then(function(result) {
+						if (settled) {
+							return;
+						}
+						if (result.card !== '') {
+							submitNfcCard(result.card);
+							return;
+						}
+						var diagnostic = iosDiscoveredPayload ? '；诊断回调' + nfcPayloadSummary(iosDiscoveredPayload) : '';
+						var failReason = result.message ? '；' + result.message : '';
+						var path = result.path ? '；路径：' + result.path : '';
+						finish(false, 'iOS NDEF直接模式未获得可用 UID' + diagnostic + path + failReason + '，已切换手动输入');
+					});
+				}
+
 				session.listener = function(payload) {
 					if (isIosClient()) {
-						showNfcRuntimeStatus($input, adapter, 'iOS NDEF模式：已收到 onDiscovered 回调' + nfcPayloadSummary(payload) + '，准备连接 NDEF');
-						readCardByNdef(adapter, payload, function(message) {
-							showNfcRuntimeStatus($input, adapter, message);
-						}).then(function(result) {
-							if (settled) {
-								return;
-							}
-							if (result.card !== '') {
-								submitNfcCard(result.card);
-								return;
-							}
-							var reason = result.message ? '；' + result.message : '';
-							var path = result.path ? '；路径：' + result.path : '';
-							finish(false, 'iOS NDEF模式未获得可用 UID' + nfcPayloadSummary(payload) + path + reason + '，已切换手动输入');
-						});
+						iosDiscoveredPayload = payload;
+						showNfcRuntimeStatus($input, adapter, 'iOS NDEF直接模式：收到 onDiscovered 诊断回调' + nfcPayloadSummary(payload) + '，当前流程继续等待 NDEF message 读取结果');
 						return;
 					}
 					var card = extractCardFromNfcPayload(payload);
@@ -1389,7 +1552,11 @@ function submitcardLatestSyncJobText($job) {
 					adapter.onDiscovered(session.listener);
 					adapter.startDiscovery({
 						success: function() {
-							showNfcRuntimeStatus($input, adapter, isIosClient() ? 'iOS NDEF模式：NFC 已启动，等待 onDiscovered 回调后连接 NDEF' : 'NFC 已启动，请将工牌贴近手机背部感应区');
+							if (isIosClient()) {
+								startIosDirectNdef('NFC 已启动');
+								return;
+							}
+							showNfcRuntimeStatus($input, adapter, 'NFC 已启动，请将工牌贴近手机背部感应区');
 						},
 						fail: function(error) {
 							finish(false, feishuNfcErrorMessage(error));
@@ -1400,7 +1567,7 @@ function submitcardLatestSyncJobText($job) {
 				}
 
 				session.timeout = setTimeout(function() {
-					finish(false, isIosClient() ? 'iOS NDEF模式：超过 15 秒未收到 onDiscovered 回调，NDEF connect 未执行，已切换手动输入' : '超过 15 秒未读取到工牌，已切换手动输入');
+					finish(false, isIosClient() ? 'iOS NDEF直接模式：超过 15 秒未通过 NDEF message 读取到工牌，已切换手动输入' : '超过 15 秒未读取到工牌，已切换手动输入');
 				}, 15000);
 			});
 		}).catch(function(error) {
