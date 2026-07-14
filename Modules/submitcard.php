@@ -1103,6 +1103,20 @@ function submitcardLatestSyncJobText($job) {
 		return '';
 	}
 
+	function getNfcTechs(payload) {
+		if (!payload || typeof payload !== 'object' || !Array.isArray(payload.techs)) {
+			return [];
+		}
+		return payload.techs.map(function(item) {
+			return String(item || '');
+		});
+	}
+
+	function nfcPayloadSummary(payload) {
+		var techs = getNfcTechs(payload);
+		return techs.length ? '，标签类型：' + techs.join('/') : '';
+	}
+
 	function feishuNfcErrorMessage(error) {
 		var raw = '';
 		if (error) {
@@ -1201,12 +1215,7 @@ function submitcardLatestSyncJobText($job) {
 					resolve(ok);
 				}
 
-				session.listener = function(payload) {
-					var card = extractCardFromNfcPayload(payload);
-					if (card === '') {
-						finish(false, '已读取到 NFC 标签，但无法转换为韦根34的10位数字工牌ID，已切换手动输入');
-						return;
-					}
+				function submitNfcCard(card) {
 					$input.val(card);
 					clearCardInputHint($input);
 					showCardNfcStatus($input, '已读取韦根34工牌 ' + card + '，正在提交');
@@ -1214,6 +1223,15 @@ function submitcardLatestSyncJobText($job) {
 					setTimeout(function() {
 						submitHandler();
 					}, 80);
+				}
+
+				session.listener = function(payload) {
+					var card = extractCardFromNfcPayload(payload);
+					if (card !== '') {
+						submitNfcCard(card);
+						return;
+					}
+					finish(false, '已发现 NFC 标签' + nfcPayloadSummary(payload) + '，但 onDiscovered 未返回可用 UID 或韦根34的10位数字工牌ID，已切换手动输入');
 				};
 
 				try {
