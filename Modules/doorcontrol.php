@@ -29,21 +29,6 @@ function fetchAssocRows($sql, $table = 'devices') {
 	return $rows;
 }
 
-function dcListValues($value) {
-	if (is_array($value)) {
-		return $value;
-	}
-	$value = trim((string)$value);
-	if ($value === '') {
-		return [];
-	}
-	$json = json_decode($value, true);
-	if (json_last_error() === JSON_ERROR_NONE && is_array($json)) {
-		return array_values(array_filter(array_map('strval', array_filter($json, 'is_scalar')), function($item) { return $item !== ''; }));
-	}
-	return array_values(array_filter(array_map('trim', explode(',', $value)), function($item) { return $item !== ''; }));
-}
-
 $devices = fetchAssocRows('SELECT * FROM `devices` ORDER BY `id` ASC', 'devices');
 $employeesRaw = fetchAssocRows("SELECT * FROM `employee` WHERE `status`='true' ORDER BY `name` ASC", 'employee');
 $guestsRaw = fetchAssocRows("SELECT * FROM `guest` WHERE `status`='true' ORDER BY `name` ASC", 'guest');
@@ -52,52 +37,16 @@ $rolesRaw = fetchAssocRows("SELECT r.*, (SELECT COUNT(*) FROM `access_role_membe
 $policiesRaw = fetchAssocRows('SELECT * FROM `access_policies` WHERE `enabled`=1 ORDER BY `id` ASC', 'access_policies');
 
 $employees = [];
-$groups = [];
 foreach ($employeesRaw as $employee) {
 	$employees[] = ['value' => $employee['open_id'], 'title' => $employee['name'].'（'.($employee['employee_id'] ?: '无工号').'）'];
-	$groupItems = dcListValues($employee['groups'] ?? '');
-	foreach ($groupItems as $item) {
-		if ($item !== '') { $groups[$item] = $item; }
-	}
 }
 
 $departments = [];
-$departmentNames = [];
 foreach ($departmentsRaw as $department) {
 	$departmentId = $department['department_id'] ?? '';
 	if ($departmentId === '') { continue; }
 	$title = ($department['name'] ?: $departmentId).'（'.$departmentId.'）';
-	$departmentNames[$departmentId] = $department['name'] ?: $departmentId;
 	$departments[] = ['value' => $departmentId, 'title' => $title];
-}
-
-$groupList = [];
-foreach ($groups as $group) {
-	$groupList[] = ['value' => $group, 'title' => $group];
-}
-
-$departmentGroups = [];
-foreach ($employeesRaw as $employee) {
-	$groupItems = dcListValues($employee['groups'] ?? '');
-	if (count($groupItems) === 0) {
-		continue;
-	}
-	$departmentIds = dcListValues($employee['department_ids'] ?? '');
-	if (!empty($employee['department_id'])) {
-		$departmentIds[] = $employee['department_id'];
-	}
-	$departmentIds = array_values(array_unique(array_filter($departmentIds)));
-	foreach ($departmentIds as $departmentId) {
-		foreach ($groupItems as $group) {
-			$key = $departmentId.'|'.$group;
-			$departmentName = $departmentNames[$departmentId] ?? $departmentId;
-			$departmentGroups[$key] = $departmentName.' / '.$group;
-		}
-	}
-}
-$departmentGroupList = [];
-foreach ($departmentGroups as $value => $title) {
-	$departmentGroupList[] = ['value' => $value, 'title' => $title];
 }
 
 $roles = [];
@@ -121,9 +70,7 @@ foreach ($devices as $device) {
 		'employees' => [],
 		'guests' => [],
 		'departments' => [],
-		'groups' => [],
-		'roles' => [],
-		'department_groups' => []
+		'roles' => []
 	];
 	$legacyEmployees = json_decode($device['allowedEmployee'] ?? '[]', true);
 	if (is_array($legacyEmployees)) {
@@ -159,45 +106,14 @@ foreach ($policiesRaw as $policy) {
 	if ($policy['subject_type'] === 'department') {
 		$policyMap[$deviceId]['departments'][] = $policy['subject_value'];
 	}
-	if ($policy['subject_type'] === 'group') {
-		$policyMap[$deviceId]['groups'][] = $policy['subject_value'];
-	}
 	if ($policy['subject_type'] === 'role') {
 		$policyMap[$deviceId]['roles'][] = $policy['subject_value'];
-	}
-	if ($policy['subject_type'] === 'department_group') {
-		$policyMap[$deviceId]['department_groups'][] = $policy['subject_value'].'|'.$policy['subject_extra'];
 	}
 }
 foreach ($policyMap as $deviceId => $policy) {
 	foreach ($policy as $key => $value) {
 		if (is_array($value)) {
 			$policyMap[$deviceId][$key] = array_values(array_unique($value));
-		}
-	}
-}
-
-$knownGroups = [];
-foreach ($groupList as $item) {
-	$knownGroups[$item['value']] = true;
-}
-$knownDepartmentGroups = [];
-foreach ($departmentGroupList as $item) {
-	$knownDepartmentGroups[$item['value']] = true;
-}
-foreach ($policyMap as $policy) {
-	foreach ($policy['groups'] as $group) {
-		if ($group !== '' && !isset($knownGroups[$group])) {
-			$groupList[] = ['value' => $group, 'title' => $group];
-			$knownGroups[$group] = true;
-		}
-	}
-	foreach ($policy['department_groups'] as $departmentGroup) {
-		if ($departmentGroup !== '' && !isset($knownDepartmentGroups[$departmentGroup])) {
-			$parts = explode('|', $departmentGroup, 2);
-			$title = count($parts) === 2 ? (($departmentNames[$parts[0]] ?? $parts[0]).' / '.$parts[1]) : $departmentGroup;
-			$departmentGroupList[] = ['value' => $departmentGroup, 'title' => $title];
-			$knownDepartmentGroups[$departmentGroup] = true;
 		}
 	}
 }
@@ -212,7 +128,7 @@ foreach ($policyMap as $policy) {
 			<div class="panel panel-white">
 				<div class="panel-body" style="font-weight: 400;overflow-x: auto;">
 					<h4 style="font-weight: 400">门禁控制与权限</h4><br>
-					<h6>按设备设置员工、访客、部门、组、角色和部门+组通行策略</h6><br />
+					<h6>按设备设置员工、访客、部门和角色通行策略</h6><br />
 					<table id="devices1" class="table table-bordered table-auto" style="clear: both;margin-top: 20px;">
                         <thead>
                             <tr>
@@ -244,13 +160,39 @@ foreach ($policyMap as $policy) {
     </div>
 </div>
 <script src="asset/layui/layui.js"></script>
+<style>
+.access-policy-form {
+	padding: 18px 18px 20px;
+}
+.access-policy-section {
+	margin: 0 0 26px;
+}
+.access-policy-section + .access-policy-section {
+	padding-top: 2px;
+}
+.access-policy-title {
+	margin: 0 0 12px;
+	padding-left: 8px;
+	border-left: 3px solid #1e9fff;
+	font-size: 14px;
+	font-weight: 600;
+	color: #2f3a4a;
+}
+.access-policy-switch {
+	margin-bottom: 12px;
+}
+.access-policy-actions {
+	margin-top: 20px;
+	padding-top: 16px;
+	border-top: 1px solid #edf0f5;
+	text-align: center;
+}
+</style>
 <script>
 var csrf_token = "<?php echo $_SESSION['token']; ?>";
 var employeeList = <?php echo json_encode($employees, JSON_UNESCAPED_UNICODE); ?>;
 var guestList = <?php echo json_encode($guests, JSON_UNESCAPED_UNICODE); ?>;
 var departmentList = <?php echo json_encode($departments, JSON_UNESCAPED_UNICODE); ?>;
-var groupList = <?php echo json_encode($groupList, JSON_UNESCAPED_UNICODE); ?>;
-var departmentGroupList = <?php echo json_encode($departmentGroupList, JSON_UNESCAPED_UNICODE); ?>;
 var roleList = <?php echo json_encode($roles, JSON_UNESCAPED_UNICODE); ?>;
 var policyMap = <?php echo json_encode($policyMap, JSON_UNESCAPED_UNICODE); ?>;
 var deviceMap = <?php echo json_encode(array_column($devices, 'name', 'id'), JSON_UNESCAPED_UNICODE); ?>;
@@ -275,23 +217,22 @@ layui.use(['layer', 'util', 'form', 'transfer'], function(){
 
 	window.editPolicy = function(deviceId) {
 		var policy = policyMap[deviceId] || {};
-		var html = '<div class="layui-form layui-form-pane" style="padding:16px;">'
-			+ '<div class="layui-form-item"><input type="checkbox" id="all_employee" title="允许全体员工通行" lay-skin="primary" ' + (policy.all_employee ? 'checked' : '') + '></div>'
-			+ '<div id="employeeTransfer"></div>'
-			+ '<hr><div class="layui-form-item"><input type="checkbox" id="all_guest" title="允许全体访客通行" lay-skin="primary" ' + (policy.all_guest ? 'checked' : '') + '></div>'
-			+ '<div id="guestTransfer"></div>'
-			+ '<hr>'
-			+ '<div id="departmentTransfer"></div>'
-			+ '<div id="groupTransfer"></div>'
-			+ '<div id="roleTransfer"></div>'
-			+ '<div id="departmentGroupTransfer"></div>'
-			+ '<div style="text-align:center;"><button class="layui-btn layui-btn-normal" onclick="savePolicy(' + deviceId + ')">保存</button><button class="layui-btn layui-btn-primary" onclick="layui.layer.closeAll()">取消</button></div>'
+		var html = '<div class="layui-form layui-form-pane access-policy-form">'
+			+ '<div class="access-policy-section"><div class="access-policy-title">员工</div>'
+			+ '<div class="layui-form-item access-policy-switch"><input type="checkbox" id="all_employee" title="允许全体员工通行" lay-skin="primary" ' + (policy.all_employee ? 'checked' : '') + '></div>'
+			+ '<div id="employeeTransfer"></div></div>'
+			+ '<div class="access-policy-section"><div class="access-policy-title">访客</div>'
+			+ '<div class="layui-form-item access-policy-switch"><input type="checkbox" id="all_guest" title="允许全体访客通行" lay-skin="primary" ' + (policy.all_guest ? 'checked' : '') + '></div>'
+			+ '<div id="guestTransfer"></div></div>'
+			+ '<div class="access-policy-section"><div class="access-policy-title">部门</div><div id="departmentTransfer"></div></div>'
+			+ '<div class="access-policy-section"><div class="access-policy-title">角色</div><div id="roleTransfer"></div></div>'
+			+ '<div class="access-policy-actions"><button class="layui-btn layui-btn-normal" onclick="savePolicy(' + deviceId + ')">保存</button><button class="layui-btn layui-btn-primary" onclick="layui.layer.closeAll()">取消</button></div>'
 			+ '</div>';
 
 		layer.open({
 			type: 1,
 			title: '编辑通行策略 - ' + (deviceMap[deviceId] || deviceId),
-			area: ['760px', '720px'],
+			area: ['780px', '760px'],
 			content: html,
 			success: function() {
 				transfer.render({
@@ -325,16 +266,6 @@ layui.use(['layer', 'util', 'form', 'transfer'], function(){
 					id: 'departmentPolicy'
 				});
 				transfer.render({
-					elem: '#groupTransfer',
-					title: ['可选组', '已允许组'],
-					data: groupList,
-					value: policy.groups || [],
-					width: 300,
-					height: 220,
-					showSearch: true,
-					id: 'groupPolicy'
-				});
-				transfer.render({
 					elem: '#roleTransfer',
 					title: ['可选角色', '已允许角色'],
 					data: roleList,
@@ -343,16 +274,6 @@ layui.use(['layer', 'util', 'form', 'transfer'], function(){
 					height: 220,
 					showSearch: true,
 					id: 'rolePolicy'
-				});
-				transfer.render({
-					elem: '#departmentGroupTransfer',
-					title: ['可选部门+组', '已允许部门+组'],
-					data: departmentGroupList,
-					value: policy.department_groups || [],
-					width: 300,
-					height: 220,
-					showSearch: true,
-					id: 'departmentGroupPolicy'
 				});
 				form.render();
 			}
@@ -376,17 +297,8 @@ layui.use(['layer', 'util', 'form', 'transfer'], function(){
 		transfer.getData('departmentPolicy').forEach(function(item) {
 			policies.push({subject_kind: 'employee', subject_type: 'department', subject_value: item.value, title: item.title});
 		});
-		transfer.getData('groupPolicy').forEach(function(item) {
-			policies.push({subject_kind: 'employee', subject_type: 'group', subject_value: item.value, title: item.title});
-		});
 		transfer.getData('rolePolicy').forEach(function(item) {
 			policies.push({subject_kind: item.subject_kind || 'employee', subject_type: 'role', subject_value: item.value, title: item.title});
-		});
-		transfer.getData('departmentGroupPolicy').forEach(function(item) {
-			var parts = String(item.value || '').split('|');
-			if (parts.length >= 2) {
-				policies.push({subject_kind: 'employee', subject_type: 'department_group', subject_value: parts[0].trim(), subject_extra: parts.slice(1).join('|').trim(), title: item.title});
-			}
 		});
 		$.ajax({
 			type: 'POST',
