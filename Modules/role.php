@@ -142,7 +142,6 @@ foreach ($rolesRaw as $role) {
 											<button class="btn btn-default" onclick="deleteAccessRole(<?php echo intval($role['id']); ?>)">删除</button>
 										<?php } else { ?>
 											<button class="btn btn-default" onclick="openRoleDeployDialog(<?php echo intval($role['id']); ?>)">下发门禁</button>
-											<span>系统内置</span>
 										<?php } ?>
 									</td>
 								</tr>
