@@ -1083,7 +1083,7 @@ function submitcardLatestSyncJobText($job) {
 				candidates.push({__wiegand34Uid: payload[uidKeys[i]]});
 			}
 		}
-		var nestedKeys = ['detail', 'data', 'payload', 'result'];
+		var nestedKeys = ['detail', 'data', 'payload', 'result', 'message', 'messages', 'ndefMessage', 'records'];
 		for (var j = 0; j < nestedKeys.length; j++) {
 			if (typeof payload[nestedKeys[j]] !== 'undefined') {
 				collectNfcCandidates(payload[nestedKeys[j]], candidates, depth + 1);
@@ -1115,6 +1115,113 @@ function submitcardLatestSyncJobText($job) {
 	function nfcPayloadSummary(payload) {
 		var techs = getNfcTechs(payload);
 		return techs.length ? '，标签类型：' + techs.join('/') : '';
+	}
+
+	function invokeNativeNfc(method, tech, options) {
+		options = options || {};
+		var bridge = window.ttJSBridge || null;
+		if (!bridge || typeof bridge.invoke !== 'function') {
+			return false;
+		}
+		try {
+			bridge.invoke(method, {
+				tech: tech,
+				success: options.success || function() {},
+				fail: options.fail || function() {},
+				complete: options.complete || function() {}
+			});
+			return true;
+		} catch (e) {
+			if (typeof options.fail === 'function') {
+				options.fail(e);
+			}
+			return false;
+		}
+	}
+
+	function closeNdefQuietly(ndef) {
+		try {
+			if (ndef && typeof ndef.close === 'function') {
+				ndef.close({});
+				return;
+			}
+			invokeNativeNfc('nfcClose', 'NDEF', {});
+		} catch (e) {}
+	}
+
+	function getNdefReader(adapter) {
+		if (adapter && typeof adapter.getNdef === 'function') {
+			try {
+				return {
+					kind: 'sdk',
+					reader: adapter.getNdef()
+				};
+			} catch (e) {
+				return {
+					kind: '',
+					error: '获取 NDEF 实例失败：' + compactErrorMessage(e)
+				};
+			}
+		}
+		if (window.ttJSBridge && typeof window.ttJSBridge.invoke === 'function') {
+			return {
+				kind: 'bridge',
+				reader: {
+					connect: function(options) {
+						var ok = invokeNativeNfc('nfcConnect', 'NDEF', options);
+						if (!ok && options && typeof options.fail === 'function') {
+							options.fail(new Error('ttJSBridge nfcConnect 调用失败'));
+						}
+					},
+					close: function(options) {
+						invokeNativeNfc('nfcClose', 'NDEF', options || {});
+					}
+				}
+			};
+		}
+		return {
+			kind: '',
+			error: '当前飞书 H5 SDK 未暴露 adapter.getNdef()，且没有可用的 ttJSBridge NDEF 入口'
+		};
+	}
+
+	function readCardByNdef(adapter, payload) {
+		return new Promise(function(resolve) {
+			var ndefInfo = getNdefReader(adapter);
+			if (!ndefInfo.reader || !ndefInfo.reader.connect) {
+				resolve({
+					card: '',
+					message: ndefInfo.error || '当前飞书客户端未开放 NDEF connect'
+				});
+				return;
+			}
+
+			try {
+				ndefInfo.reader.connect({
+					success: function(res) {
+						var card = extractCardFromNfcPayload(res) || extractCardFromNfcPayload(payload);
+						closeNdefQuietly(ndefInfo.reader);
+						resolve({
+							card: card,
+							message: card ? '' : 'NDEF 连接成功，但返回值和发现回调中都没有可用 UID'
+						});
+					},
+					fail: function(error) {
+						closeNdefQuietly(ndefInfo.reader);
+						resolve({
+							card: '',
+							message: 'NDEF 连接失败：' + compactErrorMessage(error)
+						});
+					}
+				});
+			} catch (e) {
+				closeNdefQuietly(ndefInfo.reader);
+				resolve({
+					card: '',
+					message: 'NDEF 读取异常：' + compactErrorMessage(e)
+				});
+			}
+		});
 	}
 
 	function feishuNfcErrorMessage(error) {
@@ -1226,6 +1333,21 @@ function submitcardLatestSyncJobText($job) {
 				}
 
 				session.listener = function(payload) {
+					if (isIosClient()) {
+						showCardNfcStatus($input, '已发现 NFC 标签' + nfcPayloadSummary(payload) + '，正在按 NDEF 方式读取 UID');
+						readCardByNdef(adapter, payload).then(function(result) {
+							if (settled) {
+								return;
+							}
+							if (result.card !== '') {
+								submitNfcCard(result.card);
+								return;
+							}
+							var reason = result.message ? '；' + result.message : '';
+							finish(false, 'iOS NDEF 读取未获得可用 UID' + nfcPayloadSummary(payload) + reason + '，已切换手动输入');
+						});
+						return;
+					}
 					var card = extractCardFromNfcPayload(payload);
 					if (card !== '') {
 						submitNfcCard(card);
