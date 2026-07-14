@@ -191,7 +191,7 @@ class appLinkFeishu {
         } catch (\Exception $e) {
             $nonce = md5(uniqid('', true));
         }
-        $timestamp = time();
+        $timestamp = time() * 1000;
         $signature = sha1('jsapi_ticket='.$ticket.'&noncestr='.$nonce.'&timestamp='.$timestamp.'&url='.$url);
 
         return [
@@ -554,8 +554,8 @@ class appLinkFeishu {
 
     private function getJsSdkTicket() {
         $now = time();
-        if (!empty($this->keyContent['jssdk_ticket']) && !empty($this->keyContent['jssdk_ticket_expires_at']) && intval($this->keyContent['jssdk_ticket_expires_at']) > $now + 300) {
-            return $this->keyContent['jssdk_ticket'];
+        if (!empty($this->keyContent['tenant_jssdk_ticket']) && !empty($this->keyContent['tenant_jssdk_ticket_expires_at']) && intval($this->keyContent['tenant_jssdk_ticket_expires_at']) > $now + 300) {
+            return $this->keyContent['tenant_jssdk_ticket'];
         }
 
         $url = $this->endpoint('getJsSdkTicket');
@@ -564,20 +564,20 @@ class appLinkFeishu {
             return '';
         }
 
-        $token = $this->getAppAccessToken();
+        $token = $this->getTenantAccessToken();
         if ($token === '') {
-            $this->lastError = '无法获取 app_access_token';
+            $this->lastError = '无法获取 tenant_access_token';
             return '';
         }
 
-        $data = $this->requestFeishu($url, 'GET', $token, null, 8, 2);
+        $data = $this->requestFeishu($url, 'POST', $token, new \stdClass(), 8, 2);
         if (($data['status_code'] ?? 0) == 200 && intval($data['response']['code'] ?? -1) === 0) {
             $ticketData = $data['response']['data'] ?? [];
-            $ticket = $ticketData['ticket'] ?? ($ticketData['jsapi_ticket'] ?? '');
+            $ticket = $ticketData['ticket'] ?? ($ticketData['jsapi_ticket'] ?? ($data['response']['ticket'] ?? ''));
             if ($ticket !== '') {
                 $expiresIn = intval($ticketData['expire_in'] ?? ($ticketData['expires_in'] ?? 7200));
-                $this->keyContent['jssdk_ticket'] = $ticket;
-                $this->keyContent['jssdk_ticket_expires_at'] = $now + $expiresIn;
+                $this->keyContent['tenant_jssdk_ticket'] = $ticket;
+                $this->keyContent['tenant_jssdk_ticket_expires_at'] = $now + $expiresIn;
                 $this->saveKeyFile();
                 return $ticket;
             }

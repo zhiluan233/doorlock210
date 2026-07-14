@@ -422,22 +422,7 @@ function submitcardLatestSyncJobText($job) {
 	var FEISHU_H5_SDK_URL = 'https://lf-scm-cn.feishucdn.com/lark/op/h5-js-sdk-1.5.30.js';
 	var feishuH5SdkPromise = null;
 	var feishuJsSdkConfigPromise = null;
-	var FEISHU_NFC_JS_API_LIST = [
-		'getNFCAdapter',
-		'onDiscovered',
-		'offDiscovered',
-		'startDiscovery',
-		'stopDiscovery',
-		'getNfcA',
-		'nfcFoundDevice',
-		'nfcStartDiscovery',
-		'nfcStopDiscovery',
-		'nfcConnect',
-		'nfcClose',
-		'nfcTransceive',
-		'nfcGetAtqa',
-		'nfcGetSak'
-	];
+	var FEISHU_NFC_JS_API_LIST = [];
 	var activeNfcSession = null;
 
 	function deleteGuest(id) {
@@ -733,7 +718,15 @@ function submitcardLatestSyncJobText($job) {
 	}
 
 	function loadFeishuH5Sdk() {
-		if (window.tt && typeof window.tt.getNFCAdapter === 'function') {
+		function hasRequiredSdk() {
+			return window.tt &&
+				typeof window.tt.getNFCAdapter === 'function' &&
+				window.h5sdk &&
+				typeof window.h5sdk.config === 'function' &&
+				typeof window.h5sdk.ready === 'function';
+		}
+
+		if (hasRequiredSdk()) {
 			return Promise.resolve(window.tt);
 		}
 		if (!isFeishuClient()) {
@@ -762,27 +755,23 @@ function submitcardLatestSyncJobText($job) {
 				}
 			}
 
-			function hasBridge() {
-				return window.tt && typeof window.tt.getNFCAdapter === 'function';
-			}
-
 			function waitBridge() {
 				var retry = 0;
 				(function tick() {
-					if (hasBridge()) {
+					if (hasRequiredSdk()) {
 						finish(null, window.tt);
 						return;
 					}
 					retry++;
 					if (retry > 80) {
-						finish(new Error('当前飞书客户端未开放 H5 NFC Bridge，已切换手动输入'));
+						finish(new Error('当前飞书客户端未开放 H5 NFC Bridge 或 JSAPI SDK，已切换手动输入'));
 						return;
 					}
 					setTimeout(tick, 50);
 				})();
 			}
 
-			if (hasBridge()) {
+			if (hasRequiredSdk()) {
 				finish(null, window.tt);
 				return;
 			}
@@ -1120,7 +1109,7 @@ function submitcardLatestSyncJobText($job) {
 			raw = compactErrorMessage(error);
 		}
 		if (/auth|authorize|permission|config|signature|ticket|未授权|权限/i.test(raw)) {
-			return '飞书 JSAPI 或 NFC 权限未授权，请确认应用已开通 H5 NFC 并配置可信域名，已切换手动输入';
+			return '飞书 JSAPI 鉴权失败：' + raw + '，请检查应用发布状态、H5 可信域名、服务器 IP 白名单和 H5 NFC 权限，已切换手动输入';
 		}
 		if (/nfc|NFC/i.test(raw)) {
 			if (isIosClient()) {

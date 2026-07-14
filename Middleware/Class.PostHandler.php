@@ -65,22 +65,7 @@ class PostHandler {
 							Header("HTTP/1.1 403 Forbidden");
 							exit(json_encode(['ok' => false, 'message' => '你没有足够的权限这么做'], JSON_UNESCAPED_UNICODE));
 						}
-						$jsApiList = [
-							'getNFCAdapter',
-							'onDiscovered',
-							'offDiscovered',
-							'startDiscovery',
-							'stopDiscovery',
-							'getNfcA',
-							'nfcFoundDevice',
-							'nfcStartDiscovery',
-							'nfcStopDiscovery',
-							'nfcConnect',
-							'nfcClose',
-							'nfcTransceive',
-							'nfcGetAtqa',
-							'nfcGetSak'
-						];
+						$jsApiList = [];
 						$feishu = new anim210System\appLinkFeishu(true);
 						$result = $feishu->getJsSdkConfig($_POST['url'] ?? '', $jsApiList);
 						exit(json_encode($result, JSON_UNESCAPED_UNICODE));
