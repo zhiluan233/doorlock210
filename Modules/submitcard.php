@@ -344,10 +344,12 @@ function submitcardLatestSyncJobText($job) {
       <div class="layui-input-block">
         <input type="text" id="cardnum" class="layui-input js-card-id-input" placeholder="选中输入框 连接读卡器读取工牌" autocomplete="off">
         <div class="card-input-hint"></div>
+        <div class="card-nfc-status"></div>
       </div>
     </div>
     <div class="layui-form-item">
       <div class="layui-input-block">
+        <button type="button" class="layui-btn layui-btn-primary card-nfc-button" onclick="startCardNfcScan('#cardnum', submitCard)">手机NFC读取</button>
         <button class="layui-btn" lay-filter="submit" lay-submit onclick="submitCard()">发卡</button>
         <button class="layui-btn layui-btn-primary" onclick="closeDialog()">取消</button>
       </div>
@@ -362,10 +364,12 @@ function submitcardLatestSyncJobText($job) {
       <div class="layui-input-block">
         <input type="text" id="release_cardnum" class="layui-input js-card-id-input" placeholder="选中输入框 连接读卡器读取工牌" autocomplete="off">
         <div class="card-input-hint"></div>
+        <div class="card-nfc-status"></div>
       </div>
     </div>
     <div class="layui-form-item">
       <div class="layui-input-block">
+        <button type="button" class="layui-btn layui-btn-primary card-nfc-button" onclick="startCardNfcScan('#release_cardnum', releaseCard)">手机NFC读取</button>
         <button class="layui-btn" lay-filter="submit" lay-submit onclick="releaseCard()">保存</button>
         <button class="layui-btn layui-btn-primary" onclick="closeDialog()">取消</button>
       </div>
@@ -380,6 +384,27 @@ function submitcardLatestSyncJobText($job) {
     color: #FF5722;
     line-height: 1.4;
   }
+  .card-nfc-status {
+    display: none;
+    margin-top: 8px;
+    color: #16baaa;
+    line-height: 1.4;
+  }
+  .card-nfc-button {
+    display: none;
+    margin-right: 8px;
+  }
+  @media screen and (max-width: 768px) {
+    .layui-layer-page .layui-form-pane {
+      padding: 16px !important;
+    }
+    .layui-layer-page .layui-form-label {
+      width: 100px;
+    }
+    .layui-layer-page .layui-input-block {
+      margin-left: 100px;
+    }
+  }
 </style>
 <script>
   var employeeid;
@@ -387,6 +412,9 @@ function submitcardLatestSyncJobText($job) {
   layui.use(['layer', 'form'], function() {
     var layer = layui.layer;
     var form = layui.form;
+	var FEISHU_H5_SDK_URL = 'https://lf-scm-cn.feishucdn.com/lark/op/h5-js-sdk-1.5.30.js';
+	var feishuH5SdkPromise = null;
+	var activeNfcSession = null;
 
 	function deleteGuest(id) {
 		var htmlobj = $.ajax({
@@ -607,6 +635,33 @@ function submitcardLatestSyncJobText($job) {
 		});
 	}
 
+	function isMobileClient() {
+		return /Android|Mobile|iPhone|iPad|iPod|iOS|OpenHarmony/i.test(navigator.userAgent || '');
+	}
+
+	function isIosClient() {
+		return /iPhone|iPad|iPod|iOS/i.test(navigator.userAgent || '');
+	}
+
+	function isFeishuClient() {
+		return /Feishu|Lark/i.test(navigator.userAgent || '');
+	}
+
+	function cardDialogArea(height) {
+		if (isMobileClient()) {
+			return ['92%', height + 'px'];
+		}
+		return ['420px', height + 'px'];
+	}
+
+	function leftPad(value, length) {
+		value = String(value || '');
+		while (value.length < length) {
+			value = '0' + value;
+		}
+		return value;
+	}
+
 	function normalizeCardInput(value) {
 		return String(value || '').replace(/[\r\n]/g, '').trim();
 	}
@@ -637,6 +692,431 @@ function submitcardLatestSyncJobText($job) {
 		return cardnum;
 	}
 
+	function showCardNfcStatus($input, message) {
+		var $status = $input.closest('.layui-input-block').find('.card-nfc-status');
+		clearCardInputHint($input);
+		$status.text(message).show();
+	}
+
+	function clearCardNfcStatus($input) {
+		var $status = $input.closest('.layui-input-block').find('.card-nfc-status');
+		$status.hide().text('');
+	}
+
+	function showNfcFallback($input, message) {
+		clearCardNfcStatus($input);
+		showCardInputHint($input, message);
+	}
+
+	function loadFeishuH5Sdk() {
+		if (window.tt && typeof window.tt.getNFCAdapter === 'function') {
+			return Promise.resolve(window.tt);
+		}
+		if (!isFeishuClient()) {
+			return Promise.reject(new Error('当前不是飞书内置浏览器，已切换手动输入'));
+		}
+		if (feishuH5SdkPromise) {
+			return feishuH5SdkPromise;
+		}
+
+		feishuH5SdkPromise = new Promise(function(resolve, reject) {
+			var finished = false;
+			var timeout = setTimeout(function() {
+				finish(new Error('飞书 H5 SDK 加载超时，已切换手动输入'));
+			}, 8000);
+
+			function finish(error, sdk) {
+				if (finished) {
+					return;
+				}
+				finished = true;
+				clearTimeout(timeout);
+				if (error) {
+					reject(error);
+				} else {
+					resolve(sdk);
+				}
+			}
+
+			function hasBridge() {
+				return window.tt && typeof window.tt.getNFCAdapter === 'function';
+			}
+
+			function waitBridge() {
+				var retry = 0;
+				(function tick() {
+					if (hasBridge()) {
+						finish(null, window.tt);
+						return;
+					}
+					retry++;
+					if (retry > 80) {
+						finish(new Error('当前飞书客户端未开放 H5 NFC Bridge，已切换手动输入'));
+						return;
+					}
+					setTimeout(tick, 50);
+				})();
+			}
+
+			if (hasBridge()) {
+				finish(null, window.tt);
+				return;
+			}
+
+			var existed = document.querySelector('script[data-feishu-h5-sdk="1"]');
+			if (existed) {
+				existed.addEventListener('load', waitBridge);
+				existed.addEventListener('error', function() {
+					finish(new Error('飞书 H5 SDK 加载失败，已切换手动输入'));
+				});
+				waitBridge();
+				return;
+			}
+
+			var script = document.createElement('script');
+			script.src = FEISHU_H5_SDK_URL;
+			script.async = true;
+			script.setAttribute('data-feishu-h5-sdk', '1');
+			script.onload = waitBridge;
+			script.onerror = function() {
+				finish(new Error('飞书 H5 SDK 加载失败，已切换手动输入'));
+			};
+			document.head.appendChild(script);
+		});
+		feishuH5SdkPromise.catch(function() {
+			feishuH5SdkPromise = null;
+		});
+
+		return feishuH5SdkPromise;
+	}
+
+	function base64ToBytes(value) {
+		try {
+			var binary = window.atob(String(value || ''));
+			var bytes = [];
+			for (var i = 0; i < binary.length; i++) {
+				bytes.push(binary.charCodeAt(i) & 255);
+			}
+			return bytes;
+		} catch (e) {
+			return [];
+		}
+	}
+
+	function hexToBytes(hex) {
+		hex = String(hex || '').replace(/[^0-9a-fA-F]/g, '');
+		if (hex === '' || hex.length % 2 !== 0) {
+			return [];
+		}
+		var bytes = [];
+		for (var i = 0; i < hex.length; i += 2) {
+			bytes.push(parseInt(hex.substr(i, 2), 16) & 255);
+		}
+		return bytes;
+	}
+
+	function normalizeBytes(value) {
+		var bytes = [];
+		if (!value) {
+			return bytes;
+		}
+		for (var i = 0; i < value.length; i++) {
+			var item = parseInt(value[i], 10);
+			if (!isNaN(item)) {
+				bytes.push(item & 255);
+			}
+		}
+		return bytes;
+	}
+
+	function uidBytesToWiegand34Card(bytes) {
+		bytes = normalizeBytes(bytes);
+		if (!bytes.length) {
+			return '';
+		}
+		while (bytes.length < 4) {
+			bytes.unshift(0);
+		}
+		if (bytes.length > 4) {
+			bytes = bytes.slice(bytes.length - 4);
+		}
+		var value = 0;
+		for (var i = 0; i < bytes.length; i++) {
+			value = (value * 256) + bytes[i];
+		}
+		if (!isFinite(value) || value < 0 || value > 4294967295) {
+			return '';
+		}
+		return leftPad(String(Math.floor(value)), 10);
+	}
+
+	function normalizeUidToWiegand34Candidate(value) {
+		if (value === null || typeof value === 'undefined') {
+			return '';
+		}
+		if (typeof value === 'number') {
+			if (!isFinite(value) || value < 0 || value > 4294967295) {
+				return '';
+			}
+			return leftPad(String(Math.floor(value)), 10);
+		}
+		if (typeof ArrayBuffer !== 'undefined' && value instanceof ArrayBuffer) {
+			return uidBytesToWiegand34Card(Array.prototype.slice.call(new Uint8Array(value)));
+		}
+		if (typeof ArrayBuffer !== 'undefined' && ArrayBuffer.isView && ArrayBuffer.isView(value)) {
+			return uidBytesToWiegand34Card(Array.prototype.slice.call(new Uint8Array(value.buffer, value.byteOffset, value.byteLength)));
+		}
+		if (Array.isArray(value)) {
+			return uidBytesToWiegand34Card(value);
+		}
+		if (typeof value === 'object') {
+			if (typeof value.base64 === 'string') {
+				return uidBytesToWiegand34Card(base64ToBytes(value.base64));
+			}
+			if (typeof value.value !== 'undefined') {
+				return normalizeUidToWiegand34Candidate(value.value);
+			}
+			if (typeof value.data !== 'undefined') {
+				return normalizeUidToWiegand34Candidate(value.data);
+			}
+			return '';
+		}
+		var text = String(value || '').trim();
+		var bytes = hexToBytes(text);
+		if (bytes.length) {
+			return uidBytesToWiegand34Card(bytes);
+		}
+		if (/^[0-9]{1,10}$/.test(text)) {
+			return leftPad(text, 10);
+		}
+		return '';
+	}
+
+	function normalizeNfcCandidate(value) {
+		if (value === null || typeof value === 'undefined') {
+			return '';
+		}
+		if (typeof value === 'number') {
+			if (!isFinite(value) || value < 0 || value > 9999999999) {
+				return '';
+			}
+			return leftPad(String(Math.floor(value)), 10);
+		}
+		if (typeof ArrayBuffer !== 'undefined' && value instanceof ArrayBuffer) {
+			return uidBytesToWiegand34Card(Array.prototype.slice.call(new Uint8Array(value)));
+		}
+		if (typeof ArrayBuffer !== 'undefined' && ArrayBuffer.isView && ArrayBuffer.isView(value)) {
+			return uidBytesToWiegand34Card(Array.prototype.slice.call(new Uint8Array(value.buffer, value.byteOffset, value.byteLength)));
+		}
+		if (Array.isArray(value)) {
+			return uidBytesToWiegand34Card(value);
+		}
+		if (typeof value === 'object') {
+			if (Object.prototype.hasOwnProperty.call(value, '__wiegand34Uid')) {
+				return normalizeUidToWiegand34Candidate(value.__wiegand34Uid);
+			}
+			if (typeof value.base64 === 'string') {
+				return uidBytesToWiegand34Card(base64ToBytes(value.base64));
+			}
+			if (typeof value.value !== 'undefined') {
+				return normalizeNfcCandidate(value.value);
+			}
+			if (typeof value.data !== 'undefined') {
+				return normalizeNfcCandidate(value.data);
+			}
+			return '';
+		}
+
+		var text = String(value || '').trim();
+		var numericText = text.replace(/\D/g, '');
+		if (/^[0-9]{1,10}$/.test(text)) {
+			return leftPad(text, 10);
+		}
+		if (/^[0-9]{10}$/.test(numericText)) {
+			return numericText;
+		}
+		return uidBytesToWiegand34Card(hexToBytes(text));
+	}
+
+	function collectNfcCandidates(payload, candidates, depth) {
+		if (!payload || depth > 3) {
+			return;
+		}
+		candidates.push(payload);
+		if (typeof payload !== 'object') {
+			return;
+		}
+		var cardKeys = ['cardId', 'card_id', 'cardNo', 'card_no', 'cardNumber', 'card_number', 'cardnum'];
+		for (var k = 0; k < cardKeys.length; k++) {
+			if (typeof payload[cardKeys[k]] !== 'undefined') {
+				candidates.push(payload[cardKeys[k]]);
+			}
+		}
+		var uidKeys = ['uid', 'id', 'serialNumber'];
+		for (var i = 0; i < uidKeys.length; i++) {
+			if (typeof payload[uidKeys[i]] !== 'undefined') {
+				candidates.push({__wiegand34Uid: payload[uidKeys[i]]});
+			}
+		}
+		var nestedKeys = ['detail', 'data', 'payload', 'result'];
+		for (var j = 0; j < nestedKeys.length; j++) {
+			if (typeof payload[nestedKeys[j]] !== 'undefined') {
+				collectNfcCandidates(payload[nestedKeys[j]], candidates, depth + 1);
+			}
+		}
+	}
+
+	function extractCardFromNfcPayload(payload) {
+		var candidates = [];
+		collectNfcCandidates(payload, candidates, 0);
+		for (var i = 0; i < candidates.length; i++) {
+			var card = normalizeNfcCandidate(candidates[i]);
+			if (card !== '' && /^[0-9]{10}$/.test(card)) {
+				return card;
+			}
+		}
+		return '';
+	}
+
+	function feishuNfcErrorMessage(error) {
+		var raw = '';
+		if (error) {
+			raw = error.errMsg || error.message || error.errorMessage || JSON.stringify(error);
+		}
+		if (isIosClient()) {
+			return '当前 iPhone 飞书客户端暂未开放 H5 NFC 或未授权，已切换手动输入';
+		}
+		if (/nfc|NFC/i.test(raw)) {
+			return '当前设备未开启 NFC 或飞书客户端不支持读取工牌，已切换手动输入';
+		}
+		return raw ? raw + '，已切换手动输入' : '当前设备不支持手机 NFC，已切换手动输入';
+	}
+
+	function stopActiveNfcSession() {
+		var session = activeNfcSession;
+		activeNfcSession = null;
+		if (!session || !session.adapter) {
+			return;
+		}
+		if (session.timeout) {
+			clearTimeout(session.timeout);
+		}
+		try {
+			if (session.listener && typeof session.adapter.offDiscovered === 'function') {
+				session.adapter.offDiscovered(session.listener);
+			}
+		} catch (e) {}
+		try {
+			if (typeof session.adapter.stopDiscovery === 'function') {
+				session.adapter.stopDiscovery({});
+			}
+		} catch (e) {}
+	}
+
+	function startCardNfcScan(inputSelector, submitHandler) {
+		var $input = $(inputSelector);
+		if (!$input.length) {
+			return Promise.resolve(false);
+		}
+		if (!isMobileClient()) {
+			showNfcFallback($input, '当前不是手机端，请使用发卡器或手动输入工牌ID');
+			return Promise.resolve(false);
+		}
+
+		stopActiveNfcSession();
+		showCardNfcStatus($input, '正在启动手机 NFC，请将工牌贴近手机背部感应区');
+
+		return loadFeishuH5Sdk().then(function(tt) {
+			var adapter = tt.getNFCAdapter();
+			if (!adapter || typeof adapter.startDiscovery !== 'function' || typeof adapter.onDiscovered !== 'function') {
+				throw new Error('当前飞书客户端未开放 H5 NFC Bridge，已切换手动输入');
+			}
+
+			return new Promise(function(resolve) {
+				var settled = false;
+				var session = {
+					adapter: adapter,
+					listener: null,
+					timeout: null
+				};
+				activeNfcSession = session;
+
+				function finish(ok, message) {
+					if (settled) {
+						return;
+					}
+					settled = true;
+					if (activeNfcSession === session) {
+						activeNfcSession = null;
+					}
+					if (session.timeout) {
+						clearTimeout(session.timeout);
+					}
+					try {
+						if (session.listener && typeof adapter.offDiscovered === 'function') {
+							adapter.offDiscovered(session.listener);
+						}
+					} catch (e) {}
+					try {
+						adapter.stopDiscovery({});
+					} catch (e) {}
+					if (!ok && message) {
+						showNfcFallback($input, message);
+					}
+					resolve(ok);
+				}
+
+				session.listener = function(payload) {
+					var card = extractCardFromNfcPayload(payload);
+					if (card === '') {
+						finish(false, '已读取到 NFC 标签，但无法转换为韦根34的10位数字工牌ID，已切换手动输入');
+						return;
+					}
+					$input.val(card);
+					clearCardInputHint($input);
+					showCardNfcStatus($input, '已读取韦根34工牌 ' + card + '，正在提交');
+					finish(true, '');
+					setTimeout(function() {
+						submitHandler();
+					}, 80);
+				};
+
+				try {
+					adapter.onDiscovered(session.listener);
+					adapter.startDiscovery({
+						success: function() {
+							showCardNfcStatus($input, 'NFC 已启动，请将工牌贴近手机背部感应区');
+						},
+						fail: function(error) {
+							finish(false, feishuNfcErrorMessage(error));
+						}
+					});
+				} catch (error) {
+					finish(false, feishuNfcErrorMessage(error));
+				}
+
+				session.timeout = setTimeout(function() {
+					finish(false, '超过 15 秒未读取到工牌，已切换手动输入');
+				}, 15000);
+			});
+		}).catch(function(error) {
+			showNfcFallback($input, feishuNfcErrorMessage(error));
+			return false;
+		});
+	}
+
+	function prepareCardDialog(inputSelector, submitHandler) {
+		var $input = $(inputSelector);
+		bindCardIdInput(inputSelector, submitHandler);
+		$input.closest('.layui-form').find('.card-nfc-button').toggle(isMobileClient());
+		if (!isMobileClient()) {
+			return;
+		}
+		setTimeout(function() {
+			startCardNfcScan(inputSelector, submitHandler);
+		}, 300);
+	}
+
 	function bindCardIdInput(selector, submitHandler) {
 		var $input = $(selector);
 		if (!$input.length) {
@@ -646,6 +1126,7 @@ function submitcardLatestSyncJobText($job) {
 		$input.on('input.cardReader', function() {
 			if ($(this).val() !== '') {
 				clearCardInputHint($(this));
+				clearCardNfcStatus($(this));
 			}
 		});
 		$input.on('keydown.cardReader', function(event) {
@@ -680,9 +1161,9 @@ function submitcardLatestSyncJobText($job) {
                         type: 1,
                         title: '为访客 '+guestname+' 发卡',
                         content: $('#submitCardDialogModal').html(),
-                        area: ['400px', '220px'],
+                        area: cardDialogArea(260),
 						success: function() {
-							bindCardIdInput('#cardnum', submitCard);
+							prepareCardDialog('#cardnum', submitCard);
 						}
                     });
                     $('#userid').val(guestid);
@@ -714,9 +1195,9 @@ function submitcardLatestSyncJobText($job) {
                         type: 1,
                         title: '为员工 '+employeename+' 发卡',
                         content: $('#submitCardDialogModal').html(),
-                        area: ['400px', '220px'],
+                        area: cardDialogArea(260),
 						success: function() {
-							bindCardIdInput('#cardnum', submitCard);
+							prepareCardDialog('#cardnum', submitCard);
 						}
                     });
                     $('#userid').val(employeeid);
@@ -744,15 +1225,16 @@ function submitcardLatestSyncJobText($job) {
 			type: 1,
 			title: '回收工牌',
 			content: $('#releaseCardDialogModal').html(),
-			area: ['400px', '220px'],
+			area: cardDialogArea(260),
 			success: function() {
-				bindCardIdInput('#release_cardnum', releaseCard);
+				prepareCardDialog('#release_cardnum', releaseCard);
 			}
 		});
 	}
 
     // 关闭对话框
     function closeDialog() {
+	  stopActiveNfcSession();
       layer.closeAll();
     }
 
@@ -911,6 +1393,7 @@ function submitcardLatestSyncJobText($job) {
     window.submitCard = submitCard;
 	window.openReleaseCard = openReleaseCard;
 	window.releaseCard = releaseCard;
+	window.startCardNfcScan = startCardNfcScan;
 	window.syncFeishuMember = syncFeishuMember;
   });
 </script>
