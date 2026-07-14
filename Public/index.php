@@ -21,6 +21,8 @@ include(ROOT . "/Core/UserCheck.php");
 
 doorlockNormalizeMobileBadgeRoute();
 
+/*
+
 // 获取客户端IP地址
 $client_ip = $_SERVER['REMOTE_ADDR'];
 $is_public_callback = isset($_GET['action']) && $_GET['action'] === 'feishuWebhook';
@@ -95,6 +97,8 @@ if (!$is_allowed && !$is_public_callback && !$is_public_page) {
     header('HTTP/1.1 403 Forbidden');
     exit('内网系统，不支持公网访问！');
 }
+
+*/
 
 //中间件
 //include(ROOT . '/Middleware/Class.Alipay.php');
