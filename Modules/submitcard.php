@@ -1252,6 +1252,16 @@ function submitcardLatestSyncJobText($job) {
 		});
 	}
 
+	function hasNdefTech(payload) {
+		var techs = getNfcTechs(payload);
+		for (var i = 0; i < techs.length; i++) {
+			if (String(techs[i] || '').toUpperCase().indexOf('NDEF') !== -1) {
+				return true;
+			}
+		}
+		return false;
+	}
+
 	function nfcPayloadSummary(payload) {
 		var techs = getNfcTechs(payload);
 		return techs.length ? '，标签类型：' + techs.join('/') : '';
@@ -1341,7 +1351,7 @@ function submitcardLatestSyncJobText($job) {
 
 			var ndefPath = ndefInfo.label || ndefInfo.kind || 'NDEF';
 			if (typeof onStatus === 'function') {
-				onStatus('iOS NDEF直接模式：正在调用 ' + ndefPath);
+				onStatus('iOS NDEF模式：正在调用 ' + ndefPath);
 			}
 
 			function resolveAfterRead(card, path, message) {
@@ -1364,7 +1374,7 @@ function submitcardLatestSyncJobText($job) {
 					return;
 				}
 				if (typeof onStatus === 'function') {
-					onStatus('iOS NDEF直接模式：NDEF 已连接，正在读取 NDEF message');
+					onStatus('iOS NDEF模式：NDEF 已连接，正在读取 NDEF message');
 				}
 				try {
 					ndefInfo.reader.readNdefMessage({
@@ -1373,7 +1383,7 @@ function submitcardLatestSyncJobText($job) {
 							var discoveredCard = extractCardFromNfcPayload(payload);
 							var message = 'NDEF message 读取成功，但内容中没有可识别的 UID、16进制 UID 或10位工牌号';
 							if (discoveredCard) {
-								message += '；onDiscovered 诊断回调里有 UID，但当前 iOS NDEF 直接模式未使用该回调值';
+								message += '；onDiscovered 回调里有 UID，但当前 NDEF message 未包含可用卡号';
 							}
 							resolveAfterRead(card, ndefPath + ' -> readNdefMessage', message);
 						},
@@ -1453,7 +1463,7 @@ function submitcardLatestSyncJobText($job) {
 		}
 
 		stopActiveNfcSession();
-		showCardNfcStatus($input, isIosClient() ? 'iOS NDEF模式：正在启动手机 NFC，请将工牌贴近手机背部感应区' : '正在启动手机 NFC，请将工牌贴近手机背部感应区');
+		showCardNfcStatus($input, isIosClient() ? 'iOS NFC模式：正在启动手机 NFC，请将工牌贴近手机背部感应区' : '正在启动手机 NFC，请将工牌贴近手机背部感应区');
 
 		return loadFeishuH5Sdk().then(function(tt) {
 			return configureFeishuH5Sdk().then(function() {
@@ -1509,15 +1519,14 @@ function submitcardLatestSyncJobText($job) {
 					}, 80);
 				}
 
-				var iosDiscoveredPayload = null;
 				var iosNdefStarted = false;
-				function startIosDirectNdef(reason) {
+				function startIosNdefRead(payload) {
 					if (!isIosClient() || settled || iosNdefStarted) {
 						return;
 					}
 					iosNdefStarted = true;
-					showNfcRuntimeStatus($input, adapter, 'iOS NDEF直接模式：' + reason + '，不等待 onDiscovered，正在连接 NDEF');
-					readCardByNdef(adapter, null, function(message) {
+					showNfcRuntimeStatus($input, adapter, 'iOS NDEF模式：已确认标签支持 NDEF，正在连接 NDEF' + nfcPayloadSummary(payload));
+					readCardByNdef(adapter, payload, function(message) {
 						showNfcRuntimeStatus($input, adapter, message);
 					}).then(function(result) {
 						if (settled) {
@@ -1527,17 +1536,24 @@ function submitcardLatestSyncJobText($job) {
 							submitNfcCard(result.card);
 							return;
 						}
-						var diagnostic = iosDiscoveredPayload ? '；诊断回调' + nfcPayloadSummary(iosDiscoveredPayload) : '';
 						var failReason = result.message ? '；' + result.message : '';
 						var path = result.path ? '；路径：' + result.path : '';
-						finish(false, 'iOS NDEF直接模式未获得可用 UID' + diagnostic + path + failReason + '，已切换手动输入');
+						finish(false, 'iOS NDEF模式未获得可用 UID' + nfcPayloadSummary(payload) + path + failReason + '，已切换手动输入');
 					});
 				}
 
 				session.listener = function(payload) {
 					if (isIosClient()) {
-						iosDiscoveredPayload = payload;
-						showNfcRuntimeStatus($input, adapter, 'iOS NDEF直接模式：收到 onDiscovered 诊断回调' + nfcPayloadSummary(payload) + '，当前流程继续等待 NDEF message 读取结果');
+						var iosCard = extractCardFromNfcPayload(payload);
+						if (iosCard !== '') {
+							submitNfcCard(iosCard);
+							return;
+						}
+						if (hasNdefTech(payload)) {
+							startIosNdefRead(payload);
+							return;
+						}
+						finish(false, 'iOS 已发现 NFC 标签' + nfcPayloadSummary(payload) + '，但飞书未返回 UID，也未标记为 NDEF；无法读取工牌号，已切换手动输入');
 						return;
 					}
 					var card = extractCardFromNfcPayload(payload);
@@ -1553,7 +1569,7 @@ function submitcardLatestSyncJobText($job) {
 					adapter.startDiscovery({
 						success: function() {
 							if (isIosClient()) {
-								startIosDirectNdef('NFC 已启动');
+								showNfcRuntimeStatus($input, adapter, 'iOS NFC 已启动，请将工牌贴近手机背部感应区');
 								return;
 							}
 							showNfcRuntimeStatus($input, adapter, 'NFC 已启动，请将工牌贴近手机背部感应区');
@@ -1567,7 +1583,7 @@ function submitcardLatestSyncJobText($job) {
 				}
 
 				session.timeout = setTimeout(function() {
-					finish(false, isIosClient() ? 'iOS NDEF直接模式：超过 15 秒未通过 NDEF message 读取到工牌，已切换手动输入' : '超过 15 秒未读取到工牌，已切换手动输入');
+					finish(false, isIosClient() ? 'iOS NFC模式：超过 15 秒未收到飞书 onDiscovered 回调，无法确认标签 UID 或 NDEF 类型，已切换手动输入' : '超过 15 秒未读取到工牌，已切换手动输入');
 				}, 15000);
 			});
 		}).catch(function(error) {
