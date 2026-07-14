@@ -333,6 +333,41 @@ class PostHandler {
 						exit("登录会话已超时，请重新登录");
 					}
 				break;
+				case "searchBadgeEmployees":
+					$this->requireAdminUser();
+					Header("Content-Type: application/json; charset=utf-8");
+					$keyword = trim((string)($_POST['q'] ?? ''));
+					if (preg_match_all('/./u', $keyword, $matches) !== false) {
+						$keyword = implode('', array_slice($matches[0], 0, 40));
+					} else {
+						$keyword = substr($keyword, 0, 40);
+					}
+					$where = ["`status`='true'"];
+					if ($keyword !== '') {
+						$safeKeyword = Database::escape($keyword);
+						$like = "'%{$safeKeyword}%'";
+						$where[] = "(`name` LIKE {$like} OR `realname` LIKE {$like} OR `employee_id` LIKE {$like} OR `department_name` LIKE {$like})";
+					}
+					$sql = "SELECT `id`, `open_id`, `name`, `employee_id`, `realname`, `department_name`, `card_id`, `avatar_url` FROM `employee` WHERE " . implode(' AND ', $where) . " ORDER BY CASE WHEN `card_id`='' THEN 0 ELSE 1 END, `name` ASC LIMIT 20";
+					$rs = Database::query('employee', $sql, '', true);
+					$items = [];
+					if ($rs instanceof \mysqli_result) {
+						while ($row = mysqli_fetch_assoc($rs)) {
+							$items[] = [
+								'id' => intval($row['id']),
+								'open_id' => $row['open_id'] ?? '',
+								'name' => $row['name'] ?? '',
+								'employee_id' => $row['employee_id'] ?? '',
+								'realname' => $row['realname'] ?? '',
+								'department_name' => $row['department_name'] ?? '',
+								'card_id' => $row['card_id'] ?? '',
+								'avatar_url' => $row['avatar_url'] ?? ''
+							];
+						}
+						mysqli_free_result($rs);
+					}
+					exit(json_encode(['ok' => true, 'items' => $items], JSON_UNESCAPED_UNICODE));
+				break;
 				case "addDevice":
 					$um = new anim210System\UserCheck();
 					if($um->isLogged()) {

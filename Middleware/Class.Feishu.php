@@ -391,7 +391,8 @@ class appLinkFeishu {
                     'department_ids' => $departmentIds,
                     'email' => $item['email'] ?? '',
                     'mobile' => $item['mobile'] ?? '',
-                    'tenant_key' => $item['tenant_key'] ?? ''
+                    'tenant_key' => $item['tenant_key'] ?? '',
+                    'avatar_url' => $this->extractAvatarUrl($item)
                 ];
             }
         }
@@ -443,6 +444,22 @@ class appLinkFeishu {
             }
         }
         return $realName;
+    }
+
+    private function extractAvatarUrl($item) {
+        if (isset($item['avatar']) && is_array($item['avatar'])) {
+            foreach (['avatar_240', 'avatar_72', 'avatar_origin', 'avatar_url'] as $key) {
+                if (!empty($item['avatar'][$key])) {
+                    return (string)$item['avatar'][$key];
+                }
+            }
+        }
+        foreach (['avatar_url', 'avatar_thumb', 'avatar_middle', 'avatar_big'] as $key) {
+            if (!empty($item[$key])) {
+                return (string)$item[$key];
+            }
+        }
+        return '';
     }
 
     private function isActiveStatus($status) {

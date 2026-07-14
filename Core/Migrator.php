@@ -177,6 +177,7 @@ class Migrator {
         self::addColumn('employee', 'email', "varchar(255) NOT NULL DEFAULT ''", $errors);
         self::addColumn('employee', 'mobile', "varchar(64) NOT NULL DEFAULT ''", $errors);
         self::addColumn('employee', 'tenant_key', "varchar(128) NOT NULL DEFAULT ''", $errors);
+        self::addColumn('employee', 'avatar_url', "varchar(512) NOT NULL DEFAULT ''", $errors);
         self::addColumn('employee', 'updated_at', "int unsigned NOT NULL DEFAULT 0", $errors);
 
         self::addColumn('guest', 'card_id', "varchar(64) NOT NULL DEFAULT ''", $errors);

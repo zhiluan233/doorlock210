@@ -143,6 +143,7 @@ class FeishuContactSync {
             'email' => $user['email'] ?? ($exists['email'] ?? ''),
             'mobile' => $user['mobile'] ?? ($exists['mobile'] ?? ''),
             'tenant_key' => $payload['header']['tenant_key'] ?? ($exists['tenant_key'] ?? ''),
+            'avatar_url' => self::extractAvatarUrl($user, $exists['avatar_url'] ?? ''),
             'updated_at' => $now
         ];
         if ($identity['open_id'] !== '') {
@@ -234,6 +235,7 @@ class FeishuContactSync {
                 'email' => $member['email'],
                 'mobile' => $member['mobile'],
                 'tenant_key' => $member['tenant_key'],
+                'avatar_url' => $member['avatar_url'] ?? '',
                 'updated_at' => time()
             ];
             if (!$active) {
@@ -491,6 +493,23 @@ class FeishuContactSync {
             'employee_id' => $user['employee_no'] ?? $user['employee_id'] ?? $user['employee_number'] ?? $event['employee_no'] ?? $event['employee_id'] ?? '',
             'user' => $user
         ];
+    }
+
+    private static function extractAvatarUrl($user, $fallback = '')
+    {
+        if (isset($user['avatar']) && is_array($user['avatar'])) {
+            foreach (['avatar_240', 'avatar_72', 'avatar_origin', 'avatar_url'] as $key) {
+                if (!empty($user['avatar'][$key])) {
+                    return (string)$user['avatar'][$key];
+                }
+            }
+        }
+        foreach (['avatar_url', 'avatar_thumb', 'avatar_middle', 'avatar_big'] as $key) {
+            if (!empty($user[$key])) {
+                return (string)$user[$key];
+            }
+        }
+        return (string)$fallback;
     }
 
     private static function shouldApplyUserLifecycleEvent($payload, $eventType)

@@ -65,6 +65,7 @@ $employeeData = [
     'email' => $userData['email'] ?? ($employee['email'] ?? ''),
     'mobile' => $userData['mobile'] ?? ($employee['mobile'] ?? ''),
     'tenant_key' => $userData['tenant_key'] ?? ($employee['tenant_key'] ?? ''),
+    'avatar_url' => feishuOauthAvatarUrl($userData, $employee['avatar_url'] ?? ''),
     'status' => $employee['status'] ?? 'true',
     'updated_at' => time()
 ];
@@ -110,19 +111,24 @@ if ($adminUser) {
 }
 
 $token = md5(mt_rand(0, 999999) . time() . $openId);
-if ($adminUser && in_array($adminUser['type'], ['admin', 'readonly'], true)) {
+$isPrivilegedUser = $adminUser && in_array($adminUser['type'], ['admin', 'readonly'], true);
+if ($isPrivilegedUser) {
     $_SESSION['user'] = $adminUser['username'];
     $_SESSION['token'] = $token;
-    $_SESSION['member_open_id'] = $openId;
-    $_SESSION['member_name'] = $employee['name'] ?: ($userData['name'] ?? '');
-    $_SESSION['member_token'] = $token;
-    feishuOauthFinishByViewport('/?page=userpanel', '/?page=panel&module=home');
 }
 
 $_SESSION['member_open_id'] = $openId;
 $_SESSION['member_name'] = $employee['name'] ?: ($userData['name'] ?? '');
 $_SESSION['member_token'] = $token;
 $_SESSION['token'] = $token;
+
+$returnUrl = feishuOauthConsumeReturnUrl();
+if ($returnUrl !== '') {
+    feishuOauthFinish($returnUrl);
+}
+if ($isPrivilegedUser) {
+    feishuOauthFinishByViewport('/?page=userpanel', '/?page=panel&module=home');
+}
 feishuOauthFinish('/?page=userpanel');
 
 function feishuOauthRedirectUri()
@@ -203,6 +209,30 @@ function feishuOauthFinishByViewport($userUrl, $adminUrl)
     exit;
 }
 
+function feishuOauthConsumeReturnUrl()
+{
+    $url = $_SESSION['feishu_oauth_return_url'] ?? '';
+    unset($_SESSION['feishu_oauth_return_url']);
+    $url = trim((string)$url);
+    if ($url === '') {
+        return '';
+    }
+    $parts = parse_url($url);
+    if ($parts === false || isset($parts['scheme']) || isset($parts['host'])) {
+        return '';
+    }
+    $path = $parts['path'] ?? '/';
+    $query = $parts['query'] ?? '';
+    if ($path !== '/') {
+        return '';
+    }
+    parse_str($query, $params);
+    if (!in_array($params['page'] ?? '', ['badgecard', 'userpanel', 'panel'], true)) {
+        return '';
+    }
+    return '/' . ($query !== '' ? '?' . $query : '');
+}
+
 function feishuOauthDisplayName($employee, $userData)
 {
     $name = $employee['name'] ?? '';
@@ -217,6 +247,23 @@ function feishuOauthDisplayName($employee, $userData)
     }
     $name = preg_replace('/[\x00-\x1F\x7F]/u', '', trim($name));
     return $name !== '' ? $name : '飞书用户';
+}
+
+function feishuOauthAvatarUrl($userData, $fallback = '')
+{
+    if (isset($userData['avatar']) && is_array($userData['avatar'])) {
+        foreach (['avatar_240', 'avatar_72', 'avatar_origin', 'avatar_url'] as $key) {
+            if (!empty($userData['avatar'][$key])) {
+                return (string)$userData['avatar'][$key];
+            }
+        }
+    }
+    foreach (['avatar_url', 'avatar_thumb', 'avatar_middle', 'avatar_big'] as $key) {
+        if (!empty($userData[$key])) {
+            return (string)$userData[$key];
+        }
+    }
+    return (string)$fallback;
 }
 
 function feishuOauthUniqueUsername($displayName, $employeeId, $openId, $currentUserId = 0)

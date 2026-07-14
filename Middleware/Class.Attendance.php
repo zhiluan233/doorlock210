@@ -101,6 +101,43 @@ class AttendanceService {
         return $cardId;
     }
 
+    public static function uidToWiegand34Card($uid)
+    {
+        $uid = preg_replace('/[^0-9a-fA-F]/', '', trim((string)$uid));
+        if ($uid === '') {
+            return '';
+        }
+        if (ctype_digit($uid) && strlen($uid) === 10) {
+            return $uid;
+        }
+        if (strlen($uid) % 2 !== 0) {
+            return '';
+        }
+
+        $bytes = [];
+        for ($i = 0; $i < strlen($uid); $i += 2) {
+            $bytes[] = hexdec(substr($uid, $i, 2)) & 255;
+        }
+        if (count($bytes) === 0) {
+            return '';
+        }
+        while (count($bytes) < 4) {
+            array_unshift($bytes, 0);
+        }
+        if (count($bytes) > 4) {
+            $bytes = array_slice($bytes, -4);
+        }
+        $bytes = array_reverse($bytes);
+        $value = 0;
+        foreach ($bytes as $byte) {
+            $value = ($value * 256) + $byte;
+        }
+        if ($value < 0 || $value > 4294967295) {
+            return '';
+        }
+        return str_pad((string)$value, 10, '0', STR_PAD_LEFT);
+    }
+
     public static function enqueueSwipe($employeeInfo, $deviceInfo, $cardId, $source = 'card', $eventTime = null)
     {
         global $conn;

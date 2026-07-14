@@ -28,6 +28,11 @@ if ($redirectUri === '') {
     $redirectUri = $scheme . $_SERVER['HTTP_HOST'] . '/?page=feishu_oauth_callback';
 }
 
+$returnUrl = feishuOauthStartReturnUrl($_GET['redirect'] ?? ($_GET['return'] ?? ''));
+if ($returnUrl !== '') {
+    $_SESSION['feishu_oauth_return_url'] = $returnUrl;
+}
+
 $state = md5(mt_rand(0, 999999) . microtime(true));
 $_SESSION['feishu_oauth_state'] = $state;
 
@@ -55,3 +60,32 @@ $separator = strpos($authorizeUrl, '?') === false ? '?' : '&';
 $url = $authorizeUrl . $separator . http_build_query($params, '', '&', PHP_QUERY_RFC3986);
 Header('Location: ' . $url);
 exit;
+
+function feishuOauthStartReturnUrl($value)
+{
+    $value = trim((string)$value);
+    if ($value === '') {
+        return '';
+    }
+    $parts = parse_url($value);
+    if ($parts === false || isset($parts['scheme']) || isset($parts['host'])) {
+        return '';
+    }
+    $path = $parts['path'] ?? '/';
+    if ($path === '') {
+        $path = '/';
+    }
+    if ($path[0] !== '/') {
+        $path = '/' . $path;
+    }
+    if ($path !== '/') {
+        return '';
+    }
+    $query = $parts['query'] ?? '';
+    parse_str($query, $params);
+    $page = $params['page'] ?? '';
+    if (!in_array($page, ['badgecard', 'userpanel', 'panel'], true)) {
+        return '';
+    }
+    return $path . ($query !== '' ? '?' . $query : '');
+}

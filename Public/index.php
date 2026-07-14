@@ -23,6 +23,8 @@ include(ROOT . "/Core/UserCheck.php");
 // 获取客户端IP地址
 $client_ip = $_SERVER['REMOTE_ADDR'];
 $is_public_callback = isset($_GET['action']) && $_GET['action'] === 'feishuWebhook';
+$public_pages = ['openfeishu', 'badgecard', 'feishu_oauth_start', 'feishu_oauth_callback'];
+$is_public_page = isset($_GET['page']) && in_array($_GET['page'], $public_pages, true);
 
 // 定义白名单IP地址段
 $whitelist = [
@@ -54,7 +56,7 @@ foreach ($whitelist as $range) {
 }
 
 // 如果不在白名单中，返回403
-if (!$is_allowed && !$is_public_callback) {
+if (!$is_allowed && !$is_public_callback && !$is_public_page) {
     header('HTTP/1.1 403 Forbidden');
     exit('内网系统，不支持公网访问！');
 }

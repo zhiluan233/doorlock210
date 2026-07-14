@@ -26,6 +26,10 @@ $_config = [
 		'eventToken' => '',
 		'eventEncryptKey' => '',
 		'attendanceFlowComment' => '门禁刷卡自动同步',
+		'badgeLookup' => [
+			'appLinkTemplate' => 'https://applink.feishu.cn/client/web_app/open?appId={appId}&path={path}',
+			'lostFoundUrl' => ''
+		],
 		'appEndpoint' => [
 			'getTenantToken' => 'https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal',
 			'getAppToken' => 'https://open.feishu.cn/open-apis/auth/v3/app_access_token/internal',
