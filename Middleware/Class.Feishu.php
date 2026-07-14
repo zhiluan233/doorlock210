@@ -169,6 +169,43 @@ class appLinkFeishu {
         return ['ok' => true, 'data' => $data['response']['data']];
     }
 
+    public function getJsSdkConfig($url, $jsApiList = []) {
+        $appId = Settings::get('feishu_app_id', '');
+        if ($appId === '') {
+            return ['ok' => false, 'message' => '飞书 App ID 未在 config.php 中配置'];
+        }
+
+        $url = trim((string)$url);
+        $url = explode('#', $url, 2)[0];
+        if ($url === '' || !preg_match('/^https?:\/\//i', $url)) {
+            return ['ok' => false, 'message' => 'JSAPI 签名 URL 不合法'];
+        }
+
+        $ticket = $this->getJsSdkTicket();
+        if ($ticket === '') {
+            return ['ok' => false, 'message' => $this->lastError ?: '无法获取飞书 JSAPI ticket'];
+        }
+
+        try {
+            $nonce = bin2hex(random_bytes(8));
+        } catch (\Exception $e) {
+            $nonce = md5(uniqid('', true));
+        }
+        $timestamp = time();
+        $signature = sha1('jsapi_ticket='.$ticket.'&noncestr='.$nonce.'&timestamp='.$timestamp.'&url='.$url);
+
+        return [
+            'ok' => true,
+            'data' => [
+                'appId' => $appId,
+                'timestamp' => $timestamp,
+                'nonceStr' => $nonce,
+                'signature' => $signature,
+                'jsApiList' => is_array($jsApiList) ? array_values($jsApiList) : []
+            ]
+        ];
+    }
+
     public function sendInteractiveMessage($openId, $card, $uuid = '') {
         $tenantToken = $this->getTenantAccessToken();
         if ($tenantToken === '') {
@@ -509,9 +546,45 @@ class appLinkFeishu {
         $defaults = [
             'oauthAuthorize' => 'https://accounts.feishu.cn/open-apis/authen/v1/authorize',
             'getUserAccessTokenV3' => 'https://accounts.feishu.cn/oauth/v3/token',
+            'getJsSdkTicket' => 'https://open.feishu.cn/open-apis/jssdk/ticket/get',
             'batchCreateAttendanceFlow' => 'https://open.feishu.cn/open-apis/attendance/v1/user_flows/batch_create'
         ];
         return $defaults[$key] ?? '';
+    }
+
+    private function getJsSdkTicket() {
+        $now = time();
+        if (!empty($this->keyContent['jssdk_ticket']) && !empty($this->keyContent['jssdk_ticket_expires_at']) && intval($this->keyContent['jssdk_ticket_expires_at']) > $now + 300) {
+            return $this->keyContent['jssdk_ticket'];
+        }
+
+        $url = $this->endpoint('getJsSdkTicket');
+        if ($url === '') {
+            $this->lastError = '飞书 getJsSdkTicket endpoint 未在 config.php 中配置';
+            return '';
+        }
+
+        $token = $this->getAppAccessToken();
+        if ($token === '') {
+            $this->lastError = '无法获取 app_access_token';
+            return '';
+        }
+
+        $data = $this->requestFeishu($url, 'GET', $token, null, 8, 2);
+        if (($data['status_code'] ?? 0) == 200 && intval($data['response']['code'] ?? -1) === 0) {
+            $ticketData = $data['response']['data'] ?? [];
+            $ticket = $ticketData['ticket'] ?? ($ticketData['jsapi_ticket'] ?? '');
+            if ($ticket !== '') {
+                $expiresIn = intval($ticketData['expire_in'] ?? ($ticketData['expires_in'] ?? 7200));
+                $this->keyContent['jssdk_ticket'] = $ticket;
+                $this->keyContent['jssdk_ticket_expires_at'] = $now + $expiresIn;
+                $this->saveKeyFile();
+                return $ticket;
+            }
+        }
+
+        $this->lastError = '获取飞书 JSAPI ticket 失败：' . json_encode($data, JSON_UNESCAPED_UNICODE);
+        return '';
     }
 
     private function loadKeyFile() {

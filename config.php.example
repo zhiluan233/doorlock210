@@ -32,6 +32,7 @@ $_config = [
 			'getUserAccessTokenV3' => 'https://accounts.feishu.cn/oauth/v3/token',
 			'getUserAccessToken' => 'https://open.feishu.cn/open-apis/authen/v1/access_token',
 			'getUserInfo' => 'https://open.feishu.cn/open-apis/authen/v1/user_info',
+			'getJsSdkTicket' => 'https://open.feishu.cn/open-apis/jssdk/ticket/get',
 			'oauthAuthorize' => 'https://accounts.feishu.cn/open-apis/authen/v1/authorize',
 			'sendMessage' => 'https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=open_id',
 			'batchCreateAttendanceFlow' => 'https://open.feishu.cn/open-apis/attendance/v1/user_flows/batch_create',

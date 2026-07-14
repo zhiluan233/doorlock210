@@ -348,10 +348,9 @@ function submitcardLatestSyncJobText($job) {
       </div>
     </div>
     <div class="layui-form-item">
-      <div class="layui-input-block">
+      <div class="layui-input-block card-dialog-actions">
         <button type="button" class="layui-btn layui-btn-primary card-nfc-button" onclick="startCardNfcScan('#cardnum', submitCard)">手机NFC读取</button>
         <button class="layui-btn" lay-filter="submit" lay-submit onclick="submitCard()">发卡</button>
-        <button class="layui-btn layui-btn-primary" onclick="closeDialog()">取消</button>
       </div>
     </div>
   </div>
@@ -368,10 +367,9 @@ function submitcardLatestSyncJobText($job) {
       </div>
     </div>
     <div class="layui-form-item">
-      <div class="layui-input-block">
+      <div class="layui-input-block card-dialog-actions">
         <button type="button" class="layui-btn layui-btn-primary card-nfc-button" onclick="startCardNfcScan('#release_cardnum', releaseCard)">手机NFC读取</button>
         <button class="layui-btn" lay-filter="submit" lay-submit onclick="releaseCard()">保存</button>
-        <button class="layui-btn layui-btn-primary" onclick="closeDialog()">取消</button>
       </div>
     </div>
   </div>
@@ -394,6 +392,15 @@ function submitcardLatestSyncJobText($job) {
     display: none;
     margin-right: 8px;
   }
+  .card-dialog-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .card-dialog-actions .layui-btn {
+    margin-left: 0;
+    margin-right: 0;
+  }
   @media screen and (max-width: 768px) {
     .layui-layer-page .layui-form-pane {
       padding: 16px !important;
@@ -414,6 +421,23 @@ function submitcardLatestSyncJobText($job) {
     var form = layui.form;
 	var FEISHU_H5_SDK_URL = 'https://lf-scm-cn.feishucdn.com/lark/op/h5-js-sdk-1.5.30.js';
 	var feishuH5SdkPromise = null;
+	var feishuJsSdkConfigPromise = null;
+	var FEISHU_NFC_JS_API_LIST = [
+		'getNFCAdapter',
+		'onDiscovered',
+		'offDiscovered',
+		'startDiscovery',
+		'stopDiscovery',
+		'getNfcA',
+		'nfcFoundDevice',
+		'nfcStartDiscovery',
+		'nfcStopDiscovery',
+		'nfcConnect',
+		'nfcClose',
+		'nfcTransceive',
+		'nfcGetAtqa',
+		'nfcGetSak'
+	];
 	var activeNfcSession = null;
 
 	function deleteGuest(id) {
@@ -790,6 +814,104 @@ function submitcardLatestSyncJobText($job) {
 		return feishuH5SdkPromise;
 	}
 
+	function currentJsApiUrl() {
+		return String(window.location.href || '').split('#')[0];
+	}
+
+	function compactErrorMessage(error) {
+		if (!error) {
+			return '';
+		}
+		if (typeof error === 'string') {
+			return error;
+		}
+		if (error.errMsg || error.message || error.errorMessage) {
+			return error.errMsg || error.message || error.errorMessage;
+		}
+		try {
+			return JSON.stringify(error);
+		} catch (e) {
+			return String(error);
+		}
+	}
+
+	function configureFeishuH5Sdk() {
+		if (!window.h5sdk || typeof window.h5sdk.config !== 'function' || typeof window.h5sdk.ready !== 'function') {
+			return Promise.resolve();
+		}
+		if (feishuJsSdkConfigPromise) {
+			return feishuJsSdkConfigPromise;
+		}
+
+		feishuJsSdkConfigPromise = new Promise(function(resolve, reject) {
+			var finished = false;
+			var readyTimer = null;
+
+			function finish(error) {
+				if (finished) {
+					return;
+				}
+				finished = true;
+				if (readyTimer) {
+					clearTimeout(readyTimer);
+				}
+				if (error) {
+					reject(error);
+				} else {
+					resolve(true);
+				}
+			}
+
+			$.ajax({
+				type: 'POST',
+				url: '?action=getFeishuJsSdkConfig&page=panel&module=submitcard&csrf=<?php echo $_SESSION['token']; ?>',
+				dataType: 'json',
+				timeout: 8000,
+				data: {
+					url: currentJsApiUrl()
+				},
+				error: function(xhr) {
+					var message = xhr && xhr.responseText ? xhr.responseText : '飞书 JSAPI 授权配置获取失败';
+					finish(new Error(message));
+				},
+				success: function(resp) {
+					if (!resp || resp.ok !== true || !resp.data) {
+						finish(new Error((resp && resp.message) ? resp.message : '飞书 JSAPI 授权配置无效'));
+						return;
+					}
+					var config = resp.data;
+					config.jsApiList = FEISHU_NFC_JS_API_LIST;
+					config.onFail = function(error) {
+						finish(new Error('飞书 JSAPI 授权失败：' + compactErrorMessage(error)));
+					};
+					config.onSuccess = function() {};
+
+					try {
+						if (typeof window.h5sdk.error === 'function') {
+							window.h5sdk.error(function(error) {
+								finish(new Error('飞书 JSAPI 授权失败：' + compactErrorMessage(error)));
+							});
+						}
+						window.h5sdk.config(config);
+						readyTimer = setTimeout(function() {
+							finish(new Error('飞书 JSAPI 授权超时'));
+						}, 8000);
+						window.h5sdk.ready(function() {
+							finish(null);
+						});
+					} catch (e) {
+						finish(e);
+					}
+				}
+			});
+		});
+		feishuJsSdkConfigPromise.catch(function() {
+			feishuJsSdkConfigPromise = null;
+		});
+
+		return feishuJsSdkConfigPromise;
+	}
+
 	function base64ToBytes(value) {
 		try {
 			var binary = window.atob(String(value || ''));
@@ -840,6 +962,7 @@ function submitcardLatestSyncJobText($job) {
 		if (bytes.length > 4) {
 			bytes = bytes.slice(bytes.length - 4);
 		}
+		bytes = bytes.slice().reverse();
 		var value = 0;
 		for (var i = 0; i < bytes.length; i++) {
 			value = (value * 256) + bytes[i];
@@ -946,6 +1069,19 @@ function submitcardLatestSyncJobText($job) {
 		if (typeof payload !== 'object') {
 			return;
 		}
+		if (Array.isArray(payload.__nativeBuffers__)) {
+			for (var b = 0; b < payload.__nativeBuffers__.length; b++) {
+				var buffer = payload.__nativeBuffers__[b];
+				if (!buffer || typeof buffer !== 'object') {
+					continue;
+				}
+				if (buffer.key === 'uid') {
+					candidates.push({__wiegand34Uid: buffer});
+				} else {
+					candidates.push(buffer);
+				}
+			}
+		}
 		var cardKeys = ['cardId', 'card_id', 'cardNo', 'card_no', 'cardNumber', 'card_number', 'cardnum'];
 		for (var k = 0; k < cardKeys.length; k++) {
 			if (typeof payload[cardKeys[k]] !== 'undefined') {
@@ -981,13 +1117,19 @@ function submitcardLatestSyncJobText($job) {
 	function feishuNfcErrorMessage(error) {
 		var raw = '';
 		if (error) {
-			raw = error.errMsg || error.message || error.errorMessage || JSON.stringify(error);
+			raw = compactErrorMessage(error);
 		}
-		if (isIosClient()) {
-			return '当前 iPhone 飞书客户端暂未开放 H5 NFC 或未授权，已切换手动输入';
+		if (/auth|authorize|permission|config|signature|ticket|未授权|权限/i.test(raw)) {
+			return '飞书 JSAPI 或 NFC 权限未授权，请确认应用已开通 H5 NFC 并配置可信域名，已切换手动输入';
 		}
 		if (/nfc|NFC/i.test(raw)) {
+			if (isIosClient()) {
+				return '当前 iPhone 需要飞书 5.25.0+、iOS 13+ 且设备支持 NFC，已切换手动输入';
+			}
 			return '当前设备未开启 NFC 或飞书客户端不支持读取工牌，已切换手动输入';
+		}
+		if (isIosClient()) {
+			return raw ? raw + '，已切换手动输入' : '当前 iPhone 无法启动飞书 H5 NFC，已切换手动输入';
 		}
 		return raw ? raw + '，已切换手动输入' : '当前设备不支持手机 NFC，已切换手动输入';
 	}
@@ -1027,6 +1169,10 @@ function submitcardLatestSyncJobText($job) {
 		showCardNfcStatus($input, '正在启动手机 NFC，请将工牌贴近手机背部感应区');
 
 		return loadFeishuH5Sdk().then(function(tt) {
+			return configureFeishuH5Sdk().then(function() {
+				return tt;
+			});
+		}).then(function(tt) {
 			var adapter = tt.getNFCAdapter();
 			if (!adapter || typeof adapter.startDiscovery !== 'function' || typeof adapter.onDiscovered !== 'function') {
 				throw new Error('当前飞书客户端未开放 H5 NFC Bridge，已切换手动输入');

@@ -55,6 +55,40 @@ class PostHandler {
 				case "feishuWebhook":
 					anim210System\FeishuEventHandler::handle();
 				break;
+				case "getFeishuJsSdkConfig":
+					$um = new anim210System\UserCheck();
+					if($um->isLogged()) {
+						anim210System\Utils::checkCsrf();
+						$us = $um->getInfoByUser($_SESSION['user']);
+						Header("Content-Type: application/json; charset=utf-8");
+						if($us['type'] !== "admin") {
+							Header("HTTP/1.1 403 Forbidden");
+							exit(json_encode(['ok' => false, 'message' => '你没有足够的权限这么做'], JSON_UNESCAPED_UNICODE));
+						}
+						$jsApiList = [
+							'getNFCAdapter',
+							'onDiscovered',
+							'offDiscovered',
+							'startDiscovery',
+							'stopDiscovery',
+							'getNfcA',
+							'nfcFoundDevice',
+							'nfcStartDiscovery',
+							'nfcStopDiscovery',
+							'nfcConnect',
+							'nfcClose',
+							'nfcTransceive',
+							'nfcGetAtqa',
+							'nfcGetSak'
+						];
+						$feishu = new anim210System\appLinkFeishu(true);
+						$result = $feishu->getJsSdkConfig($_POST['url'] ?? '', $jsApiList);
+						exit(json_encode($result, JSON_UNESCAPED_UNICODE));
+					}
+					Header("HTTP/1.1 403 Forbidden");
+					Header("Content-Type: application/json; charset=utf-8");
+					exit(json_encode(['ok' => false, 'message' => '登录会话已超时，请重新登录'], JSON_UNESCAPED_UNICODE));
+				break;
 				case "updateinfo":
 					$um = new anim210System\UserCheck();
 					if($um->isLogged()) {
