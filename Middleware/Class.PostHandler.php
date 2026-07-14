@@ -343,12 +343,14 @@ class PostHandler {
 						$keyword = substr($keyword, 0, 40);
 					}
 					$where = ["`status`='true'"];
-					if ($keyword !== '') {
+					$loadAll = isset($_POST['all']) && (string)$_POST['all'] === '1';
+					if ($keyword !== '' && !$loadAll) {
 						$safeKeyword = Database::escape($keyword);
 						$like = "'%{$safeKeyword}%'";
 						$where[] = "(`name` LIKE {$like} OR `realname` LIKE {$like} OR `employee_id` LIKE {$like} OR `department_name` LIKE {$like})";
 					}
-					$sql = "SELECT `id`, `open_id`, `name`, `employee_id`, `realname`, `department_name`, `card_id`, `avatar_url` FROM `employee` WHERE " . implode(' AND ', $where) . " ORDER BY CASE WHEN `card_id`='' THEN 0 ELSE 1 END, `name` ASC LIMIT 20";
+					$limit = $loadAll ? 3000 : 20;
+					$sql = "SELECT `id`, `open_id`, `name`, `employee_id`, `realname`, `department_name`, `card_id`, `avatar_url` FROM `employee` WHERE " . implode(' AND ', $where) . " ORDER BY CASE WHEN `card_id`='' THEN 0 ELSE 1 END, `name` ASC LIMIT {$limit}";
 					$rs = Database::query('employee', $sql, '', true);
 					$items = [];
 					if ($rs instanceof \mysqli_result) {

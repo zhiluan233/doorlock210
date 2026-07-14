@@ -16,6 +16,7 @@ global $_config;
 $rawUid = openfeishuNormalizeUid($_GET['cardid'] ?? '');
 $cardId = $rawUid !== '' ? AttendanceService::uidToWiegand34Card($rawUid) : '';
 $targetPath = $rawUid !== '' ? '/?page=badgecard&cardid=' . rawurlencode($rawUid) : '/?page=badgecard';
+$appPath = $rawUid !== '' ? '/badgecard/' . rawurlencode($rawUid) : '/badgecard';
 $targetUrl = openfeishuAbsoluteUrl($targetPath);
 
 if ($rawUid !== '') {
@@ -30,7 +31,7 @@ if (openfeishuIsFeishuClient() && $rawUid !== '') {
 }
 
 $appId = Settings::get('feishu_app_id', '');
-$appLink = $rawUid !== '' ? openfeishuBuildAppLink($targetPath, $targetUrl, $rawUid, $cardId, $appId) : '';
+$appLink = $rawUid !== '' ? openfeishuBuildAppLink($targetPath, $targetUrl, $appPath, $rawUid, $cardId, $appId) : '';
 $canOpenApp = $appLink !== '' && $appId !== '';
 
 Header('Content-Type: text/html; charset=utf-8');
@@ -175,29 +176,25 @@ Header('Content-Type: text/html; charset=utf-8');
 
 function openfeishuNormalizeUid($value)
 {
-    $value = strtoupper(preg_replace('/[^0-9a-fA-F]/', '', trim((string)$value)));
-    if ($value === '' || strlen($value) > 32) {
-        return '';
-    }
-    if (strlen($value) % 2 !== 0 && !(ctype_digit($value) && strlen($value) === 10)) {
-        return '';
-    }
-    return $value;
+    return AttendanceService::normalizeUidValue($value);
 }
 
-function openfeishuBuildAppLink($targetPath, $targetUrl, $rawUid, $cardId, $appId)
+function openfeishuBuildAppLink($targetPath, $targetUrl, $appPath, $rawUid, $cardId, $appId)
 {
     global $_config;
 
     $template = $_config['feishu']['badgeLookup']['appLinkTemplate'] ?? '';
     if ($template === '') {
-        $template = 'https://applink.feishu.cn/client/web_app/open?appId={appId}&path={path}';
+        $template = 'https://applink.feishu.cn/client/web_app/open?appId={appId}&path={pathRaw}';
     }
 
     $replacements = [
         '{appId}' => rawurlencode($appId),
-        '{path}' => rawurlencode($targetPath),
-        '{pathRaw}' => $targetPath,
+        '{path}' => $appPath,
+        '{pathRaw}' => $appPath,
+        '{pathEncoded}' => rawurlencode($appPath),
+        '{browserPath}' => rawurlencode($targetPath),
+        '{browserPathRaw}' => $targetPath,
         '{url}' => rawurlencode($targetUrl),
         '{urlRaw}' => $targetUrl,
         '{cardid}' => rawurlencode($rawUid),

@@ -78,6 +78,9 @@ function feishuOauthStartReturnUrl($value)
     if ($path[0] !== '/') {
         $path = '/' . $path;
     }
+    if (preg_match('#^/badgecard/([0-9A-Fa-f]{8,32}|[0-9]{10})/?$#', $path, $matches)) {
+        return '/?page=badgecard&cardid=' . rawurlencode(strtoupper($matches[1]));
+    }
     if ($path !== '/') {
         return '';
     }

@@ -489,7 +489,7 @@ function badgeRenderPage($data)
                 </div>
                 <label class="search-field">
                     <i class="fa-solid fa-magnifying-glass"></i>
-                    <input id="employeeSearch" type="search" placeholder="搜索姓名、工号、部门" autocomplete="off">
+                    <input id="employeeSearch" type="search" placeholder="搜索姓名、拼音、工号、部门" autocomplete="off">
                 </label>
                 <div class="result-list" id="employeeResults"></div>
                 <div class="sheet-actions">
@@ -500,11 +500,16 @@ function badgeRenderPage($data)
     <?php } ?>
     <div class="toast" id="toast"></div>
 
+    <?php if ($mode === 'admin_empty') { ?>
+        <script src="https://cdn.jsdelivr.net/npm/pinyin-pro@3.27.0/dist/index.min.js"></script>
+    <?php } ?>
     <script>
         var BADGE_CARD_ID = <?php echo json_encode($cardId, JSON_UNESCAPED_UNICODE); ?>;
         var BADGE_CSRF = <?php echo json_encode($csrf, JSON_UNESCAPED_UNICODE); ?>;
         var selectedEmployee = null;
         var searchTimer = null;
+        var employeeSearchCache = null;
+        var employeeSearchPromise = null;
 
         function toast(message) {
             var el = document.getElementById('toast');
@@ -607,11 +612,111 @@ function badgeRenderPage($data)
         }
 
         function searchEmployees(keyword) {
+            keyword = keyword || '';
+            if (getPinyinApi()) {
+                loadEmployeeSearchCache().then(function(items) {
+                    var filtered = filterEmployeesByKeyword(items, keyword);
+                    renderEmployees(filtered.slice(0, 30));
+                }).catch(function() {
+                    searchEmployeesFromServer(keyword);
+                });
+                return;
+            }
+            searchEmployeesFromServer(keyword);
+        }
+
+        function searchEmployeesFromServer(keyword) {
             postAction('searchBadgeEmployees', {q: keyword || ''}).then(function(text) {
                 var data = JSON.parse(text);
                 renderEmployees(data.items || []);
             }).catch(function(error) {
                 toast(error.message || '搜索失败');
+            });
+        }
+
+        function loadEmployeeSearchCache() {
+            if (employeeSearchCache) {
+                return Promise.resolve(employeeSearchCache);
+            }
+            if (employeeSearchPromise) {
+                return employeeSearchPromise;
+            }
+            employeeSearchPromise = postAction('searchBadgeEmployees', {q: '', all: '1'}).then(function(text) {
+                var data = JSON.parse(text);
+                employeeSearchCache = data.items || [];
+                employeeSearchCache.forEach(function(item) {
+                    item._searchText = buildEmployeeSearchText(item);
+                });
+                return employeeSearchCache;
+            }).catch(function(error) {
+                employeeSearchPromise = null;
+                throw error;
+            });
+            return employeeSearchPromise;
+        }
+
+        function getPinyinApi() {
+            return window.pinyinPro && typeof window.pinyinPro.pinyin === 'function' ? window.pinyinPro : null;
+        }
+
+        function normalizeSearchText(value) {
+            return String(value || '').toLowerCase().replace(/\s+/g, ' ').trim();
+        }
+
+        function compactSearchText(value) {
+            return normalizeSearchText(value).replace(/\s+/g, '');
+        }
+
+        function toPinyinText(text, pattern, separator, nonZh) {
+            var api = getPinyinApi();
+            if (!api || !text) {
+                return '';
+            }
+            try {
+                return api.pinyin(text, {
+                    pattern: pattern || 'pinyin',
+                    toneType: 'none',
+                    type: 'string',
+                    separator: separator === undefined ? ' ' : separator,
+                    nonZh: nonZh || 'spaced'
+                });
+            } catch (e) {
+                return '';
+            }
+        }
+
+        function buildEmployeeSearchText(item) {
+            var raw = normalizeSearchText([
+                item.name || '',
+                item.realname || '',
+                item.employee_id || '',
+                item.department_name || '',
+                item.card_id || ''
+            ].join(' '));
+            var fullPinyin = normalizeSearchText(toPinyinText(raw, 'pinyin', ' ', 'spaced'));
+            var firstPinyin = normalizeSearchText(toPinyinText(raw, 'first', '', 'removed'));
+            return [
+                raw,
+                compactSearchText(raw),
+                fullPinyin,
+                compactSearchText(fullPinyin),
+                firstPinyin
+            ].join(' ');
+        }
+
+        function filterEmployeesByKeyword(items, keyword) {
+            var query = normalizeSearchText(keyword);
+            if (query === '') {
+                return items || [];
+            }
+            var terms = query.split(/\s+/);
+            return (items || []).filter(function(item) {
+                var target = item._searchText || buildEmployeeSearchText(item);
+                var compactTarget = compactSearchText(target);
+                return terms.every(function(term) {
+                    var compactTerm = compactSearchText(term);
+                    return target.indexOf(term) !== -1 || (compactTerm !== '' && compactTarget.indexOf(compactTerm) !== -1);
+                });
             });
         }
 
@@ -665,14 +770,7 @@ function badgeRenderPage($data)
 
 function badgeNormalizeUid($value)
 {
-    $value = strtoupper(preg_replace('/[^0-9a-fA-F]/', '', trim((string)$value)));
-    if ($value === '' || strlen($value) > 32) {
-        return '';
-    }
-    if (strlen($value) % 2 !== 0 && !(ctype_digit($value) && strlen($value) === 10)) {
-        return '';
-    }
-    return $value;
+    return AttendanceService::normalizeUidValue($value);
 }
 
 function badgeAvatarUrl($person)

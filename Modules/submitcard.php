@@ -929,9 +929,46 @@ function submitcardLatestSyncJobText($job) {
 		}
 	}
 
+	function safeDecodeText(value) {
+		var text = String(value || '').trim();
+		try {
+			return decodeURIComponent(text);
+		} catch (e) {
+			return text;
+		}
+	}
+
+	function extractUidLikeText(value) {
+		var text = safeDecodeText(value);
+		if (/^[0-9]{1,10}$/.test(text)) {
+			return {card: leftPad(text, 10), uid: ''};
+		}
+
+		var match = text.match(/(?:^|[?&#])(?:cardid|uid)=([^&#?\s]+)/i);
+		if (match && match[1]) {
+			text = safeDecodeText(match[1]);
+		} else {
+			match = text.match(/["'](?:cardid|card_id|cardId|uid|serialNumber)["']\s*:\s*["']([^"']+)["']/i);
+			if (match && match[1]) {
+				text = safeDecodeText(match[1]);
+			}
+		}
+
+		if (/^[0-9]{1,10}$/.test(text)) {
+			return {card: leftPad(text, 10), uid: ''};
+		}
+
+		var hex = String(text || '').replace(/[^0-9a-fA-F]/g, '').toUpperCase();
+		if (hex.length < 8) {
+			return {card: '', uid: ''};
+		}
+		return {card: '', uid: hex.substr(0, 8)};
+	}
+
 	function hexToBytes(hex) {
-		hex = String(hex || '').replace(/[^0-9a-fA-F]/g, '');
-		if (hex === '' || hex.length % 2 !== 0) {
+		var extracted = extractUidLikeText(hex);
+		hex = extracted.uid || '';
+		if (hex === '') {
 			return [];
 		}
 		var bytes = [];
@@ -1089,7 +1126,7 @@ function submitcardLatestSyncJobText($job) {
 			bytes.unshift(0);
 		}
 		if (bytes.length > 4) {
-			bytes = bytes.slice(bytes.length - 4);
+			bytes = bytes.slice(0, 4);
 		}
 		bytes = bytes.slice().reverse();
 		var value = 0;
@@ -1134,12 +1171,16 @@ function submitcardLatestSyncJobText($job) {
 			return '';
 		}
 		var text = String(value || '').trim();
-		var bytes = hexToBytes(text);
-		if (bytes.length) {
-			return uidBytesToWiegand34Card(bytes);
-		}
 		if (/^[0-9]{1,10}$/.test(text)) {
 			return leftPad(text, 10);
+		}
+		var extracted = extractUidLikeText(text);
+		if (extracted.card !== '') {
+			return extracted.card;
+		}
+		var bytes = hexToBytes(extracted.uid || text);
+		if (bytes.length) {
+			return uidBytesToWiegand34Card(bytes);
 		}
 		return '';
 	}

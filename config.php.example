@@ -27,7 +27,7 @@ $_config = [
 		'eventEncryptKey' => '',
 		'attendanceFlowComment' => '门禁刷卡自动同步',
 		'badgeLookup' => [
-			'appLinkTemplate' => 'https://applink.feishu.cn/client/web_app/open?appId={appId}&path={path}',
+			'appLinkTemplate' => 'https://applink.feishu.cn/client/web_app/open?appId={appId}&path={pathRaw}',
 			'lostFoundUrl' => ''
 		],
 		'appEndpoint' => [

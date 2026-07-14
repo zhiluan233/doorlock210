@@ -101,16 +101,50 @@ class AttendanceService {
         return $cardId;
     }
 
+    public static function normalizeUidValue($uid)
+    {
+        $text = trim((string)$uid);
+        if ($text === '') {
+            return '';
+        }
+
+        $decoded = html_entity_decode(rawurldecode($text), ENT_QUOTES, 'UTF-8');
+        if (preg_match('/^[0-9]{10}$/', $decoded)) {
+            return $decoded;
+        }
+
+        $candidate = $decoded;
+        if (preg_match('/(?:^|[?&#])cardid=([^&#?\s]+)/i', $decoded, $matches)) {
+            $candidate = rawurldecode($matches[1]);
+        } elseif (preg_match('/(?:^|[?&#])uid=([^&#?\s]+)/i', $decoded, $matches)) {
+            $candidate = rawurldecode($matches[1]);
+        } elseif (preg_match('/["\'](?:cardid|card_id|cardId|uid|serialNumber)["\']\s*:\s*["\']([^"\']+)["\']/i', $decoded, $matches)) {
+            $candidate = rawurldecode($matches[1]);
+        }
+
+        $candidate = trim((string)$candidate);
+        if (preg_match('/^[0-9]{10}$/', $candidate)) {
+            return $candidate;
+        }
+
+        $hex = strtoupper(preg_replace('/[^0-9A-F]/i', '', $candidate));
+        if (strlen($hex) < 8) {
+            return '';
+        }
+
+        return substr($hex, 0, 8);
+    }
+
     public static function uidToWiegand34Card($uid)
     {
-        $uid = preg_replace('/[^0-9a-fA-F]/', '', trim((string)$uid));
+        $uid = self::normalizeUidValue($uid);
         if ($uid === '') {
             return '';
         }
         if (ctype_digit($uid) && strlen($uid) === 10) {
             return $uid;
         }
-        if (strlen($uid) % 2 !== 0) {
+        if (strlen($uid) !== 8) {
             return '';
         }
 
@@ -120,12 +154,6 @@ class AttendanceService {
         }
         if (count($bytes) === 0) {
             return '';
-        }
-        while (count($bytes) < 4) {
-            array_unshift($bytes, 0);
-        }
-        if (count($bytes) > 4) {
-            $bytes = array_slice($bytes, -4);
         }
         $bytes = array_reverse($bytes);
         $value = 0;
