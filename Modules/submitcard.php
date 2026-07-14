@@ -216,6 +216,7 @@ function submitcardLatestSyncJobText($job) {
 				<div class="panel-body" style="font-weight: 400;overflow-x: auto;">
 					<h4 style="font-weight: 400">管理飞书租户通讯录成员</h4><br />
 					<button class="btn btn-default" onclick="syncFeishuMember()">同步飞书通讯录</button>
+					<button class="btn btn-default" style="margin-left: 8px;" onclick="openReleaseCard()">回收工牌</button>
 					<div class="text-muted" style="margin-top: 12px; line-height: 1.8;">
 						<span>最后一次全量同步：<strong><?php echo submitcardH(submitcardFormatSyncTime($lastFullSyncAt, '暂未同步')); ?></strong></span>
 						<span style="margin-left: 24px;">最近全量任务：<strong><?php echo submitcardH(submitcardLatestSyncJobText($latestFullSyncJob)); ?></strong></span>
@@ -341,7 +342,8 @@ function submitcardLatestSyncJobText($job) {
       <input style="display: none" type="text" id="userid" class="layui-input">
       <input style="display: none" type="text" id="usertype" class="layui-input">
       <div class="layui-input-block">
-        <input type="text" id="cardnum" class="layui-input" placeholder="选中输入框 连接读卡器读取工牌">
+        <input type="text" id="cardnum" class="layui-input js-card-id-input" placeholder="选中输入框 连接读卡器读取工牌" autocomplete="off">
+        <div class="card-input-hint"></div>
       </div>
     </div>
     <div class="layui-form-item">
@@ -352,7 +354,33 @@ function submitcardLatestSyncJobText($job) {
     </div>
   </div>
 </script>
+<!-- 工牌回收Dialog模板 -->
+<script type="text/html" id="releaseCardDialogModal">
+  <div class="layui-form layui-form-pane" style="padding: 20px;">
+    <div class="layui-form-item">
+      <label class="layui-form-label">电子工牌ID</label>
+      <div class="layui-input-block">
+        <input type="text" id="release_cardnum" class="layui-input js-card-id-input" placeholder="选中输入框 连接读卡器读取工牌" autocomplete="off">
+        <div class="card-input-hint"></div>
+      </div>
+    </div>
+    <div class="layui-form-item">
+      <div class="layui-input-block">
+        <button class="layui-btn" lay-filter="submit" lay-submit onclick="releaseCard()">保存</button>
+        <button class="layui-btn layui-btn-primary" onclick="closeDialog()">取消</button>
+      </div>
+    </div>
+  </div>
+</script>
 <script src="asset/layui/layui.js"></script>
+<style>
+  .card-input-hint {
+    display: none;
+    margin-top: 8px;
+    color: #FF5722;
+    line-height: 1.4;
+  }
+</style>
 <script>
   var employeeid;
   var guestid;
@@ -579,6 +607,60 @@ function submitcardLatestSyncJobText($job) {
 		});
 	}
 
+	function normalizeCardInput(value) {
+		return String(value || '').replace(/[\r\n]/g, '').trim();
+	}
+
+	function isValidCardInput(value) {
+		return /^[0-9]{10}$/.test(normalizeCardInput(value));
+	}
+
+	function showCardInputHint($input, message) {
+		var $hint = $input.closest('.layui-input-block').find('.card-input-hint');
+		$hint.text(message).show();
+	}
+
+	function clearCardInputHint($input) {
+		var $hint = $input.closest('.layui-input-block').find('.card-input-hint');
+		$hint.hide().text('');
+	}
+
+	function validateCardInput($input) {
+		var cardnum = normalizeCardInput($input.val());
+		if (!isValidCardInput(cardnum)) {
+			$input.val('');
+			showCardInputHint($input, '工牌ID必须是10位数字，已忽略本次输入');
+			return '';
+		}
+		$input.val(cardnum);
+		clearCardInputHint($input);
+		return cardnum;
+	}
+
+	function bindCardIdInput(selector, submitHandler) {
+		var $input = $(selector);
+		if (!$input.length) {
+			return;
+		}
+		$input.off('.cardReader');
+		$input.on('input.cardReader', function() {
+			if ($(this).val() !== '') {
+				clearCardInputHint($(this));
+			}
+		});
+		$input.on('keydown.cardReader', function(event) {
+			if (event.key === 'Enter' || event.keyCode === 13) {
+				event.preventDefault();
+				if (validateCardInput($(this)) !== '') {
+					submitHandler();
+				}
+			}
+		});
+		setTimeout(function() {
+			$input.trigger('focus');
+		}, 50);
+	}
+
     function submitguestcard(id) {
 		var htmlobj = $.ajax({
 			type: 'GET',
@@ -598,7 +680,10 @@ function submitcardLatestSyncJobText($job) {
                         type: 1,
                         title: '为访客 '+guestname+' 发卡',
                         content: $('#submitCardDialogModal').html(),
-                        area: ['400px', '200px']
+                        area: ['400px', '220px'],
+						success: function() {
+							bindCardIdInput('#cardnum', submitCard);
+						}
                     });
                     $('#userid').val(guestid);
                     $('#usertype').val('guest');
@@ -629,7 +714,10 @@ function submitcardLatestSyncJobText($job) {
                         type: 1,
                         title: '为员工 '+employeename+' 发卡',
                         content: $('#submitCardDialogModal').html(),
-                        area: ['400px', '200px']
+                        area: ['400px', '220px'],
+						success: function() {
+							bindCardIdInput('#cardnum', submitCard);
+						}
                     });
                     $('#userid').val(employeeid);
                     $('#usertype').val('employee');
@@ -650,6 +738,18 @@ function submitcardLatestSyncJobText($job) {
         area: ['400px', '300px']
       });
     }
+
+	function openReleaseCard() {
+		layer.open({
+			type: 1,
+			title: '回收工牌',
+			content: $('#releaseCardDialogModal').html(),
+			area: ['400px', '220px'],
+			success: function() {
+				bindCardIdInput('#release_cardnum', releaseCard);
+			}
+		});
+	}
 
     // 关闭对话框
     function closeDialog() {
@@ -689,7 +789,10 @@ function submitcardLatestSyncJobText($job) {
     function submitCard() {
       var userid = $('#userid').val();
       var usertype = $('#usertype').val();
-      var cardnum = $('#cardnum').val();
+      var cardnum = validateCardInput($('#cardnum'));
+	  if (cardnum === '') {
+		return;
+	  }
       
       var htmlobj = $.ajax({
 		type: 'POST',
@@ -715,6 +818,35 @@ function submitcardLatestSyncJobText($job) {
 		}
 	  });
     }
+
+	function releaseCard() {
+	  var cardnum = validateCardInput($('#release_cardnum'));
+	  if (cardnum === '') {
+		return;
+	  }
+
+      var htmlobj = $.ajax({
+		type: 'POST',
+		url: "?action=releasecard&page=panel&module=submitcard&csrf=<?php echo $_SESSION['token']; ?>",
+		async:true,
+		data: {
+            cardid: cardnum
+		},
+		error: function() {
+			vt.error("错误：" + htmlobj.responseText, {
+				position: "top-center",
+			});
+			return;
+		},
+		success: function() {
+			vt.success(htmlobj.responseText, {
+				position: "top-center",
+			});
+			location.reload();
+			return;
+		}
+	  });
+	}
 
 	// 同步飞书通讯录
     function syncFeishuMember() {
@@ -777,6 +909,8 @@ function submitcardLatestSyncJobText($job) {
     window.submitguestcard = submitguestcard;
     window.submitemployeecard = submitemployeecard;
     window.submitCard = submitCard;
+	window.openReleaseCard = openReleaseCard;
+	window.releaseCard = releaseCard;
 	window.syncFeishuMember = syncFeishuMember;
   });
 </script>

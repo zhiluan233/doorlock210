@@ -237,13 +237,17 @@ class PostHandler {
 						$id = $_POST['id'];
 						$type = $_POST['type'];
 						$cardId = AttendanceService::normalizeCardNumber($_POST['cardid'] ?? '');
+						if (!preg_match('/^[0-9]{10}$/', $cardId)) {
+							Header("HTTP/1.1 400 Bad Request");
+							exit("工牌ID必须是10位数字");
+						}
 						$employeeInfo = Database::querySingleLine("employee", Array("card_id" => $cardId));
 						$guestInfo = Database::querySingleLine("guest", Array("card_id" => $cardId));
-						if ($employeeInfo !== null && $cardId !== '') {
+						if ($employeeInfo && $cardId !== '') {
 							Header("HTTP/1.1 400 Bad Request");
 							exit("卡已经发给了员工 ".$employeeInfo['name']);
 						}
-						if ($guestInfo !== null && $cardId !== '') {
+						if ($guestInfo && $cardId !== '') {
 							Header("HTTP/1.1 400 Bad Request");
 							exit("卡已经发给了访客 ".$guestInfo['name']);
 						}
@@ -264,6 +268,48 @@ class PostHandler {
 							Header("HTTP/1.1 404 Not Found");
 							exit("发卡失败，请联系管理员");
 						}
+					} else {
+						exit("登录会话已超时，请重新登录");
+					}
+				break;
+				case "releasecard":
+					$um = new anim210System\UserCheck();
+					if($um->isLogged()) {
+						anim210System\Utils::checkCsrf();
+						$us = $um->getInfoByUser($_SESSION['user']);
+						if($us['type'] !== "admin") {
+							Header("HTTP/1.1 403 Forbidden");
+							exit("你没有足够的权限这么做");
+						}
+						$cardId = AttendanceService::normalizeCardNumber($_POST['cardid'] ?? '');
+						if (!preg_match('/^[0-9]{10}$/', $cardId)) {
+							Header("HTTP/1.1 400 Bad Request");
+							exit("工牌ID必须是10位数字");
+						}
+						$released = [];
+						$employeeInfo = Database::querySingleLine("employee", Array("card_id" => $cardId));
+						if ($employeeInfo) {
+							$update = Database::update("employee", Array("card_id" => ''), Array("id" => $employeeInfo['id']));
+							if ($update !== true) {
+								Header("HTTP/1.1 500 Internal Server Error");
+								exit("员工工牌回收失败：{$update}");
+							}
+							$released[] = "员工 ".$employeeInfo['name'];
+						}
+						$guestInfo = Database::querySingleLine("guest", Array("card_id" => $cardId));
+						if ($guestInfo) {
+							$update = Database::update("guest", Array("card_id" => ''), Array("id" => $guestInfo['id']));
+							if ($update !== true) {
+								Header("HTTP/1.1 500 Internal Server Error");
+								exit("访客工牌回收失败：{$update}");
+							}
+							$released[] = "访客 ".$guestInfo['name'];
+						}
+						if (count($released) === 0) {
+							Header("HTTP/1.1 404 Not Found");
+							exit("未找到绑定该工牌的员工或访客");
+						}
+						exit("工牌 {$cardId} 已回收：".implode("，", $released));
 					} else {
 						exit("登录会话已超时，请重新登录");
 					}

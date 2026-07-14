@@ -97,6 +97,8 @@ if ($isReadonly && !in_array($module, ['home', 'admininfo', 'accesslog', ''], tr
 		<script src="https://cdn.jsdelivr.net/npm/bootstrap-table@1.23.0/dist/bootstrap-table.min.js"></script>
 		<!-- Latest compiled and minified Locales -->
 		<script src="https://cdn.jsdelivr.net/npm/bootstrap-table@1.23.0/dist/locale/bootstrap-table-zh-CN.min.js"></script>
+		<script src="https://cdn.jsdelivr.net/npm/pinyin-pro@3.27.0/dist/index.min.js"></script>
+		<script src="asset/js/pinyinSearch.js"></script>
         <script type="module" src="https://unpkg.com/ionicons@6.0.2/dist/ionicons/ionicons.esm.js"></script>
         <script nomodule src="https://unpkg.com/ionicons@6.0.2/dist/ionicons/ionicons.js"></script>
         <script src="asset/js/ciPanel.js"></script>
