@@ -1390,9 +1390,10 @@ function badgeDepartmentDisplay($person, $role)
 
     $titleIndex = $config['titleDepth'] - 1;
     $valueIndex = $config['valueDepth'] - 1;
+    $subValueIndex = $config['subValueDepth'] - 1;
     if (count($levels) > $valueIndex) {
         $label = $levels[$titleIndex] ?? $config['defaultLabel'];
-        $value = $levels[$valueIndex];
+        $value = $levels[$valueIndex] . '/' . $levels[$subValueIndex];
     } else if (count($levels) > $titleIndex) {
         $label = $titleIndex > 0 ? ($levels[$titleIndex - 1] ?? $config['defaultLabel']) : $config['defaultLabel'];
         $value = $levels[$titleIndex];
@@ -1420,6 +1421,7 @@ function badgeDepartmentDisplayConfig()
     $rootDepth = max(0, intval($config['rootDepth'] ?? 0));
     $titleDepth = max(1, intval($config['titleDepth'] ?? 2));
     $valueDepth = max(1, intval($config['valueDepth'] ?? 3));
+    $subValueDepth = max(1, intval($config['subValueDepth'] ?? 4));
     if ($valueDepth <= $titleDepth) {
         $valueDepth = $titleDepth + 1;
     }
@@ -1431,7 +1433,8 @@ function badgeDepartmentDisplayConfig()
         'fallbackLabel' => $fallbackLabel !== '' ? $fallbackLabel : '部门',
         'rootDepth' => $rootDepth,
         'titleDepth' => $titleDepth,
-        'valueDepth' => $valueDepth
+        'valueDepth' => $valueDepth,
+        'subValueDepth' => $subValueDepth
     ];
 }
 
