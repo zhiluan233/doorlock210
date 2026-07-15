@@ -164,6 +164,7 @@ function badgeRenderPage($data)
     $className = $person['class_name'] ?? '';
     $trainingCenter = $person['training_center'] ?? '';
     $enrolledAt = intval($person['enrolled_at'] ?? 0);
+    $joinedAt = intval($person['joined_at'] ?? 0);
     $realname = $person['realname'] ?? '';
     $role = badgeRoleFromMode($mode);
     $departmentDisplay = badgeDepartmentDisplay($person, $role);
@@ -617,13 +618,14 @@ function badgeRenderPage($data)
 
             <div class="info-list">
                 <button class="info-row info-toggle" id="badgeIdentityToggle" type="button" data-card-id="<?php echo badgeH($cardId !== '' ? $cardId : '无法转换'); ?>" data-raw-uid="<?php echo badgeH($rawUid !== '' ? $rawUid : '--'); ?>">
-                    <span id="badgeIdentityLabel">工牌号</span>
+                    <span id="badgeIdentityLabel">工牌 ID</span>
                     <span id="badgeIdentityValue"><?php echo badgeH($cardId !== '' ? $cardId : '无法转换'); ?></span>
                 </button>
                 <?php if ($person && !$isMismatch) { ?>
                     <?php if ($employeeNo !== '') { ?><div class="info-row"><span>工号</span><span><?php echo badgeH($employeeNo); ?></span></div><?php } ?>
                     <?php if ($studentNo !== '') { ?><div class="info-row"><span>学号</span><span><?php echo badgeH($studentNo); ?></span></div><?php } ?>
-                    <?php if ($realname !== '' && $realname !== '--') { ?><div class="info-row"><span>真实姓名</span><span><?php echo badgeH($realname); ?></span></div><?php } ?>
+                    <?php if ($isPersonalProfile && $role === 'employee' && $joinedAt > 0) { ?><div class="info-row"><span>入职日期</span><span><?php echo badgeH(date('Y-m-d', $joinedAt)); ?></span></div><?php } ?>
+                    <?php if (!$isPersonalProfile && $realname !== '' && $realname !== '--') { ?><div class="info-row"><span>真实姓名</span><span><?php echo badgeH($realname); ?></span></div><?php } ?>
                     <?php if ($mobile !== '') { ?><div class="info-row"><span>手机号</span><span><?php echo badgeH($mobile); ?></span></div><?php } ?>
                     <?php if ($className !== '') { ?><div class="info-row"><span>班级</span><span><?php echo badgeH($className); ?></span></div><?php } ?>
                     <?php if ($trainingCenter !== '') { ?><div class="info-row"><span>培养中心</span><span><?php echo badgeH($trainingCenter); ?></span></div><?php } ?>
