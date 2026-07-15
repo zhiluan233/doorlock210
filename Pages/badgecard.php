@@ -452,7 +452,7 @@ function badgeRenderPage($data)
 <body>
     <main class="shell">
         <div class="topbar">
-            <span>两点十分门禁</span>
+            <span>个人中心</span>
             <span><?php echo badgeH($rawUid !== '' ? 'UID ' . $rawUid : 'NDEF 工牌'); ?></span>
         </div>
         <section class="badge-card">
