@@ -49,6 +49,7 @@ if (empty($_SESSION['member_open_id']) && !$isAdmin) {
 $currentEmployee = null;
 if (!empty($_SESSION['member_open_id'])) {
     $currentEmployee = Database::querySingleLine('employee', ['open_id' => $_SESSION['member_open_id']]);
+    $currentEmployee = badgeRefreshEmployeeProfile($currentEmployee);
 }
 if (!$currentEmployee && !$isAdmin) {
     badgeRenderPage([
@@ -61,6 +62,7 @@ if (!$currentEmployee && !$isAdmin) {
 }
 
 $assignedEmployee = Database::querySingleLine('employee', ['card_id' => $cardId]);
+$assignedEmployee = badgeRefreshEmployeeProfile($assignedEmployee);
 $assignedLearner = Database::querySingleLine('learner', ['card_id' => $cardId]);
 $assignedGuest = Database::querySingleLine('guest', ['card_id' => $cardId]);
 $isOwnBadge = $assignedEmployee && ($assignedEmployee['open_id'] ?? '') === ($_SESSION['member_open_id'] ?? '');
@@ -389,8 +391,8 @@ function badgeRenderPage($data)
             width: 38px;
             height: 38px;
             border-radius: 8px;
-            background: #fff3e8;
-            color: #f67302;
+            background: #ecfdf6;
+            color: #13b887;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -452,6 +454,12 @@ function badgeRenderPage($data)
             margin: 0;
             font-size: 18px;
             line-height: 1.35;
+        }
+        #quickMenuSheet .sheet-head {
+            justify-content: flex-end;
+        }
+        #quickMenuSheet .sheet-head h2 {
+            margin-right: auto;
         }
         .icon-btn {
             width: 38px;
@@ -1260,6 +1268,70 @@ function badgeIsSameEmployee($assignedEmployee, $currentEmployee, $adminUser)
         }
     }
     return false;
+}
+
+function badgeRefreshEmployeeProfile($employee)
+{
+    if (!is_array($employee) || trim((string)($employee['open_id'] ?? '')) === '') {
+        return $employee;
+    }
+    $avatarUrl = (string)($employee['avatar_url'] ?? '');
+    $needsRefresh = trim((string)($employee['job_title'] ?? '')) === ''
+        || intval($employee['joined_at'] ?? 0) <= 0
+        || $avatarUrl === ''
+        || preg_match('/image_size=(72|240)x/i', $avatarUrl);
+    if (!$needsRefresh) {
+        return $employee;
+    }
+
+    static $cache = [];
+    $openId = trim((string)$employee['open_id']);
+    if (!array_key_exists($openId, $cache)) {
+        try {
+            $feishu = new \anim210System\appLinkFeishu(true);
+            $cache[$openId] = $feishu->getNormalizedMemberProfile($openId);
+        } catch (\Throwable $e) {
+            $cache[$openId] = [];
+        }
+    }
+    $profile = is_array($cache[$openId]) ? $cache[$openId] : [];
+    if (count($profile) === 0) {
+        return $employee;
+    }
+
+    $data = [];
+    foreach ([
+        'user_id' => 'user_id',
+        'union_id' => 'union_id',
+        'name' => 'name',
+        'employee_id' => 'employee_no',
+        'email' => 'email',
+        'mobile' => 'mobile',
+        'tenant_key' => 'tenant_key',
+        'avatar_url' => 'avatar_url',
+        'job_title' => 'job_title'
+    ] as $dbField => $profileField) {
+        $value = trim((string)($profile[$profileField] ?? ''));
+        if ($value !== '') {
+            $data[$dbField] = $value;
+        }
+    }
+    if (($profile['real_name'] ?? '') !== '' && ($profile['real_name'] ?? '') !== '--') {
+        $data['realname'] = $profile['real_name'];
+    }
+    if (intval($profile['joined_at'] ?? 0) > 0) {
+        $data['joined_at'] = intval($profile['joined_at']);
+    }
+    if (isset($profile['status'])) {
+        $data['status'] = $profile['status'] ? 'true' : 'false';
+    }
+    if (count($data) === 0) {
+        return $employee;
+    }
+
+    $data['updated_at'] = time();
+    Database::update('employee', $data, ['id' => $employee['id']]);
+    return array_merge($employee, $data);
 }
 
 function badgeRoleFromMode($mode)

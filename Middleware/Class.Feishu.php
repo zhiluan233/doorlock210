@@ -59,6 +59,35 @@ class appLinkFeishu {
         return $this->lastError;
     }
 
+    public function getMemberProfile($openId) {
+        return $this->fetchMemberProfile($openId);
+    }
+
+    public function getNormalizedMemberProfile($openId) {
+        $profile = $this->fetchMemberProfile($openId);
+        if (!is_array($profile)) {
+            return [];
+        }
+        $statusDetail = $profile['status'] ?? [];
+        return [
+            'open_id' => $profile['open_id'] ?? $openId,
+            'user_id' => $profile['user_id'] ?? '',
+            'union_id' => $profile['union_id'] ?? '',
+            'name' => $profile['name'] ?? '',
+            'employee_no' => $profile['employee_no'] ?? ($profile['employee_id'] ?? ''),
+            'real_name' => $this->extractRealName($profile),
+            'status' => $this->isActiveStatus($statusDetail),
+            'status_detail' => $statusDetail,
+            'email' => $profile['email'] ?? ($profile['enterprise_email'] ?? ''),
+            'mobile' => $profile['mobile'] ?? '',
+            'tenant_key' => $profile['tenant_key'] ?? '',
+            'avatar_url' => $this->extractAvatarUrl($profile),
+            'job_title' => $this->extractJobTitle($profile),
+            'joined_at' => $this->extractJoinedAt($profile),
+            'raw_payload' => $profile
+        ];
+    }
+
     public function verifyFeishuMemberStatus($open_id) {
         $token = $this->getTenantAccessToken();
         if (!$token) {

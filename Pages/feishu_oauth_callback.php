@@ -55,20 +55,21 @@ if ($openId === '') {
 }
 
 $employee = Database::querySingleLine('employee', ['open_id' => $openId]);
+$contactProfile = $feishu->getNormalizedMemberProfile($openId);
 $employeeData = [
     'open_id' => $openId,
-    'user_id' => $userData['user_id'] ?? ($employee['user_id'] ?? ''),
-    'union_id' => $userData['union_id'] ?? ($employee['union_id'] ?? ''),
-    'name' => $userData['name'] ?? ($employee['name'] ?? ''),
-    'employee_id' => $userData['employee_no'] ?? ($employee['employee_id'] ?? ''),
-    'realname' => $employee['realname'] ?? '--',
-    'email' => $userData['email'] ?? ($employee['email'] ?? ''),
-    'mobile' => $userData['mobile'] ?? ($employee['mobile'] ?? ''),
-    'tenant_key' => $userData['tenant_key'] ?? ($employee['tenant_key'] ?? ''),
-    'avatar_url' => feishuOauthAvatarUrl($userData, $employee['avatar_url'] ?? ''),
-    'job_title' => feishuOauthProfileText($userData, ['job_title', 'jobTitle', 'position', 'title', 'employee_title', 'staff_title', 'work_title'], $employee['job_title'] ?? ''),
-    'joined_at' => feishuOauthJoinedAt($userData, intval($employee['joined_at'] ?? 0)),
-    'status' => $employee['status'] ?? 'true',
+    'user_id' => feishuOauthFirstText([$contactProfile['user_id'] ?? '', $userData['user_id'] ?? '', $employee['user_id'] ?? '']),
+    'union_id' => feishuOauthFirstText([$contactProfile['union_id'] ?? '', $userData['union_id'] ?? '', $employee['union_id'] ?? '']),
+    'name' => feishuOauthFirstText([$contactProfile['name'] ?? '', $userData['name'] ?? '', $employee['name'] ?? '']),
+    'employee_id' => feishuOauthFirstText([$contactProfile['employee_no'] ?? '', $userData['employee_no'] ?? '', $employee['employee_id'] ?? '']),
+    'realname' => feishuOauthFirstText([($contactProfile['real_name'] ?? '') !== '--' ? ($contactProfile['real_name'] ?? '') : '', $employee['realname'] ?? '', '--']),
+    'email' => feishuOauthFirstText([$contactProfile['email'] ?? '', $userData['email'] ?? '', $employee['email'] ?? '']),
+    'mobile' => feishuOauthFirstText([$contactProfile['mobile'] ?? '', $userData['mobile'] ?? '', $employee['mobile'] ?? '']),
+    'tenant_key' => feishuOauthFirstText([$contactProfile['tenant_key'] ?? '', $userData['tenant_key'] ?? '', $employee['tenant_key'] ?? '']),
+    'avatar_url' => feishuOauthFirstText([$contactProfile['avatar_url'] ?? '', feishuOauthAvatarUrl($userData, ''), $employee['avatar_url'] ?? '']),
+    'job_title' => feishuOauthFirstText([$contactProfile['job_title'] ?? '', feishuOauthProfileText($userData, ['job_title', 'jobTitle', 'position', 'title', 'employee_title', 'staff_title', 'work_title'], ''), $employee['job_title'] ?? '']),
+    'joined_at' => intval($contactProfile['joined_at'] ?? 0) > 0 ? intval($contactProfile['joined_at']) : feishuOauthJoinedAt($userData, intval($employee['joined_at'] ?? 0)),
+    'status' => isset($contactProfile['status']) ? ($contactProfile['status'] ? 'true' : 'false') : ($employee['status'] ?? 'true'),
     'updated_at' => time()
 ];
 if ($employee) {
@@ -266,6 +267,16 @@ function feishuOauthAvatarUrl($userData, $fallback = '')
         }
     }
     return (string)$fallback;
+}
+
+function feishuOauthFirstText($values)
+{
+    foreach ($values as $value) {
+        if (is_scalar($value) && trim((string)$value) !== '') {
+            return trim((string)$value);
+        }
+    }
+    return '';
 }
 
 function feishuOauthProfileText($userData, $fields, $fallback = '')
