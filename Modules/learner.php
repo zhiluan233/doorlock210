@@ -48,8 +48,12 @@ if ($learnerRs && $learnerRs instanceof \mysqli_result) {
 						<thead>
 							<tr>
 								<th>ID</th>
-								<th>姓名</th>
+								<th>花名</th>
+								<th>真实姓名</th>
 								<th>学号</th>
+								<th>手机号</th>
+								<th>班级</th>
+								<th>培养中心</th>
 								<th>状态</th>
 								<th>门禁卡号</th>
 								<th>备注</th>
@@ -66,7 +70,11 @@ if ($learnerRs && $learnerRs instanceof \mysqli_result) {
 								<tr>
 									<td><?php echo intval($learner['id']); ?></td>
 									<td><?php echo learnerH($learner['name']); ?></td>
+									<td><?php echo learnerH($learner['realname'] ?? ''); ?></td>
 									<td><?php echo learnerH($learner['student_no']); ?></td>
+									<td><?php echo learnerH($learner['mobile'] ?? ''); ?></td>
+									<td><?php echo learnerH($learner['class_name'] ?? ''); ?></td>
+									<td><?php echo learnerH($learner['training_center'] ?? ''); ?></td>
 									<td><?php echo $statusText; ?></td>
 									<td><?php echo learnerH($learner['card_id']); ?></td>
 									<td><?php echo learnerH($learner['remark']); ?></td>
@@ -94,15 +102,39 @@ if ($learnerRs && $learnerRs instanceof \mysqli_result) {
 	<div class="layui-form layui-form-pane" style="padding: 20px;">
 		<input type="hidden" id="learner_id">
 		<div class="layui-form-item">
-			<label class="layui-form-label">姓名</label>
+			<label class="layui-form-label">花名</label>
 			<div class="layui-input-block">
-				<input type="text" id="learner_name" class="layui-input" placeholder="学员姓名">
+				<input type="text" id="learner_name" class="layui-input" placeholder="学员花名">
+			</div>
+		</div>
+		<div class="layui-form-item">
+			<label class="layui-form-label">真实姓名</label>
+			<div class="layui-input-block">
+				<input type="text" id="learner_realname" class="layui-input" placeholder="必填">
 			</div>
 		</div>
 		<div class="layui-form-item">
 			<label class="layui-form-label">学号</label>
 			<div class="layui-input-block">
 				<input type="text" id="learner_student_no" class="layui-input" placeholder="唯一学号">
+			</div>
+		</div>
+		<div class="layui-form-item">
+			<label class="layui-form-label">手机号</label>
+			<div class="layui-input-block">
+				<input type="text" id="learner_mobile" class="layui-input" placeholder="选填">
+			</div>
+		</div>
+		<div class="layui-form-item">
+			<label class="layui-form-label">班级</label>
+			<div class="layui-input-block">
+				<input type="text" id="learner_class_name" class="layui-input" placeholder="选填">
+			</div>
+		</div>
+		<div class="layui-form-item">
+			<label class="layui-form-label">培养中心</label>
+			<div class="layui-input-block">
+				<input type="text" id="learner_training_center" class="layui-input" placeholder="选填">
 			</div>
 		</div>
 		<div class="layui-form-item">
@@ -238,11 +270,15 @@ layui.use(['layer', 'form'], function(){
 			type: 1,
 			title: id ? '编辑学员' : '添加学员',
 			content: $('#learnerDialogTpl').html(),
-			area: ['440px', '360px'],
+			area: ['440px', '560px'],
 			success: function() {
 				$('#learner_id').val(learner ? learner.id : '');
 				$('#learner_name').val(learner ? learner.name : '');
+				$('#learner_realname').val(learner ? (learner.realname || '') : '');
 				$('#learner_student_no').val(learner ? learner.student_no : '');
+				$('#learner_mobile').val(learner ? (learner.mobile || '') : '');
+				$('#learner_class_name').val(learner ? (learner.class_name || '') : '');
+				$('#learner_training_center').val(learner ? (learner.training_center || '') : '');
 				$('#learner_remark').val(learner ? learner.remark : '');
 				form.render();
 			}
@@ -256,7 +292,11 @@ layui.use(['layer', 'form'], function(){
 			data: {
 				id: $('#learner_id').val(),
 				name: $('#learner_name').val(),
+				realname: $('#learner_realname').val(),
 				student_no: $('#learner_student_no').val(),
+				mobile: $('#learner_mobile').val(),
+				class_name: $('#learner_class_name').val(),
+				training_center: $('#learner_training_center').val(),
 				remark: $('#learner_remark').val()
 			},
 			success: function(resp) {

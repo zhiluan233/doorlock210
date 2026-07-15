@@ -54,7 +54,7 @@ Database::delete('access_role_members', "DELETE m FROM `access_role_members` m L
 Database::delete('access_role_members', "DELETE m FROM `access_role_members` m LEFT JOIN `guest` g ON g.`open_id`=m.`employee_open_id` WHERE m.`member_kind`='guest' AND g.`open_id` IS NULL", '', true);
 
 $employeesRaw = roleFetchRows("SELECT `open_id`, `name`, `employee_id`, `status` FROM `employee` WHERE `open_id`<>'' ORDER BY `status` DESC, `name` ASC", 'employee');
-$learnersRaw = roleFetchRows("SELECT `student_no`, `name`, `status` FROM `learner` WHERE `student_no`<>'' ORDER BY `status` DESC, `name` ASC", 'learner');
+$learnersRaw = roleFetchRows("SELECT `student_no`, `name`, `realname`, `class_name`, `training_center`, `status` FROM `learner` WHERE `student_no`<>'' ORDER BY `status` DESC, `name` ASC", 'learner');
 $guestsRaw = roleFetchRows("SELECT `open_id`, `name`, `status` FROM `guest` WHERE `open_id`<>'' ORDER BY `status` DESC, `name` ASC", 'guest');
 $devicesRaw = roleFetchRows("SELECT `id`, `name`, `ip` FROM `devices` ORDER BY `id` ASC", 'devices');
 $rolesRaw = roleFetchRows("SELECT r.*, (SELECT COUNT(*) FROM `access_role_members` m WHERE m.`role_id`=r.`id`) AS member_count FROM `access_roles` r WHERE r.`enabled`=1 ORDER BY r.`builtin_key` DESC, r.`id` ASC", 'access_roles');
@@ -82,9 +82,15 @@ foreach ($guestsRaw as $guest) {
 $learners = [];
 foreach ($learnersRaw as $learner) {
 	$statusText = ($learner['status'] ?? '') === 'true' ? '' : '，禁用';
+	$meta = array_filter([
+		$learner['student_no'] ?? '',
+		$learner['realname'] ?? '',
+		$learner['class_name'] ?? '',
+		$learner['training_center'] ?? ''
+	], function($item) { return $item !== ''; });
 	$learners[] = [
 		'value' => $learner['student_no'],
-		'title' => $learner['name'].'（'.$learner['student_no'].$statusText.'）'
+		'title' => $learner['name'].'（'.implode('，', $meta).$statusText.'）'
 	];
 }
 

@@ -32,52 +32,89 @@ class ApiCenter {
         $payload = $this->readJsonBody();
         switch ($method) {
             case 'addLearner':
-                $this->addLearner($payload);
+            case 'createLearner':
+                $this->saveLearner($payload, 'upsert');
+            break;
+            case 'updateLearner':
+                $this->saveLearner($payload, 'update');
+            break;
+            case 'getLearner':
+                $this->getLearner($payload);
+            break;
+            case 'listLearners':
+                $this->listLearners($payload);
+            break;
+            case 'deleteLearner':
+                $this->deleteLearner($payload);
             break;
             default:
                 $this->respond(404, ['ok' => false, 'message' => 'Undefined API method '.$method]);
         }
     }
 
-    private function addLearner($payload)
+    private function saveLearner($payload, $mode)
     {
+        $mode = $mode === 'update' ? 'update' : 'upsert';
+        $id = intval($payload['id'] ?? 0);
         $studentNo = $this->normalizeStudentNo($payload['student_no'] ?? ($payload['studentNo'] ?? ''));
-        $name = trim((string)($payload['name'] ?? ''));
-        $remark = trim((string)($payload['remark'] ?? ''));
-        $hasStatus = array_key_exists('status', $payload);
-        $status = $hasStatus ? $this->normalizeStatus($payload['status']) : 'true';
-        $cardId = '';
-
-        if ($studentNo === '') {
-            $this->respond(422, ['ok' => false, 'message' => 'student_no不能为空，且只能包含字母、数字、下划线和中划线']);
-        }
-        if ($name === '') {
-            $this->respond(422, ['ok' => false, 'message' => 'name不能为空']);
-        }
-        if ($this->utf8Length($name) > 100 || $this->utf8Length($remark) > 200) {
-            $this->respond(422, ['ok' => false, 'message' => 'name或remark过长']);
-        }
-
-        $hasCardId = array_key_exists('card_id', $payload) || array_key_exists('cardId', $payload);
-        if ($hasCardId) {
-            $cardId = AttendanceService::normalizeCardNumber($payload['card_id'] ?? ($payload['cardId'] ?? ''));
-            if ($cardId !== '' && !preg_match('/^[0-9]{10}$/', $cardId)) {
-                $this->respond(422, ['ok' => false, 'message' => 'card_id必须为空或10位数字']);
+        $existing = null;
+        if ($mode === 'update') {
+            $existing = $this->findLearner($payload);
+            if (!$existing) {
+                $this->respond(404, ['ok' => false, 'message' => '学员不存在']);
             }
-            $this->assertCardAvailable($cardId, $studentNo);
+            $studentNo = $existing['student_no'] ?? '';
+            $id = intval($existing['id']);
+        } else {
+            if ($studentNo === '') {
+                $this->respond(422, ['ok' => false, 'message' => 'student_no不能为空，且只能包含字母、数字、下划线和中划线']);
+            }
+            $existing = Database::querySingleLine('learner', ['student_no' => $studentNo]);
+            if ($existing) {
+                $id = intval($existing['id']);
+            }
         }
+
+        $hasName = array_key_exists('name', $payload);
+        $hasRealname = array_key_exists('realname', $payload) || array_key_exists('real_name', $payload);
+        $hasMobile = array_key_exists('mobile', $payload);
+        $hasClassName = array_key_exists('class_name', $payload) || array_key_exists('className', $payload);
+        $hasTrainingCenter = array_key_exists('training_center', $payload) || array_key_exists('trainingCenter', $payload);
+        $hasRemark = array_key_exists('remark', $payload);
+        $hasStatus = array_key_exists('status', $payload);
+        $hasCardId = array_key_exists('card_id', $payload) || array_key_exists('cardId', $payload);
+
+        $name = $hasName ? trim((string)$payload['name']) : ($existing['name'] ?? '');
+        $realname = $hasRealname ? trim((string)($payload['realname'] ?? ($payload['real_name'] ?? ''))) : ($existing['realname'] ?? '');
+        $mobile = $hasMobile ? trim((string)$payload['mobile']) : ($existing['mobile'] ?? '');
+        $className = $hasClassName ? trim((string)($payload['class_name'] ?? ($payload['className'] ?? ''))) : ($existing['class_name'] ?? '');
+        $trainingCenter = $hasTrainingCenter ? trim((string)($payload['training_center'] ?? ($payload['trainingCenter'] ?? ''))) : ($existing['training_center'] ?? '');
+        $remark = $hasRemark ? trim((string)$payload['remark']) : ($existing['remark'] ?? '');
+        $status = $hasStatus ? $this->normalizeStatus($payload['status']) : ($existing['status'] ?? 'true');
+        $cardId = $hasCardId ? AttendanceService::normalizeCardNumber($payload['card_id'] ?? ($payload['cardId'] ?? '')) : ($existing['card_id'] ?? '');
+
+        if ($name === '') {
+            $this->respond(422, ['ok' => false, 'message' => 'name（花名）不能为空']);
+        }
+        if ($realname === '') {
+            $this->respond(422, ['ok' => false, 'message' => 'realname（真实姓名）不能为空']);
+        }
+        $this->validateLearnerText($name, $realname, $mobile, $className, $trainingCenter, $remark);
+        if ($hasCardId && $cardId !== '' && !preg_match('/^[0-9]{10}$/', $cardId)) {
+            $this->respond(422, ['ok' => false, 'message' => 'card_id必须为空或10位数字']);
+        }
+        $this->assertCardAvailable($cardId, $studentNo, $id);
 
         $now = time();
-        $existing = Database::querySingleLine('learner', ['student_no' => $studentNo]);
-        $data = [
-            'student_no' => $studentNo,
-            'name' => $name,
-            'remark' => $remark,
-            'updated_at' => $now
-        ];
-        if ($hasStatus || !$existing) {
-            $data['status'] = $status;
-        }
+        $data = ['updated_at' => $now];
+        if ($mode !== 'update') { $data['student_no'] = $studentNo; }
+        if ($hasName || !$existing) { $data['name'] = $name; }
+        if ($hasRealname || !$existing) { $data['realname'] = $realname; }
+        if ($hasMobile || !$existing) { $data['mobile'] = $mobile; }
+        if ($hasClassName || !$existing) { $data['class_name'] = $className; }
+        if ($hasTrainingCenter || !$existing) { $data['training_center'] = $trainingCenter; }
+        if ($hasRemark || !$existing) { $data['remark'] = $remark; }
+        if ($hasStatus || !$existing) { $data['status'] = $status; }
         if ($hasCardId) {
             $data['card_id'] = $cardId;
         }
@@ -91,6 +128,12 @@ class ApiCenter {
             if (!$hasCardId) {
                 $data['card_id'] = '';
             }
+            if (!isset($data['mobile'])) {
+                $data['mobile'] = '';
+            }
+            if (!isset($data['remark'])) {
+                $data['remark'] = '';
+            }
             $data['created_at'] = $now;
             $result = Database::insert('learner', $data);
             $action = 'created';
@@ -102,21 +145,134 @@ class ApiCenter {
             $this->respond(500, ['ok' => false, 'message' => '学员保存失败：'.$result]);
         }
 
-        $responseStatus = ($hasStatus || !$existing) ? $status : ($existing['status'] ?? 'true');
-        $responseCardId = $hasCardId ? $cardId : ($existing ? ($existing['card_id'] ?? '') : '');
+        $learner = Database::querySingleLine('learner', ['id' => $id]);
         $this->respond($action === 'created' ? 201 : 200, [
             'ok' => true,
             'message' => $action === 'created' ? '学员已创建' : '学员已更新',
             'action' => $action,
-            'learner' => [
-                'id' => $id,
-                'student_no' => $studentNo,
-                'name' => $name,
-                'status' => $responseStatus,
-                'card_id' => $responseCardId,
-                'remark' => $remark
-            ]
+            'learner' => $this->learnerPayload($learner ?: [])
         ]);
+    }
+
+    private function getLearner($payload)
+    {
+        $learner = $this->findLearner($payload);
+        if (!$learner) {
+            $this->respond(404, ['ok' => false, 'message' => '学员不存在']);
+        }
+        $this->respond(200, ['ok' => true, 'learner' => $this->learnerPayload($learner)]);
+    }
+
+    private function listLearners($payload)
+    {
+        global $conn;
+
+        $page = max(1, intval($payload['page'] ?? 1));
+        $pageSize = min(100, max(1, intval($payload['page_size'] ?? ($payload['pageSize'] ?? 20))));
+        $offset = ($page - 1) * $pageSize;
+        $where = ['1=1'];
+
+        $status = $payload['status'] ?? '';
+        if ($status !== '') {
+            $where[] = "`status`='" . mysqli_real_escape_string($conn, $this->normalizeStatus($status)) . "'";
+        }
+
+        $keyword = trim((string)($payload['q'] ?? ($payload['keyword'] ?? '')));
+        if ($keyword !== '') {
+            $safe = mysqli_real_escape_string($conn, $keyword);
+            $like = "'%{$safe}%'";
+            $where[] = "(`student_no` LIKE {$like} OR `name` LIKE {$like} OR `realname` LIKE {$like} OR `mobile` LIKE {$like} OR `class_name` LIKE {$like} OR `training_center` LIKE {$like} OR `card_id` LIKE {$like})";
+        }
+
+        $whereSql = implode(' AND ', $where);
+        $countRow = Database::querySingleLine('learner', "SELECT COUNT(*) AS `total` FROM `learner` WHERE {$whereSql}", true);
+        $total = intval($countRow['total'] ?? 0);
+        $rs = Database::query('learner', "SELECT * FROM `learner` WHERE {$whereSql} ORDER BY `id` DESC LIMIT {$offset}, {$pageSize}", '', true);
+        $items = [];
+        if ($rs && $rs instanceof \mysqli_result) {
+            while ($row = mysqli_fetch_assoc($rs)) {
+                $items[] = $this->learnerPayload($row);
+            }
+        }
+
+        $this->respond(200, [
+            'ok' => true,
+            'page' => $page,
+            'page_size' => $pageSize,
+            'total' => $total,
+            'items' => $items
+        ]);
+    }
+
+    private function deleteLearner($payload)
+    {
+        $learner = $this->findLearner($payload);
+        if (!$learner) {
+            $this->respond(404, ['ok' => false, 'message' => '学员不存在']);
+        }
+        $studentNo = $learner['student_no'] ?? '';
+        if ($studentNo !== '') {
+            Database::delete('access_role_members', [
+                'member_kind' => 'learner',
+                'employee_open_id' => $studentNo
+            ]);
+            Database::delete('access_policies', [
+                'subject_kind' => 'learner',
+                'subject_type' => 'learner',
+                'subject_value' => $studentNo
+            ]);
+        }
+        $result = Database::delete('learner', ['id' => $learner['id']]);
+        if ($result !== true) {
+            $this->respond(500, ['ok' => false, 'message' => '学员删除失败：'.$result]);
+        }
+        $this->respond(200, [
+            'ok' => true,
+            'message' => '学员已删除',
+            'learner' => $this->learnerPayload($learner)
+        ]);
+    }
+
+    private function findLearner($payload)
+    {
+        $id = intval($payload['id'] ?? 0);
+        if ($id > 0) {
+            return Database::querySingleLine('learner', ['id' => $id]);
+        }
+
+        $studentNo = $this->normalizeStudentNo($payload['student_no'] ?? ($payload['studentNo'] ?? ''));
+        if ($studentNo === '') {
+            return null;
+        }
+        return Database::querySingleLine('learner', ['student_no' => $studentNo]);
+    }
+
+    private function learnerPayload($learner)
+    {
+        return [
+            'id' => intval($learner['id'] ?? 0),
+            'student_no' => (string)($learner['student_no'] ?? ''),
+            'name' => (string)($learner['name'] ?? ''),
+            'realname' => (string)($learner['realname'] ?? ''),
+            'mobile' => (string)($learner['mobile'] ?? ''),
+            'class_name' => (string)($learner['class_name'] ?? ''),
+            'training_center' => (string)($learner['training_center'] ?? ''),
+            'status' => (string)($learner['status'] ?? ''),
+            'card_id' => (string)($learner['card_id'] ?? ''),
+            'remark' => (string)($learner['remark'] ?? ''),
+            'created_at' => intval($learner['created_at'] ?? 0),
+            'updated_at' => intval($learner['updated_at'] ?? 0)
+        ];
+    }
+
+    private function validateLearnerText($name, $realname, $mobile, $className, $trainingCenter, $remark)
+    {
+        if ($this->utf8Length($name) > 100 || $this->utf8Length($realname) > 100 || $this->utf8Length($className) > 100 || $this->utf8Length($trainingCenter) > 100 || $this->utf8Length($remark) > 200) {
+            $this->respond(422, ['ok' => false, 'message' => 'name、realname、class_name、training_center或remark过长']);
+        }
+        if ($mobile !== '' && (!preg_match('/^[0-9\+\-\s]{1,32}$/', $mobile) || strlen($mobile) > 32)) {
+            $this->respond(422, ['ok' => false, 'message' => 'mobile格式不合法']);
+        }
     }
 
     private function isAuthorized()
@@ -175,7 +331,7 @@ class ApiCenter {
         return $payload;
     }
 
-    private function assertCardAvailable($cardId, $studentNo)
+    private function assertCardAvailable($cardId, $studentNo, $learnerId = 0)
     {
         if ($cardId === '') {
             return;
@@ -190,7 +346,7 @@ class ApiCenter {
             $this->respond(409, ['ok' => false, 'message' => '卡已经发给了访客 '.$guest['name']]);
         }
         $learner = Database::querySingleLine('learner', ['card_id' => $cardId]);
-        if ($learner && ($learner['student_no'] ?? '') !== $studentNo) {
+        if ($learner && intval($learner['id'] ?? 0) !== intval($learnerId) && ($learner['student_no'] ?? '') !== $studentNo) {
             $this->respond(409, ['ok' => false, 'message' => '卡已经发给了学员 '.$learner['name']]);
         }
     }

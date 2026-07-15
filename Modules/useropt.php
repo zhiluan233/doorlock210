@@ -157,7 +157,7 @@ function useroptRoleName($role) {
 					<table id="feishuUser1" class="table table-bordered table-auto" data-toggle="table" data-pagination="true" data-page-size="10" data-page-list="[5, 10, 20, 30, 50, 'All']" data-sortable="true" data-search="true" style="clear: both;margin-top: 20px;">
                         <thead>
                             <tr>
-                                <th>姓名</th>
+                                <th>花名</th>
                                 <th>工号</th>
                                 <th>员工状态</th>
                                 <th>后台权限</th>

@@ -83,6 +83,10 @@ class Migrator {
             `id` bigint unsigned NOT NULL AUTO_INCREMENT,
             `student_no` varchar(128) NOT NULL,
             `name` varchar(255) NOT NULL DEFAULT '',
+            `realname` varchar(255) NOT NULL DEFAULT '',
+            `mobile` varchar(64) NOT NULL DEFAULT '',
+            `class_name` varchar(255) NOT NULL DEFAULT '',
+            `training_center` varchar(255) NOT NULL DEFAULT '',
             `card_id` varchar(64) NOT NULL DEFAULT '',
             `status` varchar(16) NOT NULL DEFAULT 'true',
             `remark` varchar(255) NOT NULL DEFAULT '',
@@ -92,7 +96,10 @@ class Migrator {
             UNIQUE KEY `uniq_learner_student_no` (`student_no`),
             KEY `idx_learner_card_id` (`card_id`),
             KEY `idx_learner_status` (`status`),
-            KEY `idx_learner_name` (`name`(191))
+            KEY `idx_learner_name` (`name`(191)),
+            KEY `idx_learner_realname` (`realname`(191)),
+            KEY `idx_learner_class_name` (`class_name`(191)),
+            KEY `idx_learner_training_center` (`training_center`(191))
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4", $errors);
 
         self::exec("CREATE TABLE IF NOT EXISTS `access_role_members` (
@@ -200,6 +207,10 @@ class Migrator {
 
         self::addColumn('learner', 'student_no', "varchar(128) NOT NULL DEFAULT ''", $errors);
         self::addColumn('learner', 'name', "varchar(255) NOT NULL DEFAULT ''", $errors);
+        self::addColumn('learner', 'realname', "varchar(255) NOT NULL DEFAULT ''", $errors);
+        self::addColumn('learner', 'mobile', "varchar(64) NOT NULL DEFAULT ''", $errors);
+        self::addColumn('learner', 'class_name', "varchar(255) NOT NULL DEFAULT ''", $errors);
+        self::addColumn('learner', 'training_center', "varchar(255) NOT NULL DEFAULT ''", $errors);
         self::addColumn('learner', 'card_id', "varchar(64) NOT NULL DEFAULT ''", $errors);
         self::addColumn('learner', 'status', "varchar(16) NOT NULL DEFAULT 'true'", $errors);
         self::addColumn('learner', 'remark', "varchar(255) NOT NULL DEFAULT ''", $errors);
@@ -231,6 +242,9 @@ class Migrator {
         self::addIndex('learner', 'idx_learner_card_id', ['card_id'], $errors);
         self::addIndex('learner', 'idx_learner_status', ['status'], $errors);
         self::addIndex('learner', 'idx_learner_name', [['name' => 'name', 'length' => 191]], $errors);
+        self::addIndex('learner', 'idx_learner_realname', [['name' => 'realname', 'length' => 191]], $errors);
+        self::addIndex('learner', 'idx_learner_class_name', [['name' => 'class_name', 'length' => 191]], $errors);
+        self::addIndex('learner', 'idx_learner_training_center', [['name' => 'training_center', 'length' => 191]], $errors);
         self::addIndex('devices', 'idx_devices_did', ['did'], $errors);
         self::addIndex('devices', 'idx_devices_ip', ['ip'], $errors);
         self::addIndex('user', 'idx_user_open_id', ['open_id'], $errors);
@@ -281,6 +295,7 @@ class Migrator {
         self::exec("UPDATE `employee` SET `card_id`=LPAD(`card_id`, 10, '0') WHERE `card_id`<>'' AND `card_id` REGEXP '^[0-9]+$' AND CHAR_LENGTH(`card_id`)<10", $errors);
         self::exec("UPDATE `guest` SET `card_id`=LPAD(`card_id`, 10, '0') WHERE `card_id`<>'' AND `card_id` REGEXP '^[0-9]+$' AND CHAR_LENGTH(`card_id`)<10", $errors);
         self::exec("UPDATE `learner` SET `card_id`=LPAD(`card_id`, 10, '0') WHERE `card_id`<>'' AND `card_id` REGEXP '^[0-9]+$' AND CHAR_LENGTH(`card_id`)<10", $errors);
+        self::exec("UPDATE `learner` SET `realname`=`name` WHERE `realname`=''", $errors);
         self::exec("UPDATE `logs` SET `cardid`=LPAD(`cardid`, 10, '0') WHERE `cardid`<>'' AND `cardid` REGEXP '^[0-9]+$' AND CHAR_LENGTH(`cardid`)<10", $errors);
         self::exec("UPDATE `access_roles` SET `subject_kind`='employee' WHERE `subject_kind`=''", $errors);
         self::exec("UPDATE `access_role_members` SET `member_kind`='employee' WHERE `member_kind`=''", $errors);

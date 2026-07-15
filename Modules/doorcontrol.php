@@ -78,7 +78,13 @@ foreach ($rolesRaw as $role) {
 
 $learners = [];
 foreach ($learnersRaw as $learner) {
-	$learners[] = ['value' => $learner['student_no'], 'title' => $learner['name'].'（'.$learner['student_no'].'）'];
+	$meta = array_filter([
+		$learner['student_no'] ?? '',
+		$learner['realname'] ?? '',
+		$learner['class_name'] ?? '',
+		$learner['training_center'] ?? ''
+	], function($item) { return $item !== ''; });
+	$learners[] = ['value' => $learner['student_no'], 'title' => $learner['name'].'（'.implode('，', $meta).'）'];
 }
 
 $guests = [];

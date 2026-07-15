@@ -228,7 +228,7 @@ function submitcardLatestSyncJobText($job) {
                         <thead>
                             <tr>
                                 <th>ID</th>
-                                <th>姓名</th>
+                                <th>花名</th>
                                 <th>工号</th>
                                 <th>真实姓名</th>
                                 <th>状态</th>

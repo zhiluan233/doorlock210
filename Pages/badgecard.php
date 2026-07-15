@@ -146,6 +146,9 @@ function badgeRenderPage($data)
     $name = $person['name'] ?? ($mode === 'admin_empty' ? '空置工牌' : '工牌');
     $employeeNo = $person['employee_id'] ?? '';
     $studentNo = $person['student_no'] ?? '';
+    $mobile = $person['mobile'] ?? '';
+    $className = $person['class_name'] ?? '';
+    $trainingCenter = $person['training_center'] ?? '';
     $department = $person['department_name'] ?? '';
     $realname = $person['realname'] ?? '';
     $isAdminMode = strpos($mode, 'admin_') === 0;
@@ -371,6 +374,24 @@ function badgeRenderPage($data)
             font-size: 16px;
             background: transparent;
         }
+        .assign-tabs {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+        }
+        .assign-tab {
+            min-height: 38px;
+            border: 1px solid #d0d5dd;
+            border-radius: 8px;
+            background: #fff;
+            color: #344054;
+            font-size: 14px;
+        }
+        .assign-tab.active {
+            background: #13b887;
+            border-color: #13b887;
+            color: #fff;
+        }
         .result-list {
             overflow: auto;
             display: grid;
@@ -463,6 +484,9 @@ function badgeRenderPage($data)
                     <?php if ($employeeNo !== '') { ?><div class="info-row"><span>工号</span><span><?php echo badgeH($employeeNo); ?></span></div><?php } ?>
                     <?php if ($studentNo !== '') { ?><div class="info-row"><span>学号</span><span><?php echo badgeH($studentNo); ?></span></div><?php } ?>
                     <?php if ($realname !== '' && $realname !== '--') { ?><div class="info-row"><span>真实姓名</span><span><?php echo badgeH($realname); ?></span></div><?php } ?>
+                    <?php if ($mobile !== '') { ?><div class="info-row"><span>手机号</span><span><?php echo badgeH($mobile); ?></span></div><?php } ?>
+                    <?php if ($className !== '') { ?><div class="info-row"><span>班级</span><span><?php echo badgeH($className); ?></span></div><?php } ?>
+                    <?php if ($trainingCenter !== '') { ?><div class="info-row"><span>培养中心</span><span><?php echo badgeH($trainingCenter); ?></span></div><?php } ?>
                     <?php if ($department !== '') { ?><div class="info-row"><span>部门</span><span><?php echo badgeH($department); ?></span></div><?php } ?>
                 <?php } elseif ($person && $isMismatch) { ?>
                     <div class="info-row"><span>当前账号</span><span><?php echo badgeH($person['name'] ?? ''); ?></span></div>
@@ -498,14 +522,18 @@ function badgeRenderPage($data)
         <div class="sheet-mask" id="assignSheet" aria-hidden="true">
             <section class="sheet">
                 <div class="sheet-head">
-                    <h2>选择员工发工牌</h2>
+                    <h2>选择人员发工牌</h2>
                     <button class="icon-btn" type="button" onclick="closeAssignSheet()" aria-label="关闭"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+                <div class="assign-tabs" role="tablist" aria-label="发卡对象">
+                    <button class="assign-tab active" type="button" data-kind="employee" onclick="switchAssignKind('employee')">员工</button>
+                    <button class="assign-tab" type="button" data-kind="learner" onclick="switchAssignKind('learner')">学员</button>
                 </div>
                 <label class="search-field">
                     <i class="fa-solid fa-magnifying-glass"></i>
-                    <input id="employeeSearch" type="search" placeholder="搜索姓名、拼音、工号、部门" autocomplete="off">
+                    <input id="personSearch" type="search" placeholder="搜索花名、拼音、工号、部门" autocomplete="off">
                 </label>
-                <div class="result-list" id="employeeResults"></div>
+                <div class="result-list" id="personResults"></div>
                 <div class="sheet-actions">
                     <button class="btn btn-primary" id="assignButton" type="button" onclick="assignBadge()" disabled>保存发卡</button>
                 </div>
@@ -520,10 +548,11 @@ function badgeRenderPage($data)
     <script>
         var BADGE_CARD_ID = <?php echo json_encode($cardId, JSON_UNESCAPED_UNICODE); ?>;
         var BADGE_CSRF = <?php echo json_encode($csrf, JSON_UNESCAPED_UNICODE); ?>;
-        var selectedEmployee = null;
+        var assignKind = 'employee';
+        var selectedPerson = null;
         var searchTimer = null;
-        var employeeSearchCache = null;
-        var employeeSearchPromise = null;
+        var personSearchCache = {employee: null, learner: null};
+        var personSearchPromise = {employee: null, learner: null};
 
         function toast(message) {
             var el = document.getElementById('toast');
@@ -579,10 +608,10 @@ function badgeRenderPage($data)
             sheet.className = 'sheet-mask show';
             sheet.setAttribute('aria-hidden', 'false');
             setTimeout(function() {
-                var input = document.getElementById('employeeSearch');
+                var input = document.getElementById('personSearch');
                 if (input) {
                     input.focus();
-                    searchEmployees('');
+                    searchPeople('');
                 }
             }, 80);
         }
@@ -596,26 +625,58 @@ function badgeRenderPage($data)
             sheet.setAttribute('aria-hidden', 'true');
         }
 
-        function renderEmployees(items) {
-            var list = document.getElementById('employeeResults');
+        function switchAssignKind(kind) {
+            assignKind = kind === 'learner' ? 'learner' : 'employee';
+            selectedPerson = null;
+            var assignButton = document.getElementById('assignButton');
+            if (assignButton) {
+                assignButton.disabled = true;
+            }
+            Array.prototype.forEach.call(document.querySelectorAll('.assign-tab'), function(tab) {
+                tab.classList.toggle('active', tab.getAttribute('data-kind') === assignKind);
+            });
+            var input = document.getElementById('personSearch');
+            if (input) {
+                input.value = '';
+                input.placeholder = assignKind === 'learner' ? '搜索花名、拼音、学号、班级、培养中心' : '搜索花名、拼音、工号、部门';
+                input.focus();
+            }
+            searchPeople('');
+        }
+
+        function renderPeople(items) {
+            var list = document.getElementById('personResults');
             if (!list) {
                 return;
             }
             if (!items || !items.length) {
-                list.innerHTML = '<div class="person-option"><strong>未找到员工</strong><span>换个关键词再试</span></div>';
+                list.innerHTML = '<div class="person-option"><strong>未找到' + (assignKind === 'learner' ? '学员' : '员工') + '</strong><span>换个关键词再试</span></div>';
                 return;
             }
             list.innerHTML = items.map(function(item) {
                 var cardText = item.card_id ? '已绑定 ' + item.card_id : '未绑定工牌';
+                if (assignKind === 'learner') {
+                    var learnerMeta = [
+                        item.student_no || '未设置学号',
+                        item.realname || '未设置真实姓名',
+                        item.class_name || '未设置班级',
+                        item.training_center || '未设置培养中心',
+                        cardText
+                    ].join(' · ');
+                    return '<button class="person-option" type="button" data-id="' + item.id + '">' +
+                        '<strong>' + escapeHtml(item.name || '未设置花名') + '</strong>' +
+                        '<span>' + escapeHtml(learnerMeta) + '</span>' +
+                        '</button>';
+                }
                 var dept = item.department_name || '未设置部门';
                 return '<button class="person-option" type="button" data-id="' + item.id + '">' +
-                    '<strong>' + escapeHtml(item.name || '未命名员工') + '</strong>' +
+                    '<strong>' + escapeHtml(item.name || '未设置花名') + '</strong>' +
                     '<span>' + escapeHtml((item.employee_id || '未分配工号') + ' · ' + dept + ' · ' + cardText) + '</span>' +
                     '</button>';
             }).join('');
             Array.prototype.forEach.call(list.querySelectorAll('.person-option[data-id]'), function(btn, index) {
                 btn.addEventListener('click', function() {
-                    selectedEmployee = items[index];
+                    selectedPerson = items[index];
                     Array.prototype.forEach.call(list.querySelectorAll('.person-option'), function(node) {
                         node.classList.remove('selected');
                     });
@@ -625,48 +686,49 @@ function badgeRenderPage($data)
             });
         }
 
-        function searchEmployees(keyword) {
+        function searchPeople(keyword) {
             keyword = keyword || '';
             if (getPinyinApi()) {
-                loadEmployeeSearchCache().then(function(items) {
-                    var filtered = filterEmployeesByKeyword(items, keyword);
-                    renderEmployees(filtered.slice(0, 30));
+                loadPersonSearchCache(assignKind).then(function(items) {
+                    var filtered = filterPeopleByKeyword(items, keyword);
+                    renderPeople(filtered.slice(0, 30));
                 }).catch(function() {
-                    searchEmployeesFromServer(keyword);
+                    searchPeopleFromServer(keyword);
                 });
                 return;
             }
-            searchEmployeesFromServer(keyword);
+            searchPeopleFromServer(keyword);
         }
 
-        function searchEmployeesFromServer(keyword) {
-            postAction('searchBadgeEmployees', {q: keyword || ''}).then(function(text) {
+        function searchPeopleFromServer(keyword) {
+            postAction(assignKind === 'learner' ? 'searchBadgeLearners' : 'searchBadgeEmployees', {q: keyword || ''}).then(function(text) {
                 var data = JSON.parse(text);
-                renderEmployees(data.items || []);
+                renderPeople(data.items || []);
             }).catch(function(error) {
                 toast(error.message || '搜索失败');
             });
         }
 
-        function loadEmployeeSearchCache() {
-            if (employeeSearchCache) {
-                return Promise.resolve(employeeSearchCache);
+        function loadPersonSearchCache(kind) {
+            kind = kind === 'learner' ? 'learner' : 'employee';
+            if (personSearchCache[kind]) {
+                return Promise.resolve(personSearchCache[kind]);
             }
-            if (employeeSearchPromise) {
-                return employeeSearchPromise;
+            if (personSearchPromise[kind]) {
+                return personSearchPromise[kind];
             }
-            employeeSearchPromise = postAction('searchBadgeEmployees', {q: '', all: '1'}).then(function(text) {
+            personSearchPromise[kind] = postAction(kind === 'learner' ? 'searchBadgeLearners' : 'searchBadgeEmployees', {q: '', all: '1'}).then(function(text) {
                 var data = JSON.parse(text);
-                employeeSearchCache = data.items || [];
-                employeeSearchCache.forEach(function(item) {
-                    item._searchText = buildEmployeeSearchText(item);
+                personSearchCache[kind] = data.items || [];
+                personSearchCache[kind].forEach(function(item) {
+                    item._searchText = buildPersonSearchText(item, kind);
                 });
-                return employeeSearchCache;
+                return personSearchCache[kind];
             }).catch(function(error) {
-                employeeSearchPromise = null;
+                personSearchPromise[kind] = null;
                 throw error;
             });
-            return employeeSearchPromise;
+            return personSearchPromise[kind];
         }
 
         function getPinyinApi() {
@@ -699,14 +761,23 @@ function badgeRenderPage($data)
             }
         }
 
-        function buildEmployeeSearchText(item) {
-            var raw = normalizeSearchText([
+        function buildPersonSearchText(item, kind) {
+            var parts = kind === 'learner' ? [
+                item.name || '',
+                item.realname || '',
+                item.student_no || '',
+                item.mobile || '',
+                item.class_name || '',
+                item.training_center || '',
+                item.card_id || ''
+            ] : [
                 item.name || '',
                 item.realname || '',
                 item.employee_id || '',
                 item.department_name || '',
                 item.card_id || ''
-            ].join(' '));
+            ];
+            var raw = normalizeSearchText(parts.join(' '));
             var fullPinyin = normalizeSearchText(toPinyinText(raw, 'pinyin', ' ', 'spaced'));
             var firstPinyin = normalizeSearchText(toPinyinText(raw, 'first', '', 'removed'));
             return [
@@ -718,14 +789,14 @@ function badgeRenderPage($data)
             ].join(' ');
         }
 
-        function filterEmployeesByKeyword(items, keyword) {
+        function filterPeopleByKeyword(items, keyword) {
             var query = normalizeSearchText(keyword);
             if (query === '') {
                 return items || [];
             }
             var terms = query.split(/\s+/);
             return (items || []).filter(function(item) {
-                var target = item._searchText || buildEmployeeSearchText(item);
+                var target = item._searchText || buildPersonSearchText(item, assignKind);
                 var compactTarget = compactSearchText(target);
                 return terms.every(function(term) {
                     var compactTerm = compactSearchText(term);
@@ -735,17 +806,18 @@ function badgeRenderPage($data)
         }
 
         function assignBadge() {
-            if (!selectedEmployee) {
-                toast('请选择员工');
+            if (!selectedPerson) {
+                toast('请选择' + (assignKind === 'learner' ? '学员' : '员工'));
                 return;
             }
-            var message = selectedEmployee.card_id ? '该员工已有工牌，继续会替换为当前工牌。是否继续？' : '确定为 ' + selectedEmployee.name + ' 发放该工牌？';
+            var subjectLabel = assignKind === 'learner' ? '学员' : '员工';
+            var message = selectedPerson.card_id ? '该' + subjectLabel + '已有工牌，继续会替换为当前工牌。是否继续？' : '确定为 ' + selectedPerson.name + ' 发放该工牌？';
             if (!confirm(message)) {
                 return;
             }
             postAction('submitcard', {
-                id: selectedEmployee.id,
-                type: 'employee',
+                id: selectedPerson.id,
+                type: assignKind,
                 cardid: BADGE_CARD_ID
             }).then(function(text) {
                 toast(text || '发卡成功');
@@ -762,16 +834,16 @@ function badgeRenderPage($data)
         }
 
         (function() {
-            var input = document.getElementById('employeeSearch');
+            var input = document.getElementById('personSearch');
             if (!input) {
                 return;
             }
             input.addEventListener('input', function() {
                 clearTimeout(searchTimer);
-                selectedEmployee = null;
+                selectedPerson = null;
                 document.getElementById('assignButton').disabled = true;
                 searchTimer = setTimeout(function() {
-                    searchEmployees(input.value);
+                    searchPeople(input.value);
                 }, 220);
             });
         })();

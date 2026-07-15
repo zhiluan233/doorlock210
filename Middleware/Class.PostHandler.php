@@ -252,19 +252,31 @@ class PostHandler {
 					$this->requireAdminUser();
 					$id = intval($_POST['id'] ?? 0);
 					$name = trim((string)($_POST['name'] ?? ''));
+					$realname = trim((string)($_POST['realname'] ?? ''));
+					$mobile = trim((string)($_POST['mobile'] ?? ''));
+					$className = trim((string)($_POST['class_name'] ?? ''));
+					$trainingCenter = trim((string)($_POST['training_center'] ?? ''));
 					$studentNo = $this->normalizeStudentNo($_POST['student_no'] ?? '');
 					$remark = trim((string)($_POST['remark'] ?? ''));
 					if ($name === '') {
 						Header("HTTP/1.1 400 Bad Request");
-						exit("学员姓名不能为空");
+						exit("学员花名不能为空");
+					}
+					if ($realname === '') {
+						Header("HTTP/1.1 400 Bad Request");
+						exit("学员真实姓名不能为空");
 					}
 					if ($studentNo === '') {
 						Header("HTTP/1.1 400 Bad Request");
 						exit("学号只能包含字母、数字、下划线和中划线，长度1-64位");
 					}
-					if ($this->utf8Length($name) > 100 || $this->utf8Length($remark) > 200) {
+					if ($mobile !== '' && !preg_match('/^[0-9\+\-\s]{1,32}$/', $mobile)) {
 						Header("HTTP/1.1 400 Bad Request");
-						exit("学员姓名或备注过长");
+						exit("手机号格式不合法");
+					}
+					if ($this->utf8Length($name) > 100 || $this->utf8Length($realname) > 100 || strlen($mobile) > 32 || $this->utf8Length($className) > 100 || $this->utf8Length($trainingCenter) > 100 || $this->utf8Length($remark) > 200) {
+						Header("HTTP/1.1 400 Bad Request");
+						exit("学员花名、真实姓名、手机号、班级、培养中心或备注过长");
 					}
 					$studentNoEsc = Database::escape($studentNo);
 					$duplicateSql = "SELECT * FROM `learner` WHERE `student_no`='{$studentNoEsc}' AND `id`<>{$id} LIMIT 1";
@@ -276,6 +288,10 @@ class PostHandler {
 					$data = [
 						'student_no' => $studentNo,
 						'name' => $name,
+						'realname' => $realname,
+						'mobile' => $mobile,
+						'class_name' => $className,
+						'training_center' => $trainingCenter,
 						'remark' => $remark,
 						'updated_at' => $now
 					];
@@ -500,6 +516,44 @@ class PostHandler {
 								'department_name' => $row['department_name'] ?? '',
 								'card_id' => $row['card_id'] ?? '',
 								'avatar_url' => $row['avatar_url'] ?? ''
+							];
+						}
+						mysqli_free_result($rs);
+					}
+					exit(json_encode(['ok' => true, 'items' => $items], JSON_UNESCAPED_UNICODE));
+				break;
+				case "searchBadgeLearners":
+					$this->requireAdminUser();
+					Header("Content-Type: application/json; charset=utf-8");
+					$keyword = trim((string)($_POST['q'] ?? ''));
+					if (preg_match_all('/./u', $keyword, $matches) !== false) {
+						$keyword = implode('', array_slice($matches[0], 0, 40));
+					} else {
+						$keyword = substr($keyword, 0, 40);
+					}
+					$where = ["`status`='true'"];
+					$loadAll = isset($_POST['all']) && (string)$_POST['all'] === '1';
+					if ($keyword !== '' && !$loadAll) {
+						$safeKeyword = Database::escape($keyword);
+						$like = "'%{$safeKeyword}%'";
+						$where[] = "(`name` LIKE {$like} OR `realname` LIKE {$like} OR `student_no` LIKE {$like} OR `mobile` LIKE {$like} OR `class_name` LIKE {$like} OR `training_center` LIKE {$like})";
+					}
+					$limit = $loadAll ? 3000 : 20;
+					$sql = "SELECT `id`, `student_no`, `name`, `realname`, `mobile`, `class_name`, `training_center`, `card_id`, `status` FROM `learner` WHERE " . implode(' AND ', $where) . " ORDER BY CASE WHEN `card_id`='' THEN 0 ELSE 1 END, `name` ASC LIMIT {$limit}";
+					$rs = Database::query('learner', $sql, '', true);
+					$items = [];
+					if ($rs instanceof \mysqli_result) {
+						while ($row = mysqli_fetch_assoc($rs)) {
+							$items[] = [
+								'id' => intval($row['id']),
+								'student_no' => $row['student_no'] ?? '',
+								'name' => $row['name'] ?? '',
+								'realname' => $row['realname'] ?? '',
+								'mobile' => $row['mobile'] ?? '',
+								'class_name' => $row['class_name'] ?? '',
+								'training_center' => $row['training_center'] ?? '',
+								'card_id' => $row['card_id'] ?? '',
+								'status' => $row['status'] ?? ''
 							];
 						}
 						mysqli_free_result($rs);

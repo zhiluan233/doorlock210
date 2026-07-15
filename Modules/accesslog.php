@@ -46,7 +46,7 @@ while ($row = mysqli_fetch_assoc($logData)) {
 					<table id="devices1" class="table table-bordered table-auto" data-toggle="table" data-pagination="true" data-page-size="10" data-page-list="[5, 10, 20, 30, 40, 50, 'All']" data-sortable="true" data-search="true"  style="clear: both;margin-top: 20px;">
                         <thead>
                             <tr>
-                                <th>姓名</th>
+                                <th>姓名/花名</th>
                                 <th>类型</th>
 								<th>出入口位置</th>
 								<th>使用的卡号</th>
