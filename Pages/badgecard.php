@@ -311,11 +311,24 @@ function badgeRenderPage($data)
         .info-toggle {
             width: 100%;
             border: 0;
-            font: inherit;
+            font-family: inherit;
+            font-size: 14px;
+            line-height: normal;
             color: inherit;
             -webkit-appearance: none;
             appearance: none;
             cursor: pointer;
+            -webkit-tap-highlight-color: transparent;
+            text-decoration: none;
+            outline: none;
+        }
+        .info-toggle:active {
+            background: #f8fafc;
+            color: inherit;
+        }
+        .info-toggle:focus-visible {
+            outline: 2px solid rgba(246, 115, 2, 0.28);
+            outline-offset: 2px;
         }
         .actions {
             display: grid;
@@ -1084,7 +1097,7 @@ function badgeRenderPage($data)
             button.addEventListener('click', function() {
                 showingUid = !showingUid;
                 if (label) {
-                    label.textContent = showingUid ? '卡片 UID' : '工牌号';
+                    label.textContent = showingUid ? '卡片 UID' : '工牌 ID';
                 }
                 if (value) {
                     value.textContent = showingUid ? (button.getAttribute('data-raw-uid') || '--') : (button.getAttribute('data-card-id') || '无法转换');
