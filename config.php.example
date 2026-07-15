@@ -35,6 +35,16 @@ $_config = [
 		'badgeLookup' => [
 			'appLinkTemplate' => 'https://applink.feishu.cn/client/web_url/open?url={entryUrl}',
 			'lostFoundUrl' => '',
+			'departmentDisplay' => [
+				'enabled' => true,
+				'defaultLabel' => '两点十分',
+				'fallbackLabel' => '部门',
+				// 飞书 departments/0/children 通常不包含公司根节点；如果你的表里包含公司根节点，可设为 1
+				'rootDepth' => 0,
+				// rootDepth 之后第几层作为标题/值，默认：第2层做标题，第3层做值
+				'titleDepth' => 2,
+				'valueDepth' => 3
+			],
 			'profile' => [
 				'employee' => [
 					'textTemplate' => '您与两点十分并肩 {days} 天',

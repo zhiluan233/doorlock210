@@ -164,9 +164,9 @@ function badgeRenderPage($data)
     $className = $person['class_name'] ?? '';
     $trainingCenter = $person['training_center'] ?? '';
     $enrolledAt = intval($person['enrolled_at'] ?? 0);
-    $department = $person['department_name'] ?? '';
     $realname = $person['realname'] ?? '';
     $role = badgeRoleFromMode($mode);
+    $departmentDisplay = badgeDepartmentDisplay($person, $role);
     $isAdminMode = strpos($mode, 'admin_') === 0;
     $isAdminSelfMode = $mode === 'member_own_admin';
     $isPersonalProfile = in_array($mode, ['member_own', 'member_own_admin'], true);
@@ -307,6 +307,15 @@ function badgeRenderPage($data)
             text-align: right;
             min-width: 0;
             word-break: break-all;
+        }
+        .info-toggle {
+            width: 100%;
+            border: 0;
+            font: inherit;
+            color: inherit;
+            -webkit-appearance: none;
+            appearance: none;
+            cursor: pointer;
         }
         .actions {
             display: grid;
@@ -594,8 +603,10 @@ function badgeRenderPage($data)
             <p class="subtitle"><?php echo badgeH($subtitle); ?></p>
 
             <div class="info-list">
-                <div class="info-row"><span>工牌号</span><span><?php echo badgeH($cardId !== '' ? $cardId : '无法转换'); ?></span></div>
-                <div class="info-row"><span>卡片 UID</span><span><?php echo badgeH($rawUid !== '' ? $rawUid : '--'); ?></span></div>
+                <button class="info-row info-toggle" id="badgeIdentityToggle" type="button" data-card-id="<?php echo badgeH($cardId !== '' ? $cardId : '无法转换'); ?>" data-raw-uid="<?php echo badgeH($rawUid !== '' ? $rawUid : '--'); ?>">
+                    <span id="badgeIdentityLabel">工牌号</span>
+                    <span id="badgeIdentityValue"><?php echo badgeH($cardId !== '' ? $cardId : '无法转换'); ?></span>
+                </button>
                 <?php if ($person && !$isMismatch) { ?>
                     <?php if ($employeeNo !== '') { ?><div class="info-row"><span>工号</span><span><?php echo badgeH($employeeNo); ?></span></div><?php } ?>
                     <?php if ($studentNo !== '') { ?><div class="info-row"><span>学号</span><span><?php echo badgeH($studentNo); ?></span></div><?php } ?>
@@ -604,7 +615,7 @@ function badgeRenderPage($data)
                     <?php if ($className !== '') { ?><div class="info-row"><span>班级</span><span><?php echo badgeH($className); ?></span></div><?php } ?>
                     <?php if ($trainingCenter !== '') { ?><div class="info-row"><span>培养中心</span><span><?php echo badgeH($trainingCenter); ?></span></div><?php } ?>
                     <?php if ($studentNo !== '' && $enrolledAt > 0) { ?><div class="info-row"><span>入学时间</span><span><?php echo badgeH(date('Y-m-d', $enrolledAt)); ?></span></div><?php } ?>
-                    <?php if ($department !== '') { ?><div class="info-row"><span>部门</span><span><?php echo badgeH($department); ?></span></div><?php } ?>
+                    <?php if ($departmentDisplay['value'] !== '') { ?><div class="info-row"><span><?php echo badgeH($departmentDisplay['label']); ?></span><span><?php echo badgeH($departmentDisplay['value']); ?></span></div><?php } ?>
                 <?php } elseif ($person && $isMismatch) { ?>
                     <div class="info-row"><span>当前账号</span><span><?php echo badgeH($person['name'] ?? ''); ?></span></div>
                     <?php if (($person['employee_id'] ?? '') !== '') { ?><div class="info-row"><span>当前工号</span><span><?php echo badgeH($person['employee_id']); ?></span></div><?php } ?>
@@ -1062,6 +1073,25 @@ function badgeRenderPage($data)
             });
         }
 
+        function initBadgeIdentityToggle() {
+            var button = document.getElementById('badgeIdentityToggle');
+            if (!button) {
+                return;
+            }
+            var label = document.getElementById('badgeIdentityLabel');
+            var value = document.getElementById('badgeIdentityValue');
+            var showingUid = false;
+            button.addEventListener('click', function() {
+                showingUid = !showingUid;
+                if (label) {
+                    label.textContent = showingUid ? '卡片 UID' : '工牌号';
+                }
+                if (value) {
+                    value.textContent = showingUid ? (button.getAttribute('data-raw-uid') || '--') : (button.getAttribute('data-card-id') || '无法转换');
+                }
+            });
+        }
+
         function initQuickFab() {
             var fab = document.getElementById('quickFab');
             if (!fab) {
@@ -1201,6 +1231,7 @@ function badgeRenderPage($data)
         }
 
         (function() {
+            initBadgeIdentityToggle();
             initQuickMenuActions();
             initQuickFab();
 
@@ -1332,6 +1363,161 @@ function badgeRefreshEmployeeProfile($employee)
     $data['updated_at'] = time();
     Database::update('employee', $data, ['id' => $employee['id']]);
     return array_merge($employee, $data);
+}
+
+function badgeDepartmentDisplay($person, $role)
+{
+    $config = badgeDepartmentDisplayConfig();
+    $fallbackValue = trim((string)($person['department_name'] ?? ''));
+    if (!is_array($person) || $role !== 'employee') {
+        return [
+            'label' => $config['fallbackLabel'],
+            'value' => $fallbackValue
+        ];
+    }
+    if (!$config['enabled']) {
+        return [
+            'label' => $config['fallbackLabel'],
+            'value' => $fallbackValue
+        ];
+    }
+
+    $path = badgeDepartmentPath($person);
+    if (count($path) === 0 && $fallbackValue !== '') {
+        $path = [$fallbackValue];
+    }
+    $levels = array_slice($path, $config['rootDepth']);
+
+    $titleIndex = $config['titleDepth'] - 1;
+    $valueIndex = $config['valueDepth'] - 1;
+    if (count($levels) > $valueIndex) {
+        $label = $levels[$titleIndex] ?? $config['defaultLabel'];
+        $value = $levels[$valueIndex];
+    } else if (count($levels) > $titleIndex) {
+        $label = $titleIndex > 0 ? ($levels[$titleIndex - 1] ?? $config['defaultLabel']) : $config['defaultLabel'];
+        $value = $levels[$titleIndex];
+    } else if (count($levels) > 0) {
+        $label = $config['defaultLabel'];
+        $value = $levels[0];
+    } else {
+        $label = $config['defaultLabel'];
+        $value = '-';
+    }
+
+    $label = trim((string)$label);
+    $value = trim((string)$value);
+    return [
+        'label' => $label !== '' ? $label : $config['defaultLabel'],
+        'value' => $value !== '' ? $value : '-'
+    ];
+}
+
+function badgeDepartmentDisplayConfig()
+{
+    $lookup = badgeLookupConfig();
+    $config = is_array($lookup['departmentDisplay'] ?? null) ? $lookup['departmentDisplay'] : [];
+    $enabled = array_key_exists('enabled', $config) ? (bool)$config['enabled'] : true;
+    $rootDepth = max(0, intval($config['rootDepth'] ?? 0));
+    $titleDepth = max(1, intval($config['titleDepth'] ?? 2));
+    $valueDepth = max(1, intval($config['valueDepth'] ?? 3));
+    if ($valueDepth <= $titleDepth) {
+        $valueDepth = $titleDepth + 1;
+    }
+    $defaultLabel = trim((string)($config['defaultLabel'] ?? '两点十分'));
+    $fallbackLabel = trim((string)($config['fallbackLabel'] ?? '部门'));
+    return [
+        'enabled' => $enabled,
+        'defaultLabel' => $defaultLabel !== '' ? $defaultLabel : '两点十分',
+        'fallbackLabel' => $fallbackLabel !== '' ? $fallbackLabel : '部门',
+        'rootDepth' => $rootDepth,
+        'titleDepth' => $titleDepth,
+        'valueDepth' => $valueDepth
+    ];
+}
+
+function badgeDepartmentPath($person)
+{
+    $ids = badgePersonDepartmentIds($person);
+    $bestPath = [];
+    foreach ($ids as $id) {
+        $path = badgeDepartmentPathById($id);
+        if (count($path) > count($bestPath)) {
+            $bestPath = $path;
+        }
+    }
+    return $bestPath;
+}
+
+function badgePersonDepartmentIds($person)
+{
+    $ids = [];
+    $raw = $person['department_ids'] ?? '';
+    if (is_string($raw) && trim($raw) !== '') {
+        $decoded = json_decode($raw, true);
+        if (is_array($decoded)) {
+            $raw = $decoded;
+        } else if (strpos($raw, ',') !== false) {
+            $raw = array_map('trim', explode(',', $raw));
+        }
+    }
+    if (is_array($raw)) {
+        foreach ($raw as $item) {
+            if (is_scalar($item) && trim((string)$item) !== '') {
+                $ids[] = trim((string)$item);
+            }
+        }
+    }
+    if (!empty($person['department_id'])) {
+        $ids[] = trim((string)$person['department_id']);
+    }
+    return array_values(array_unique(array_filter($ids, function($id) {
+        return $id !== '';
+    })));
+}
+
+function badgeDepartmentPathById($departmentId)
+{
+    $path = [];
+    $seen = [];
+    $department = badgeFindDepartment($departmentId);
+    while (is_array($department)) {
+        $id = trim((string)($department['department_id'] ?? ''));
+        $openId = trim((string)($department['open_department_id'] ?? ''));
+        $seenKey = $id !== '' ? $id : $openId;
+        if ($seenKey !== '' && isset($seen[$seenKey])) {
+            break;
+        }
+        if ($seenKey !== '') {
+            $seen[$seenKey] = true;
+        }
+        $name = trim((string)($department['name'] ?? ''));
+        if ($name !== '') {
+            array_unshift($path, $name);
+        }
+        $parentId = trim((string)($department['parent_department_id'] ?? ''));
+        if ($parentId === '' || $parentId === '0') {
+            break;
+        }
+        $department = badgeFindDepartment($parentId);
+    }
+    return $path;
+}
+
+function badgeFindDepartment($departmentId)
+{
+    static $cache = [];
+    $departmentId = trim((string)$departmentId);
+    if ($departmentId === '') {
+        return null;
+    }
+    if (array_key_exists($departmentId, $cache)) {
+        return $cache[$departmentId];
+    }
+    $escaped = Database::escape($departmentId);
+    $sql = "SELECT * FROM `feishu_departments` WHERE `department_id`='{$escaped}' OR `open_department_id`='{$escaped}' LIMIT 1";
+    $row = Database::querySingleLine('feishu_departments', $sql, true);
+    $cache[$departmentId] = is_array($row) ? $row : null;
+    return $cache[$departmentId];
 }
 
 function badgeRoleFromMode($mode)
