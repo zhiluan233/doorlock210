@@ -87,6 +87,7 @@ class Migrator {
             `mobile` varchar(64) NOT NULL DEFAULT '',
             `class_name` varchar(255) NOT NULL DEFAULT '',
             `training_center` varchar(255) NOT NULL DEFAULT '',
+            `enrolled_at` int unsigned NOT NULL DEFAULT 0,
             `card_id` varchar(64) NOT NULL DEFAULT '',
             `status` varchar(16) NOT NULL DEFAULT 'true',
             `remark` varchar(255) NOT NULL DEFAULT '',
@@ -176,6 +177,8 @@ class Migrator {
             `disable_count` int unsigned NOT NULL DEFAULT 0,
             `delete_count` int unsigned NOT NULL DEFAULT 0,
             `release_count` int unsigned NOT NULL DEFAULT 0,
+            `job_title_count` int unsigned NOT NULL DEFAULT 0,
+            `joined_at_count` int unsigned NOT NULL DEFAULT 0,
             `message` text,
             `locked_at` int unsigned NOT NULL DEFAULT 0,
             `started_at` int unsigned NOT NULL DEFAULT 0,
@@ -188,6 +191,8 @@ class Migrator {
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4", $errors);
 
         self::addColumn('feishu_sync_jobs', 'delete_count', "int unsigned NOT NULL DEFAULT 0", $errors);
+        self::addColumn('feishu_sync_jobs', 'job_title_count', "int unsigned NOT NULL DEFAULT 0", $errors);
+        self::addColumn('feishu_sync_jobs', 'joined_at_count', "int unsigned NOT NULL DEFAULT 0", $errors);
 
         self::addColumn('employee', 'card_id', "varchar(64) NOT NULL DEFAULT ''", $errors);
         self::addColumn('employee', 'department_id', "varchar(128) NOT NULL DEFAULT ''", $errors);
@@ -213,6 +218,7 @@ class Migrator {
         self::addColumn('learner', 'mobile', "varchar(64) NOT NULL DEFAULT ''", $errors);
         self::addColumn('learner', 'class_name', "varchar(255) NOT NULL DEFAULT ''", $errors);
         self::addColumn('learner', 'training_center', "varchar(255) NOT NULL DEFAULT ''", $errors);
+        self::addColumn('learner', 'enrolled_at', "int unsigned NOT NULL DEFAULT 0", $errors);
         self::addColumn('learner', 'card_id', "varchar(64) NOT NULL DEFAULT ''", $errors);
         self::addColumn('learner', 'status', "varchar(16) NOT NULL DEFAULT 'true'", $errors);
         self::addColumn('learner', 'remark', "varchar(255) NOT NULL DEFAULT ''", $errors);
@@ -298,6 +304,7 @@ class Migrator {
         self::exec("UPDATE `guest` SET `card_id`=LPAD(`card_id`, 10, '0') WHERE `card_id`<>'' AND `card_id` REGEXP '^[0-9]+$' AND CHAR_LENGTH(`card_id`)<10", $errors);
         self::exec("UPDATE `learner` SET `card_id`=LPAD(`card_id`, 10, '0') WHERE `card_id`<>'' AND `card_id` REGEXP '^[0-9]+$' AND CHAR_LENGTH(`card_id`)<10", $errors);
         self::exec("UPDATE `learner` SET `realname`=`name` WHERE `realname`=''", $errors);
+        self::exec("UPDATE `learner` SET `enrolled_at`=`created_at` WHERE `enrolled_at`=0 AND `created_at`>0", $errors);
         self::exec("UPDATE `logs` SET `cardid`=LPAD(`cardid`, 10, '0') WHERE `cardid`<>'' AND `cardid` REGEXP '^[0-9]+$' AND CHAR_LENGTH(`cardid`)<10", $errors);
         self::exec("UPDATE `access_roles` SET `subject_kind`='employee' WHERE `subject_kind`=''", $errors);
         self::exec("UPDATE `access_role_members` SET `member_kind`='employee' WHERE `member_kind`=''", $errors);

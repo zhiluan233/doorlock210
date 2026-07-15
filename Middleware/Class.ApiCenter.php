@@ -80,6 +80,7 @@ class ApiCenter {
         $hasMobile = array_key_exists('mobile', $payload);
         $hasClassName = array_key_exists('class_name', $payload) || array_key_exists('className', $payload);
         $hasTrainingCenter = array_key_exists('training_center', $payload) || array_key_exists('trainingCenter', $payload);
+        $hasEnrolledAt = array_key_exists('enrolled_at', $payload) || array_key_exists('enrolledAt', $payload) || array_key_exists('enrolled_date', $payload) || array_key_exists('enrolledDate', $payload);
         $hasRemark = array_key_exists('remark', $payload);
         $hasStatus = array_key_exists('status', $payload);
         $hasCardId = array_key_exists('card_id', $payload) || array_key_exists('cardId', $payload);
@@ -89,6 +90,7 @@ class ApiCenter {
         $mobile = $hasMobile ? trim((string)$payload['mobile']) : ($existing['mobile'] ?? '');
         $className = $hasClassName ? trim((string)($payload['class_name'] ?? ($payload['className'] ?? ''))) : ($existing['class_name'] ?? '');
         $trainingCenter = $hasTrainingCenter ? trim((string)($payload['training_center'] ?? ($payload['trainingCenter'] ?? ''))) : ($existing['training_center'] ?? '');
+        $enrolledAt = $hasEnrolledAt ? $this->normalizeDateValue($payload['enrolled_at'] ?? ($payload['enrolledAt'] ?? ($payload['enrolled_date'] ?? ($payload['enrolledDate'] ?? ''))), 'enrolled_at') : intval($existing['enrolled_at'] ?? 0);
         $remark = $hasRemark ? trim((string)$payload['remark']) : ($existing['remark'] ?? '');
         $status = $hasStatus ? $this->normalizeStatus($payload['status']) : ($existing['status'] ?? 'true');
         $cardId = $hasCardId ? AttendanceService::normalizeCardNumber($payload['card_id'] ?? ($payload['cardId'] ?? '')) : ($existing['card_id'] ?? '');
@@ -113,6 +115,7 @@ class ApiCenter {
         if ($hasMobile || !$existing) { $data['mobile'] = $mobile; }
         if ($hasClassName || !$existing) { $data['class_name'] = $className; }
         if ($hasTrainingCenter || !$existing) { $data['training_center'] = $trainingCenter; }
+        if ($hasEnrolledAt || !$existing) { $data['enrolled_at'] = $enrolledAt > 0 ? $enrolledAt : strtotime(date('Y-m-d')); }
         if ($hasRemark || !$existing) { $data['remark'] = $remark; }
         if ($hasStatus || !$existing) { $data['status'] = $status; }
         if ($hasCardId) {
@@ -257,6 +260,8 @@ class ApiCenter {
             'mobile' => (string)($learner['mobile'] ?? ''),
             'class_name' => (string)($learner['class_name'] ?? ''),
             'training_center' => (string)($learner['training_center'] ?? ''),
+            'enrolled_at' => intval($learner['enrolled_at'] ?? 0),
+            'enrolled_date' => intval($learner['enrolled_at'] ?? 0) > 0 ? date('Y-m-d', intval($learner['enrolled_at'])) : '',
             'status' => (string)($learner['status'] ?? ''),
             'card_id' => (string)($learner['card_id'] ?? ''),
             'remark' => (string)($learner['remark'] ?? ''),
@@ -366,6 +371,32 @@ class ApiCenter {
             return 'true';
         }
         return 'false';
+    }
+
+    private function normalizeDateValue($value, $field)
+    {
+        if ($value === '' || $value === null) {
+            return 0;
+        }
+        if (is_numeric($value)) {
+            $timestamp = intval($value);
+            if ($timestamp > 100000000000) {
+                $timestamp = intval($timestamp / 1000);
+            }
+            if ($timestamp < 0) {
+                $this->respond(422, ['ok' => false, 'message' => $field.'必须是有效日期或时间戳']);
+            }
+            return $timestamp;
+        }
+        $text = trim((string)$value);
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $text)) {
+            $this->respond(422, ['ok' => false, 'message' => $field.'必须是YYYY-MM-DD或Unix时间戳']);
+        }
+        $parts = explode('-', $text);
+        if (!checkdate(intval($parts[1]), intval($parts[2]), intval($parts[0]))) {
+            $this->respond(422, ['ok' => false, 'message' => $field.'不是有效日期']);
+        }
+        return strtotime($text.' 00:00:00');
     }
 
     private function utf8Length($value)

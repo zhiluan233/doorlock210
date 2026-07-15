@@ -66,7 +66,7 @@ $employeeData = [
     'mobile' => $userData['mobile'] ?? ($employee['mobile'] ?? ''),
     'tenant_key' => $userData['tenant_key'] ?? ($employee['tenant_key'] ?? ''),
     'avatar_url' => feishuOauthAvatarUrl($userData, $employee['avatar_url'] ?? ''),
-    'job_title' => $userData['job_title'] ?? ($userData['position'] ?? ($employee['job_title'] ?? '')),
+    'job_title' => feishuOauthProfileText($userData, ['job_title', 'jobTitle', 'position', 'title', 'employee_title', 'staff_title', 'work_title'], $employee['job_title'] ?? ''),
     'joined_at' => feishuOauthJoinedAt($userData, intval($employee['joined_at'] ?? 0)),
     'status' => $employee['status'] ?? 'true',
     'updated_at' => time()
@@ -268,13 +268,21 @@ function feishuOauthAvatarUrl($userData, $fallback = '')
     return (string)$fallback;
 }
 
+function feishuOauthProfileText($userData, $fields, $fallback = '')
+{
+    foreach ($fields as $field) {
+        $text = feishuOauthValueText(feishuOauthFieldValue($userData, $field));
+        if ($text !== '') {
+            return $text;
+        }
+    }
+    return (string)$fallback;
+}
+
 function feishuOauthJoinedAt($userData, $fallback = 0)
 {
-    foreach (['join_time', 'joined_at', 'hire_date', 'entry_time'] as $key) {
-        if (!isset($userData[$key])) {
-            continue;
-        }
-        $value = $userData[$key];
+    foreach (['join_time', 'joinTime', 'joined_at', 'joinedAt', 'hire_date', 'hireDate', 'entry_time', 'entryTime', 'employment_time', 'employmentTime', 'onboard_time', 'onboardTime', 'start_time', 'startTime'] as $key) {
+        $value = feishuOauthFieldValue($userData, $key);
         if (is_numeric($value)) {
             $timestamp = intval($value);
             if ($timestamp > 100000000000) {
@@ -282,12 +290,54 @@ function feishuOauthJoinedAt($userData, $fallback = 0)
             }
             return $timestamp > 0 ? $timestamp : intval($fallback);
         }
-        $timestamp = strtotime((string)$value);
+        $text = feishuOauthValueText($value);
+        if ($text === '') {
+            continue;
+        }
+        $timestamp = strtotime($text);
         if ($timestamp !== false) {
             return intval($timestamp);
         }
     }
     return intval($fallback);
+}
+
+function feishuOauthFieldValue($data, $field)
+{
+    if (!is_array($data) || $field === '') {
+        return null;
+    }
+    if (array_key_exists($field, $data)) {
+        return $data[$field];
+    }
+    foreach (['employee', 'employment', 'staff', 'work_info', 'employee_info', 'job_info', 'profile'] as $group) {
+        if (isset($data[$group]) && is_array($data[$group]) && array_key_exists($field, $data[$group])) {
+            return $data[$group][$field];
+        }
+    }
+    return null;
+}
+
+function feishuOauthValueText($value)
+{
+    if (is_scalar($value)) {
+        return trim((string)$value);
+    }
+    if (!is_array($value)) {
+        return '';
+    }
+    foreach (['text', 'value', 'name', 'date', 'datetime', 'option_value'] as $key) {
+        if (isset($value[$key]) && is_scalar($value[$key]) && trim((string)$value[$key]) !== '') {
+            return trim((string)$value[$key]);
+        }
+    }
+    foreach ($value as $item) {
+        $text = feishuOauthValueText($item);
+        if ($text !== '') {
+            return $text;
+        }
+    }
+    return '';
 }
 
 function feishuOauthUniqueUsername($displayName, $employeeId, $openId, $currentUserId = 0)

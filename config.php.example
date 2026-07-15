@@ -37,7 +37,7 @@ $_config = [
 			'lostFoundUrl' => '',
 			'profile' => [
 				'employee' => [
-					'textTemplate' => '您已与两点十分并肩 {days} 天',
+					'textTemplate' => '您与两点十分并肩 {days} 天',
 					'fallbackDays' => 0,
 					'blessings' => [
 						'感恩一路有你',
@@ -73,8 +73,8 @@ $_config = [
 					]
 				],
 				// 如飞书通讯录字段不是标准字段，可在这里配置自定义属性名称或ID
-				'employeePositionFields' => ['job_title', 'position', 'title', '职务', '岗位'],
-				'employeeJoinedAtFields' => ['join_time', 'joined_at', 'hire_date', 'entry_time', '入职日期', '入职时间'],
+				'employeePositionFields' => ['job_title', 'jobTitle', 'position', 'title', 'employee_title', 'staff_title', 'work_title', '职务', '岗位'],
+				'employeeJoinedAtFields' => ['join_time', 'joinTime', 'joined_at', 'joinedAt', 'hire_date', 'hireDate', 'entry_time', 'entryTime', 'employment_time', 'employmentTime', 'onboard_time', 'onboardTime', '入职日期', '入职时间'],
 				'customAttrMap' => [
 					'jobTitle' => [
 						'ids' => [],
@@ -88,6 +88,7 @@ $_config = [
 			],
 			'quickActions' => [
 				['name' => '打卡记录', 'icon' => 'history', 'url' => '/?page=userpanel'],
+				['name' => '考勤系统', 'icon' => 'attendance', 'url' => 'alert("入口未开放")'],
 				['name' => '飞书', 'icon' => 'feishu', 'url' => 'https://applink.feishu.cn/client/web_url/open?url=https%3A%2F%2Fwww.feishu.cn'],
 				['name' => 'OA中心', 'icon' => 'oa', 'url' => 'https://example.com/oa'],
 				['name' => '资产', 'icon' => 'asset', 'url' => 'https://example.com/assets'],

@@ -25,6 +25,11 @@ function learnerTime($timestamp) {
 	return $timestamp > 0 ? date('Y-m-d H:i:s', $timestamp) : '--';
 }
 
+function learnerDate($timestamp) {
+	$timestamp = intval($timestamp);
+	return $timestamp > 0 ? date('Y-m-d', $timestamp) : '--';
+}
+
 $learnerData = [];
 $learnerRs = Database::query('learner', 'SELECT * FROM `learner` ORDER BY `id` DESC', '', true);
 if ($learnerRs && $learnerRs instanceof \mysqli_result) {
@@ -54,6 +59,7 @@ if ($learnerRs && $learnerRs instanceof \mysqli_result) {
 								<th>手机号</th>
 								<th>班级</th>
 								<th>培养中心</th>
+								<th>入学时间</th>
 								<th>状态</th>
 								<th>门禁卡号</th>
 								<th>备注</th>
@@ -75,6 +81,7 @@ if ($learnerRs && $learnerRs instanceof \mysqli_result) {
 									<td><?php echo learnerH($learner['mobile'] ?? ''); ?></td>
 									<td><?php echo learnerH($learner['class_name'] ?? ''); ?></td>
 									<td><?php echo learnerH($learner['training_center'] ?? ''); ?></td>
+									<td><?php echo learnerH(learnerDate($learner['enrolled_at'] ?? 0)); ?></td>
 									<td><?php echo $statusText; ?></td>
 									<td><?php echo learnerH($learner['card_id']); ?></td>
 									<td><?php echo learnerH($learner['remark']); ?></td>
@@ -135,6 +142,12 @@ if ($learnerRs && $learnerRs instanceof \mysqli_result) {
 			<label class="layui-form-label">培养中心</label>
 			<div class="layui-input-block">
 				<input type="text" id="learner_training_center" class="layui-input" placeholder="选填">
+			</div>
+		</div>
+		<div class="layui-form-item">
+			<label class="layui-form-label">入学时间</label>
+			<div class="layui-input-block">
+				<input type="date" id="learner_enrolled_date" class="layui-input">
 			</div>
 		</div>
 		<div class="layui-form-item">
@@ -270,7 +283,7 @@ layui.use(['layer', 'form'], function(){
 			type: 1,
 			title: id ? '编辑学员' : '添加学员',
 			content: $('#learnerDialogTpl').html(),
-			area: ['440px', '560px'],
+			area: ['440px', '610px'],
 			success: function() {
 				$('#learner_id').val(learner ? learner.id : '');
 				$('#learner_name').val(learner ? learner.name : '');
@@ -279,11 +292,30 @@ layui.use(['layer', 'form'], function(){
 				$('#learner_mobile').val(learner ? (learner.mobile || '') : '');
 				$('#learner_class_name').val(learner ? (learner.class_name || '') : '');
 				$('#learner_training_center').val(learner ? (learner.training_center || '') : '');
+				$('#learner_enrolled_date').val(learner ? formatDateInput(learner.enrolled_at || learner.created_at || 0) : todayDateInput());
 				$('#learner_remark').val(learner ? learner.remark : '');
 				form.render();
 			}
 		});
 	};
+
+	function todayDateInput() {
+		var now = new Date();
+		return formatDateParts(now.getFullYear(), now.getMonth() + 1, now.getDate());
+	}
+
+	function formatDateInput(timestamp) {
+		timestamp = parseInt(timestamp || 0, 10);
+		if (!timestamp) {
+			return '';
+		}
+		var date = new Date(timestamp * 1000);
+		return formatDateParts(date.getFullYear(), date.getMonth() + 1, date.getDate());
+	}
+
+	function formatDateParts(year, month, day) {
+		return String(year).padStart(4, '0') + '-' + String(month).padStart(2, '0') + '-' + String(day).padStart(2, '0');
+	}
 
 	window.saveLearner = function() {
 		var htmlobj = $.ajax({
@@ -297,6 +329,7 @@ layui.use(['layer', 'form'], function(){
 				mobile: $('#learner_mobile').val(),
 				class_name: $('#learner_class_name').val(),
 				training_center: $('#learner_training_center').val(),
+				enrolled_date: $('#learner_enrolled_date').val(),
 				remark: $('#learner_remark').val()
 			},
 			success: function(resp) {

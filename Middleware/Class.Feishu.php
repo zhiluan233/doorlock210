@@ -18,6 +18,7 @@ class appLinkFeishu {
     private $keyFile;
     private $lastError = '';
     private $departments = [];
+    private $profileSupplementAvailable = true;
 
     public function __construct($skipTenantToken = false) {
         global $_config;
@@ -376,6 +377,17 @@ class appLinkFeishu {
                 $realName = $this->extractRealName($item);
                 $jobTitle = $this->extractJobTitle($item);
                 $joinedAt = $this->extractJoinedAt($item);
+                if ($jobTitle === '' || $joinedAt <= 0) {
+                    $profile = $this->fetchMemberProfile($item['open_id']);
+                    if (is_array($profile)) {
+                        if ($jobTitle === '') {
+                            $jobTitle = $this->extractJobTitle($profile);
+                        }
+                        if ($joinedAt <= 0) {
+                            $joinedAt = $this->extractJoinedAt($profile);
+                        }
+                    }
+                }
                 $departmentIds = $item['department_ids'] ?? [$canonicalDepartmentId];
 
                 $allMembers[] = [
@@ -404,6 +416,36 @@ class appLinkFeishu {
         if (isset($membersData['data']['has_more']) && $membersData['data']['has_more'] === true && isset($membersData['data']['page_token'])) {
             $this->fetchMembers($allMembers, $department, $processedOpenIds, $membersData['data']['page_token']);
         }
+    }
+
+    private function fetchMemberProfile($openId) {
+        $openId = trim((string)$openId);
+        if ($openId === '' || !$this->profileSupplementAvailable) {
+            return null;
+        }
+        $token = $this->getTenantAccessToken();
+        $endpoint = $this->_config['feishu']['appEndpoint']['getMemberInfo'] ?? '';
+        if ($token === '' || $endpoint === '') {
+            return null;
+        }
+
+        $url = $endpoint . rawurlencode($openId);
+        if ($this->urlQueryParam($url, 'department_id_type') === '') {
+            $url .= (strpos($url, '?') === false ? '?' : '&') . 'department_id_type=department_id';
+        }
+        if ($this->urlQueryParam($url, 'user_id_type') === '') {
+            $url .= '&user_id_type=open_id';
+        }
+        $data = $this->requestFeishu($url, 'GET', $token, null, 5, 1);
+        if (($data['status_code'] ?? 0) < 200 || ($data['status_code'] ?? 0) >= 300) {
+            $statusCode = intval($data['status_code'] ?? 0);
+            if ($statusCode === 0 || $statusCode === 400 || $statusCode === 401 || $statusCode === 403 || ($data['error'] ?? '') !== '') {
+                $this->profileSupplementAvailable = false;
+            }
+            return null;
+        }
+        $user = $data['response']['data']['user'] ?? null;
+        return is_array($user) ? $user : null;
     }
 
     private function departmentIdForType($department, $departmentIdType) {
@@ -467,33 +509,95 @@ class appLinkFeishu {
     }
 
     private function extractJobTitle($item) {
-        $value = $this->extractFieldByConfig($item, 'employeePositionFields', 'jobTitle', ['job_title', 'position', 'title']);
+        $value = $this->extractFieldByConfig($item, 'employeePositionFields', 'jobTitle', ['job_title', 'jobTitle', 'position', 'title', 'employee_title', 'staff_title', 'work_title']);
         return $this->limitText($value, 100);
     }
 
     private function extractJoinedAt($item) {
-        $value = $this->extractFieldByConfig($item, 'employeeJoinedAtFields', 'joinedAt', ['join_time', 'joined_at', 'hire_date', 'entry_time']);
+        $value = $this->extractFieldByConfig($item, 'employeeJoinedAtFields', 'joinedAt', ['join_time', 'joinTime', 'joined_at', 'joinedAt', 'hire_date', 'hireDate', 'entry_time', 'entryTime', 'employment_time', 'employmentTime', 'onboard_time', 'onboardTime', 'start_time', 'startTime']);
         return $this->parseDateTimeValue($value);
     }
 
     private function extractFieldByConfig($item, $fieldKey, $customKey, $defaults) {
         $profile = $this->_config['feishu']['badgeLookup']['profile'] ?? [];
-        $fields = $profile[$fieldKey] ?? $defaults;
-        if (!is_array($fields)) {
-            $fields = $defaults;
+        $configuredFields = $profile[$fieldKey] ?? [];
+        if (!is_array($configuredFields)) {
+            $configuredFields = [];
         }
+        $fields = array_values(array_unique(array_merge($defaults, $configuredFields)));
         foreach ($fields as $field) {
             $field = trim((string)$field);
             if ($field === '') {
                 continue;
             }
-            if (isset($item[$field]) && $this->customValueText($item[$field]) !== '') {
-                return $this->customValueText($item[$field]);
+            $value = $this->fieldValueByPath($item, $field);
+            $text = $this->customValueText($value);
+            if ($text !== '') {
+                return $text;
             }
         }
 
-        $map = $profile['customAttrMap'][$customKey] ?? [];
+        $defaultMap = $this->defaultCustomAttrMap($customKey);
+        $customAttrMap = is_array($profile['customAttrMap'] ?? null) ? $profile['customAttrMap'] : [];
+        $configuredMap = $customAttrMap[$customKey] ?? [];
+        if (!is_array($configuredMap)) {
+            $configuredMap = [];
+        }
+        $map = [
+            'ids' => array_values(array_unique(array_merge(
+                $defaultMap['ids'],
+                isset($configuredMap['ids']) && is_array($configuredMap['ids']) ? array_map('strval', $configuredMap['ids']) : []
+            ))),
+            'names' => array_values(array_unique(array_merge(
+                $defaultMap['names'],
+                isset($configuredMap['names']) && is_array($configuredMap['names']) ? array_map('strval', $configuredMap['names']) : []
+            )))
+        ];
         return $this->extractCustomAttrValue($item, $map);
+    }
+
+    private function fieldValueByPath($item, $field) {
+        if (!is_array($item) || $field === '') {
+            return null;
+        }
+        if (array_key_exists($field, $item)) {
+            return $item[$field];
+        }
+        if (strpos($field, '.') !== false) {
+            $value = $item;
+            foreach (explode('.', $field) as $part) {
+                if (!is_array($value) || !array_key_exists($part, $value)) {
+                    $value = null;
+                    break;
+                }
+                $value = $value[$part];
+            }
+            if ($value !== null) {
+                return $value;
+            }
+        }
+        foreach (['employee', 'employment', 'staff', 'work_info', 'employee_info', 'job_info', 'profile'] as $group) {
+            if (isset($item[$group]) && is_array($item[$group]) && array_key_exists($field, $item[$group])) {
+                return $item[$group][$field];
+            }
+        }
+        return null;
+    }
+
+    private function defaultCustomAttrMap($customKey) {
+        if ($customKey === 'jobTitle') {
+            return [
+                'ids' => [],
+                'names' => ['岗位', '职位', '职务', '职称']
+            ];
+        }
+        if ($customKey === 'joinedAt') {
+            return [
+                'ids' => [],
+                'names' => ['入职日期', '入职时间', '加入日期', '入职日']
+            ];
+        }
+        return ['ids' => [], 'names' => []];
     }
 
     private function extractCustomAttrValue($item, $map) {
@@ -526,7 +630,7 @@ class appLinkFeishu {
         if (!is_array($value)) {
             return '';
         }
-        foreach (['text', 'value', 'name', 'date', 'datetime'] as $key) {
+        foreach (['text', 'value', 'name', 'date', 'datetime', 'option_value', 'pc_url'] as $key) {
             if (isset($value[$key]) && is_scalar($value[$key]) && trim((string)$value[$key]) !== '') {
                 return trim((string)$value[$key]);
             }

@@ -161,6 +161,7 @@ function badgeRenderPage($data)
     $mobile = $person['mobile'] ?? '';
     $className = $person['class_name'] ?? '';
     $trainingCenter = $person['training_center'] ?? '';
+    $enrolledAt = intval($person['enrolled_at'] ?? 0);
     $department = $person['department_name'] ?? '';
     $realname = $person['realname'] ?? '';
     $role = badgeRoleFromMode($mode);
@@ -180,7 +181,7 @@ function badgeRenderPage($data)
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <title>两点十分门禁 ｜ 工牌查询</title>
+    <title>个人中心</title>
     <link href="asset/plugins/Font-awesome/css/all.min.css" rel="stylesheet" />
     <style>
         * { box-sizing: border-box; }
@@ -217,6 +218,7 @@ function badgeRenderPage($data)
             text-align: right;
             line-height: 1.45;
             word-break: break-word;
+            white-space: pre-line;
         }
         .badge-card {
             flex: 1;
@@ -342,7 +344,7 @@ function badgeRenderPage($data)
         .quick-fab {
             position: fixed;
             right: max(16px, env(safe-area-inset-right));
-            bottom: calc(88px + env(safe-area-inset-bottom));
+            bottom: calc(152px + env(safe-area-inset-bottom));
             width: 54px;
             height: 54px;
             border: 0;
@@ -355,6 +357,14 @@ function badgeRenderPage($data)
             box-shadow: 0 14px 28px rgba(19, 184, 135, .28);
             z-index: 900;
             font-size: 20px;
+            touch-action: none;
+            user-select: none;
+            cursor: grab;
+        }
+        .quick-fab.dragging {
+            transition: none;
+            box-shadow: 0 18px 34px rgba(19, 184, 135, .34);
+            cursor: grabbing;
         }
         .quick-menu-grid {
             display: grid;
@@ -418,6 +428,9 @@ function badgeRenderPage($data)
             z-index: 1000;
         }
         .sheet-mask.show { display: flex; }
+        .sheet-mask.centered {
+            align-items: center;
+        }
         .sheet {
             width: min(520px, 100%);
             max-height: min(78vh, 640px);
@@ -582,6 +595,7 @@ function badgeRenderPage($data)
                     <?php if ($mobile !== '') { ?><div class="info-row"><span>手机号</span><span><?php echo badgeH($mobile); ?></span></div><?php } ?>
                     <?php if ($className !== '') { ?><div class="info-row"><span>班级</span><span><?php echo badgeH($className); ?></span></div><?php } ?>
                     <?php if ($trainingCenter !== '') { ?><div class="info-row"><span>培养中心</span><span><?php echo badgeH($trainingCenter); ?></span></div><?php } ?>
+                    <?php if ($studentNo !== '' && $enrolledAt > 0) { ?><div class="info-row"><span>入学时间</span><span><?php echo badgeH(date('Y-m-d', $enrolledAt)); ?></span></div><?php } ?>
                     <?php if ($department !== '') { ?><div class="info-row"><span>部门</span><span><?php echo badgeH($department); ?></span></div><?php } ?>
                 <?php } elseif ($person && $isMismatch) { ?>
                     <div class="info-row"><span>当前账号</span><span><?php echo badgeH($person['name'] ?? ''); ?></span></div>
@@ -617,8 +631,8 @@ function badgeRenderPage($data)
     </main>
 
     <?php if ($isPersonalProfile && count($quickActions) > 0) { ?>
-        <button class="quick-fab" type="button" onclick="openQuickMenu()" aria-label="打开功能菜单"><i class="fa-solid fa-compass"></i></button>
-        <div class="sheet-mask" id="quickMenuSheet" aria-hidden="true">
+        <button class="quick-fab" id="quickFab" type="button" aria-label="打开功能菜单"><i class="fa-solid fa-compass"></i></button>
+        <div class="sheet-mask centered" id="quickMenuSheet" aria-hidden="true">
             <section class="sheet">
                 <div class="sheet-head">
                     <h2>工牌菜单</h2>
@@ -626,7 +640,7 @@ function badgeRenderPage($data)
                 </div>
                 <div class="quick-menu-grid">
                     <?php foreach ($quickActions as $action) { ?>
-                        <button class="quick-action" type="button" onclick="openQuickAction(<?php echo badgeJs($action['url']); ?>)">
+                        <button class="quick-action" type="button" data-url="<?php echo badgeH($action['url']); ?>">
                             <span class="quick-action-icon"><?php echo badgeActionIconHtml($action['icon']); ?></span>
                             <span class="quick-action-name"><?php echo badgeH($action['name']); ?></span>
                         </button>
@@ -740,7 +754,7 @@ function badgeRenderPage($data)
             if (!sheet) {
                 return;
             }
-            sheet.className = 'sheet-mask show';
+            sheet.classList.add('show');
             sheet.setAttribute('aria-hidden', 'false');
             overlayState = stateName || id;
             if (!history.state || history.state.badgeOverlay !== overlayState) {
@@ -753,7 +767,7 @@ function badgeRenderPage($data)
             if (!sheet) {
                 return;
             }
-            sheet.className = 'sheet-mask';
+            sheet.classList.remove('show');
             sheet.setAttribute('aria-hidden', 'true');
             overlayState = null;
         }
@@ -771,7 +785,28 @@ function badgeRenderPage($data)
                 toast('该功能暂未配置');
                 return;
             }
+            if (runConfiguredJsAction(url)) {
+                return;
+            }
             location.href = url;
+        }
+
+        function runConfiguredJsAction(url) {
+            var match = String(url || '').match(/^\s*(?:window\.)?alert\(([\s\S]*)\)\s*;?\s*$/);
+            if (!match) {
+                return false;
+            }
+            var arg = match[1].trim();
+            var message = arg;
+            if ((arg.charAt(0) === '"' && arg.charAt(arg.length - 1) === '"') || (arg.charAt(0) === "'" && arg.charAt(arg.length - 1) === "'")) {
+                try {
+                    message = JSON.parse(arg.charAt(0) === "'" ? '"' + arg.slice(1, -1).replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"' : arg);
+                } catch (e) {
+                    message = arg.slice(1, -1);
+                }
+            }
+            alert(String(message || ''));
+            return true;
         }
 
         function openSelfManageSheet() {
@@ -1003,6 +1038,155 @@ function badgeRenderPage($data)
             });
         }
 
+        function initQuickMenuActions() {
+            var grid = document.querySelector('.quick-menu-grid');
+            if (!grid) {
+                return;
+            }
+            grid.addEventListener('click', function(event) {
+                var target = event.target;
+                var button = target && target.closest ? target.closest('.quick-action') : null;
+                if (!button || !grid.contains(button)) {
+                    return;
+                }
+                event.preventDefault();
+                event.stopPropagation();
+                openQuickAction(button.getAttribute('data-url') || '');
+            });
+        }
+
+        function initQuickFab() {
+            var fab = document.getElementById('quickFab');
+            if (!fab) {
+                return;
+            }
+            var storageKey = 'badgeQuickFabPosition';
+            var activePointer = null;
+            var suppressClick = false;
+
+            function clamp(value, min, max) {
+                return Math.max(min, Math.min(max, value));
+            }
+
+            function placeFab(left, top) {
+                var rect = fab.getBoundingClientRect();
+                var size = Math.max(rect.width || 54, rect.height || 54);
+                var margin = 10;
+                var maxLeft = Math.max(margin, window.innerWidth - size - margin);
+                var maxTop = Math.max(margin, window.innerHeight - size - margin);
+                var nextLeft = clamp(left, margin, maxLeft);
+                var nextTop = clamp(top, margin, maxTop);
+                fab.style.left = nextLeft + 'px';
+                fab.style.top = nextTop + 'px';
+                fab.style.right = 'auto';
+                fab.style.bottom = 'auto';
+            }
+
+            function savePosition() {
+                try {
+                    var rect = fab.getBoundingClientRect();
+                    localStorage.setItem(storageKey, JSON.stringify({left: rect.left, top: rect.top}));
+                } catch (e) {}
+            }
+
+            function restorePosition() {
+                try {
+                    var saved = JSON.parse(localStorage.getItem(storageKey) || 'null');
+                    if (saved && typeof saved.left === 'number' && typeof saved.top === 'number') {
+                        placeFab(saved.left, saved.top);
+                    }
+                } catch (e) {}
+            }
+
+            restorePosition();
+
+            if (!window.PointerEvent) {
+                fab.addEventListener('click', function(event) {
+                    event.preventDefault();
+                    openQuickMenu();
+                });
+                return;
+            }
+
+            fab.addEventListener('pointerdown', function(event) {
+                if (event.button && event.button !== 0) {
+                    return;
+                }
+                var rect = fab.getBoundingClientRect();
+                activePointer = {
+                    id: event.pointerId,
+                    startX: event.clientX,
+                    startY: event.clientY,
+                    offsetX: event.clientX - rect.left,
+                    offsetY: event.clientY - rect.top,
+                    moved: false
+                };
+                try {
+                    fab.setPointerCapture(event.pointerId);
+                } catch (e) {}
+            });
+
+            fab.addEventListener('pointermove', function(event) {
+                if (!activePointer || event.pointerId !== activePointer.id) {
+                    return;
+                }
+                var dx = Math.abs(event.clientX - activePointer.startX);
+                var dy = Math.abs(event.clientY - activePointer.startY);
+                if (dx > 5 || dy > 5) {
+                    activePointer.moved = true;
+                }
+                if (!activePointer.moved) {
+                    return;
+                }
+                fab.classList.add('dragging');
+                placeFab(event.clientX - activePointer.offsetX, event.clientY - activePointer.offsetY);
+                event.preventDefault();
+            });
+
+            function finishPointer(event) {
+                if (!activePointer || event.pointerId !== activePointer.id) {
+                    return;
+                }
+                var moved = activePointer.moved;
+                activePointer = null;
+                fab.classList.remove('dragging');
+                suppressClick = true;
+                window.setTimeout(function() {
+                    suppressClick = false;
+                }, 350);
+                try {
+                    fab.releasePointerCapture(event.pointerId);
+                } catch (e) {}
+                if (moved) {
+                    savePosition();
+                    event.preventDefault();
+                    return;
+                }
+                openQuickMenu();
+            }
+
+            fab.addEventListener('pointerup', finishPointer);
+            fab.addEventListener('pointercancel', function(event) {
+                if (!activePointer || event.pointerId !== activePointer.id) {
+                    return;
+                }
+                activePointer = null;
+                fab.classList.remove('dragging');
+            });
+            fab.addEventListener('click', function(event) {
+                if (suppressClick) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                }
+            });
+            window.addEventListener('resize', function() {
+                if (fab.style.left && fab.style.top) {
+                    placeFab(parseFloat(fab.style.left), parseFloat(fab.style.top));
+                    savePosition();
+                }
+            });
+        }
+
         function escapeHtml(value) {
             return String(value || '').replace(/[&<>"']/g, function(ch) {
                 return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[ch];
@@ -1010,6 +1194,9 @@ function badgeRenderPage($data)
         }
 
         (function() {
+            initQuickMenuActions();
+            initQuickFab();
+
             window.addEventListener('popstate', function() {
                 if (overlayState === 'quickMenu') {
                     closeQuickMenu();
@@ -1106,7 +1293,7 @@ function badgeProfileSubtitle($role, $person, $fallback)
     if ($jobTitle !== '') {
         return $jobTitle;
     }
-    return trim((string)($person['department_name'] ?? '')) ?: $fallback;
+    return '员工';
 }
 
 function badgeTopbarRightText($role, $person, $cardId, $rawUid, $isPersonalProfile, $isAdminMode)
@@ -1124,14 +1311,17 @@ function badgeTopbarRightText($role, $person, $cardId, $rawUid, $isPersonalProfi
         'uid' => $rawUid
     ]);
     $blessing = badgeStableBlessing($profile['blessings'] ?? [], $cardId . '|' . $role);
-    return $blessing !== '' ? $base . '，' . $blessing : $base;
+    return $blessing !== '' ? $base . "\n" . $blessing : $base;
 }
 
 function badgeProfileDays($role, $person, $fallback)
 {
     $timestamp = 0;
     if ($role === 'learner') {
-        $timestamp = intval($person['created_at'] ?? 0);
+        $timestamp = intval($person['enrolled_at'] ?? 0);
+        if ($timestamp <= 0) {
+            $timestamp = intval($person['created_at'] ?? 0);
+        }
     } else if ($role === 'employee') {
         $timestamp = intval($person['joined_at'] ?? 0);
     }
@@ -1167,7 +1357,7 @@ function badgeDefaultProfile($role)
         ];
     }
     return [
-        'textTemplate' => '您已与两点十分并肩 {days} 天',
+        'textTemplate' => '您与两点十分并肩 {days} 天',
         'fallbackDays' => 0,
         'blessings' => ['感恩一路有你', '今天也一起创造精彩', '愿每一次靠近都带来新的灵感', '继续一起把想象做成作品', '并肩同行，热爱常在']
     ];

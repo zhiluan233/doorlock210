@@ -256,6 +256,7 @@ class PostHandler {
 					$mobile = trim((string)($_POST['mobile'] ?? ''));
 					$className = trim((string)($_POST['class_name'] ?? ''));
 					$trainingCenter = trim((string)($_POST['training_center'] ?? ''));
+					$enrolledAt = $this->parseDateInput($_POST['enrolled_date'] ?? '', '入学时间');
 					$studentNo = $this->normalizeStudentNo($_POST['student_no'] ?? '');
 					$remark = trim((string)($_POST['remark'] ?? ''));
 					if ($name === '') {
@@ -292,6 +293,7 @@ class PostHandler {
 						'mobile' => $mobile,
 						'class_name' => $className,
 						'training_center' => $trainingCenter,
+						'enrolled_at' => $enrolledAt > 0 ? $enrolledAt : strtotime(date('Y-m-d')),
 						'remark' => $remark,
 						'updated_at' => $now
 					];
@@ -1262,6 +1264,24 @@ class PostHandler {
 			return '';
 		}
 		return $value;
+	}
+
+	private function parseDateInput($value, $label)
+	{
+		$value = trim((string)$value);
+		if ($value === '') {
+			return 0;
+		}
+		if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $value)) {
+			Header("HTTP/1.1 400 Bad Request");
+			exit($label."格式必须是YYYY-MM-DD");
+		}
+		$parts = explode('-', $value);
+		if (!checkdate(intval($parts[1]), intval($parts[2]), intval($parts[0]))) {
+			Header("HTTP/1.1 400 Bad Request");
+			exit($label."不是有效日期");
+		}
+		return strtotime($value.' 00:00:00');
 	}
 
 	private function feishuReadableUsername($employee, $openId, $currentUserId = 0)

@@ -144,8 +144,8 @@ class FeishuContactSync {
             'mobile' => $user['mobile'] ?? ($exists['mobile'] ?? ''),
             'tenant_key' => $payload['header']['tenant_key'] ?? ($exists['tenant_key'] ?? ''),
             'avatar_url' => self::extractAvatarUrl($user, $exists['avatar_url'] ?? ''),
-            'job_title' => self::extractProfileText($user, ['job_title', 'position', 'title'], $exists['job_title'] ?? ''),
-            'joined_at' => self::extractProfileTime($user, ['join_time', 'joined_at', 'hire_date', 'entry_time'], intval($exists['joined_at'] ?? 0)),
+            'job_title' => self::extractProfileText($user, ['job_title', 'jobTitle', 'position', 'title', 'employee_title', 'staff_title', 'work_title'], $exists['job_title'] ?? ''),
+            'joined_at' => self::extractProfileTime($user, ['join_time', 'joinTime', 'joined_at', 'joinedAt', 'hire_date', 'hireDate', 'entry_time', 'entryTime', 'employment_time', 'employmentTime', 'onboard_time', 'onboardTime', 'start_time', 'startTime'], intval($exists['joined_at'] ?? 0)),
             'updated_at' => $now
         ];
         if ($identity['open_id'] !== '') {
@@ -197,7 +197,9 @@ class FeishuContactSync {
             'update_count' => 0,
             'disable_count' => 0,
             'delete_count' => 0,
-            'release_count' => 0
+            'release_count' => 0,
+            'job_title_count' => 0,
+            'joined_at_count' => 0
         ];
         $seenOpenIds = [];
 
@@ -213,6 +215,12 @@ class FeishuContactSync {
                     self::deleteEmployee($exists, $stats);
                 }
                 continue;
+            }
+            if (trim((string)($member['job_title'] ?? '')) !== '') {
+                $stats['job_title_count']++;
+            }
+            if (intval($member['joined_at'] ?? 0) > 0) {
+                $stats['joined_at_count']++;
             }
 
             $active = ($member['status'] === true);
@@ -238,8 +246,8 @@ class FeishuContactSync {
                 'mobile' => $member['mobile'],
                 'tenant_key' => $member['tenant_key'],
                 'avatar_url' => $member['avatar_url'] ?? '',
-                'job_title' => $member['job_title'] ?? '',
-                'joined_at' => intval($member['joined_at'] ?? 0),
+                'job_title' => trim((string)($member['job_title'] ?? '')) !== '' ? $member['job_title'] : ($exists['job_title'] ?? ''),
+                'joined_at' => intval($member['joined_at'] ?? 0) > 0 ? intval($member['joined_at']) : intval($exists['joined_at'] ?? 0),
                 'updated_at' => time()
             ];
             if (!$active) {
@@ -260,7 +268,7 @@ class FeishuContactSync {
             self::deleteMissingEmployees($seenOpenIds, $stats);
         }
 
-        $message = '飞书通讯录同步完成：处理 '.$stats['total_count'].' 人，新增 '.$stats['insert_count'].' 人，更新 '.$stats['update_count'].' 人，禁用 '.$stats['disable_count'].' 人，删除 '.$stats['delete_count'].' 人，释放卡号 '.$stats['release_count'].' 张';
+        $message = '飞书通讯录同步完成：处理 '.$stats['total_count'].' 人，新增 '.$stats['insert_count'].' 人，更新 '.$stats['update_count'].' 人，禁用 '.$stats['disable_count'].' 人，删除 '.$stats['delete_count'].' 人，释放卡号 '.$stats['release_count'].' 张，岗位 '.$stats['job_title_count'].' 人，入职时间 '.$stats['joined_at_count'].' 人';
         $finishedAt = time();
         $stats['status'] = 'success';
         $stats['finished_at'] = $finishedAt;
@@ -502,8 +510,9 @@ class FeishuContactSync {
     private static function extractProfileText($user, $fields, $fallback = '')
     {
         foreach ($fields as $field) {
-            if (isset($user[$field]) && self::valueText($user[$field]) !== '') {
-                return self::utf8Limit(self::valueText($user[$field]), 100);
+            $text = self::valueText(self::fieldValue($user, $field));
+            if ($text !== '') {
+                return self::utf8Limit($text, 100);
             }
         }
         return (string)$fallback;
@@ -512,14 +521,41 @@ class FeishuContactSync {
     private static function extractProfileTime($user, $fields, $fallback = 0)
     {
         foreach ($fields as $field) {
-            if (isset($user[$field])) {
-                $timestamp = self::parseTimeValue($user[$field]);
-                if ($timestamp > 0) {
-                    return $timestamp;
-                }
+            $timestamp = self::parseTimeValue(self::fieldValue($user, $field));
+            if ($timestamp > 0) {
+                return $timestamp;
             }
         }
         return intval($fallback);
+    }
+
+    private static function fieldValue($user, $field)
+    {
+        if (!is_array($user) || $field === '') {
+            return null;
+        }
+        if (array_key_exists($field, $user)) {
+            return $user[$field];
+        }
+        if (strpos($field, '.') !== false) {
+            $value = $user;
+            foreach (explode('.', $field) as $part) {
+                if (!is_array($value) || !array_key_exists($part, $value)) {
+                    $value = null;
+                    break;
+                }
+                $value = $value[$part];
+            }
+            if ($value !== null) {
+                return $value;
+            }
+        }
+        foreach (['employee', 'employment', 'staff', 'work_info', 'employee_info', 'job_info', 'profile'] as $group) {
+            if (isset($user[$group]) && is_array($user[$group]) && array_key_exists($field, $user[$group])) {
+                return $user[$group][$field];
+            }
+        }
+        return null;
     }
 
     private static function valueText($value)
@@ -530,7 +566,7 @@ class FeishuContactSync {
         if (!is_array($value)) {
             return '';
         }
-        foreach (['text', 'value', 'name', 'date', 'datetime'] as $key) {
+        foreach (['text', 'value', 'name', 'date', 'datetime', 'option_value', 'pc_url'] as $key) {
             if (isset($value[$key]) && is_scalar($value[$key]) && trim((string)$value[$key]) !== '') {
                 return trim((string)$value[$key]);
             }
