@@ -1393,7 +1393,7 @@ function badgeDepartmentDisplay($person, $role)
     $subValueIndex = $config['subValueDepth'] - 1;
     if (count($levels) > $valueIndex) {
         $label = $levels[$titleIndex] ?? $config['defaultLabel'];
-        $value = $levels[$valueIndex] . '/' . $levels[$subValueIndex];
+        $value = $levels[$valueIndex] . ' / ' . $levels[$subValueIndex];
     } else if (count($levels) > $titleIndex) {
         $label = $titleIndex > 0 ? ($levels[$titleIndex - 1] ?? $config['defaultLabel']) : $config['defaultLabel'];
         $value = $levels[$titleIndex];
