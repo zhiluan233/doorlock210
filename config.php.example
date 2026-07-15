@@ -43,7 +43,8 @@ $_config = [
 				'rootDepth' => 0,
 				// rootDepth 之后第几层作为标题/值，默认：第2层做标题，第3层做值
 				'titleDepth' => 2,
-				'valueDepth' => 3
+				'valueDepth' => 3,
+				'subValueDepth' => 4
 			],
 			'profile' => [
 				'employee' => [
