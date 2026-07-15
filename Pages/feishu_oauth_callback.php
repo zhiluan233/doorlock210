@@ -66,6 +66,8 @@ $employeeData = [
     'mobile' => $userData['mobile'] ?? ($employee['mobile'] ?? ''),
     'tenant_key' => $userData['tenant_key'] ?? ($employee['tenant_key'] ?? ''),
     'avatar_url' => feishuOauthAvatarUrl($userData, $employee['avatar_url'] ?? ''),
+    'job_title' => $userData['job_title'] ?? ($userData['position'] ?? ($employee['job_title'] ?? '')),
+    'joined_at' => feishuOauthJoinedAt($userData, intval($employee['joined_at'] ?? 0)),
     'status' => $employee['status'] ?? 'true',
     'updated_at' => time()
 ];
@@ -264,6 +266,28 @@ function feishuOauthAvatarUrl($userData, $fallback = '')
         }
     }
     return (string)$fallback;
+}
+
+function feishuOauthJoinedAt($userData, $fallback = 0)
+{
+    foreach (['join_time', 'joined_at', 'hire_date', 'entry_time'] as $key) {
+        if (!isset($userData[$key])) {
+            continue;
+        }
+        $value = $userData[$key];
+        if (is_numeric($value)) {
+            $timestamp = intval($value);
+            if ($timestamp > 100000000000) {
+                $timestamp = intval($timestamp / 1000);
+            }
+            return $timestamp > 0 ? $timestamp : intval($fallback);
+        }
+        $timestamp = strtotime((string)$value);
+        if ($timestamp !== false) {
+            return intval($timestamp);
+        }
+    }
+    return intval($fallback);
 }
 
 function feishuOauthUniqueUsername($displayName, $employeeId, $openId, $currentUserId = 0)

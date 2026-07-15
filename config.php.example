@@ -34,7 +34,66 @@ $_config = [
 		'attendanceFlowComment' => '门禁刷卡自动同步',
 		'badgeLookup' => [
 			'appLinkTemplate' => 'https://applink.feishu.cn/client/web_url/open?url={entryUrl}',
-			'lostFoundUrl' => ''
+			'lostFoundUrl' => '',
+			'profile' => [
+				'employee' => [
+					'textTemplate' => '您已与两点十分并肩 {days} 天',
+					'fallbackDays' => 0,
+					'blessings' => [
+						'感恩一路有你',
+						'今天也一起创造精彩',
+						'愿每一次靠近都带来新的灵感',
+						'继续一起把想象做成作品',
+						'并肩同行，热爱常在',
+						'感谢你让两点十分更有光'
+					]
+				],
+				'learner' => [
+					'textTemplate' => '您已入学 {days} 天',
+					'fallbackDays' => 0,
+					'blessings' => [
+						'愿你每天都有新的成长',
+						'保持好奇，继续进阶',
+						'把练习变成作品',
+						'今天也向目标更近一步',
+						'愿灵感和努力都在线',
+						'欢迎在两点十分继续发光'
+					]
+				],
+				'guest' => [
+					'textTemplate' => '感谢到访两点十分',
+					'fallbackDays' => 0,
+					'blessings' => [
+						'愿这次相遇留下好印象',
+						'欢迎常来交流',
+						'期待与你一起创造可能',
+						'感谢你走进两点十分',
+						'愿今天的行程顺利愉快',
+						'期待下次再见'
+					]
+				],
+				// 如飞书通讯录字段不是标准字段，可在这里配置自定义属性名称或ID
+				'employeePositionFields' => ['job_title', 'position', 'title', '职务', '岗位'],
+				'employeeJoinedAtFields' => ['join_time', 'joined_at', 'hire_date', 'entry_time', '入职日期', '入职时间'],
+				'customAttrMap' => [
+					'jobTitle' => [
+						'ids' => [],
+						'names' => ['岗位', '职位', '职务', '职称']
+					],
+					'joinedAt' => [
+						'ids' => [],
+						'names' => ['入职日期', '入职时间', '加入日期', '入职日']
+					]
+				]
+			],
+			'quickActions' => [
+				['name' => '打卡记录', 'icon' => 'history', 'url' => '/?page=userpanel'],
+				['name' => '飞书', 'icon' => 'feishu', 'url' => 'https://applink.feishu.cn/client/web_url/open?url=https%3A%2F%2Fwww.feishu.cn'],
+				['name' => 'OA中心', 'icon' => 'oa', 'url' => 'https://example.com/oa'],
+				['name' => '资产', 'icon' => 'asset', 'url' => 'https://example.com/assets'],
+				['name' => '日程', 'icon' => 'calendar', 'url' => 'https://example.com/calendar'],
+				['name' => '帮助', 'icon' => 'help', 'url' => 'https://example.com/help']
+			]
 		],
 		'appEndpoint' => [
 			'getTenantToken' => 'https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal',

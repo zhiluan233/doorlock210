@@ -64,9 +64,21 @@ $assignedEmployee = Database::querySingleLine('employee', ['card_id' => $cardId]
 $assignedLearner = Database::querySingleLine('learner', ['card_id' => $cardId]);
 $assignedGuest = Database::querySingleLine('guest', ['card_id' => $cardId]);
 $isOwnBadge = $assignedEmployee && ($assignedEmployee['open_id'] ?? '') === ($_SESSION['member_open_id'] ?? '');
+$isAdminOwnBadge = $isAdmin && $assignedEmployee && badgeIsSameEmployee($assignedEmployee, $currentEmployee, $adminUser);
 $lostFoundUrl = trim((string)($_config['feishu']['badgeLookup']['lostFoundUrl'] ?? ''));
 
 if ($isAdmin) {
+    if ($isAdminOwnBadge) {
+        badgeRenderPage([
+            'mode' => 'member_own_admin',
+            'title' => '我的工牌',
+            'subtitle' => '这张工牌已绑定到你的门禁账户',
+            'raw_uid' => $rawUid,
+            'card_id' => $cardId,
+            'person' => $assignedEmployee,
+            'csrf' => $_SESSION['token'] ?? ''
+        ]);
+    }
     if ($assignedEmployee) {
         badgeRenderPage([
             'mode' => 'admin_employee',
@@ -151,9 +163,15 @@ function badgeRenderPage($data)
     $trainingCenter = $person['training_center'] ?? '';
     $department = $person['department_name'] ?? '';
     $realname = $person['realname'] ?? '';
+    $role = badgeRoleFromMode($mode);
     $isAdminMode = strpos($mode, 'admin_') === 0;
+    $isAdminSelfMode = $mode === 'member_own_admin';
+    $isPersonalProfile = in_array($mode, ['member_own', 'member_own_admin'], true);
     $isMismatch = $mode === 'member_mismatch';
     $isInvalid = $mode === 'invalid';
+    $subtitle = badgeProfileSubtitle($role, $person, (string)($data['subtitle'] ?? ''));
+    $topbarRight = badgeTopbarRightText($role, $person, $cardId, $rawUid, $isPersonalProfile, $isAdminMode);
+    $quickActions = badgeQuickActions($role, $person, $cardId, $rawUid, $isPersonalProfile);
 
     Header('Content-Type: text/html; charset=utf-8');
 ?>
@@ -190,6 +208,15 @@ function badgeRenderPage($data)
             color: #667085;
             font-size: 13px;
             margin-bottom: 12px;
+        }
+        .topbar span:first-child {
+            flex: 0 0 auto;
+        }
+        .topbar span:last-child {
+            max-width: 72%;
+            text-align: right;
+            line-height: 1.45;
+            word-break: break-word;
         }
         .badge-card {
             flex: 1;
@@ -311,6 +338,74 @@ function badgeRenderPage($data)
         .btn.disabled {
             opacity: .45;
             pointer-events: none;
+        }
+        .quick-fab {
+            position: fixed;
+            right: max(16px, env(safe-area-inset-right));
+            bottom: calc(88px + env(safe-area-inset-bottom));
+            width: 54px;
+            height: 54px;
+            border: 0;
+            border-radius: 50%;
+            background: #13b887;
+            color: #fff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 14px 28px rgba(19, 184, 135, .28);
+            z-index: 900;
+            font-size: 20px;
+        }
+        .quick-menu-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+        }
+        .quick-action {
+            min-height: 86px;
+            border: 1px solid #e4e7ec;
+            border-radius: 8px;
+            background: #fff;
+            color: #344054;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            padding: 10px 6px;
+            text-align: center;
+        }
+        .quick-action-icon {
+            width: 38px;
+            height: 38px;
+            border-radius: 8px;
+            background: #ecfdf6;
+            color: #13b887;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            flex: 0 0 auto;
+        }
+        .quick-action-icon i {
+            font-size: 18px;
+            line-height: 1;
+        }
+        .quick-action-icon img {
+            width: 24px;
+            height: 24px;
+            object-fit: contain;
+            display: block;
+        }
+        .quick-action-name {
+            width: 100%;
+            color: #344054;
+            font-size: 13px;
+            line-height: 1.25;
+            overflow: hidden;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
         }
         .sheet-mask {
             position: fixed;
@@ -453,7 +548,7 @@ function badgeRenderPage($data)
     <main class="shell">
         <div class="topbar">
             <span>个人中心</span>
-            <span><?php echo badgeH($rawUid !== '' ? 'UID ' . $rawUid : 'NDEF 工牌'); ?></span>
+            <span><?php echo badgeH($topbarRight); ?></span>
         </div>
         <section class="badge-card">
             <?php if ($isInvalid) { ?>
@@ -475,7 +570,7 @@ function badgeRenderPage($data)
             </div>
 
             <h1><?php echo badgeH($isMismatch ? '不是你的工牌' : $name); ?></h1>
-            <p class="subtitle"><?php echo badgeH($data['subtitle'] ?? ''); ?></p>
+            <p class="subtitle"><?php echo badgeH($subtitle); ?></p>
 
             <div class="info-list">
                 <div class="info-row"><span>工牌号</span><span><?php echo badgeH($cardId !== '' ? $cardId : '无法转换'); ?></span></div>
@@ -501,7 +596,10 @@ function badgeRenderPage($data)
                 <?php } elseif ($mode === 'admin_empty') { ?>
                     <button class="btn btn-primary" type="button" onclick="openAssignSheet()"><i class="fa-solid fa-id-card"></i>发工牌</button>
                     <a class="btn" href="/?page=panel&module=submitcard"><i class="fa-solid fa-list"></i>返回发卡管理</a>
-                <?php } elseif ($mode === 'member_own') { ?>
+                <?php } elseif ($mode === 'member_own' || $mode === 'member_own_admin') { ?>
+                    <?php if ($isAdminSelfMode) { ?>
+                        <button class="btn" type="button" onclick="openSelfManageSheet()"><i class="fa-solid fa-sliders"></i>管理自己的工牌</button>
+                    <?php } ?>
                     <a class="btn btn-primary" href="/?page=userpanel"><i class="fa-solid fa-clock-rotate-left"></i>查看工牌打卡记录</a>
                     <a class="btn" href="/?page=logout&csrf=<?php echo badgeH($csrf); ?>"><i class="fa-solid fa-right-from-bracket"></i>退出</a>
                 <?php } elseif ($mode === 'member_mismatch') { ?>
@@ -517,6 +615,42 @@ function badgeRenderPage($data)
             </div>
         </section>
     </main>
+
+    <?php if ($isPersonalProfile && count($quickActions) > 0) { ?>
+        <button class="quick-fab" type="button" onclick="openQuickMenu()" aria-label="打开功能菜单"><i class="fa-solid fa-compass"></i></button>
+        <div class="sheet-mask" id="quickMenuSheet" aria-hidden="true">
+            <section class="sheet">
+                <div class="sheet-head">
+                    <h2>工牌菜单</h2>
+                    <button class="icon-btn" type="button" onclick="closeQuickMenu()" aria-label="关闭"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+                <div class="quick-menu-grid">
+                    <?php foreach ($quickActions as $action) { ?>
+                        <button class="quick-action" type="button" onclick="openQuickAction(<?php echo badgeJs($action['url']); ?>)">
+                            <span class="quick-action-icon"><?php echo badgeActionIconHtml($action['icon']); ?></span>
+                            <span class="quick-action-name"><?php echo badgeH($action['name']); ?></span>
+                        </button>
+                    <?php } ?>
+                </div>
+            </section>
+        </div>
+    <?php } ?>
+
+    <?php if ($isAdminSelfMode) { ?>
+        <div class="sheet-mask" id="selfManageSheet" aria-hidden="true">
+            <section class="sheet">
+                <div class="sheet-head">
+                    <h2>管理自己的工牌</h2>
+                    <button class="icon-btn" type="button" onclick="closeSelfManageSheet()" aria-label="关闭"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+                <div class="sheet-actions">
+                    <button class="btn btn-danger" type="button" onclick="releaseBadge()"><i class="fa-solid fa-rotate-left"></i>回收该工牌</button>
+                    <a class="btn" href="/?page=panel&module=submitcard"><i class="fa-solid fa-list"></i>进入发卡管理</a>
+                    <button class="btn" type="button" onclick="closeSelfManageSheet()"><i class="fa-solid fa-arrow-left"></i>返回工牌菜单</button>
+                </div>
+            </section>
+        </div>
+    <?php } ?>
 
     <?php if ($mode === 'admin_empty') { ?>
         <div class="sheet-mask" id="assignSheet" aria-hidden="true">
@@ -553,6 +687,7 @@ function badgeRenderPage($data)
         var searchTimer = null;
         var personSearchCache = {employee: null, learner: null};
         var personSearchPromise = {employee: null, learner: null};
+        var overlayState = null;
 
         function toast(message) {
             var el = document.getElementById('toast');
@@ -600,13 +735,59 @@ function badgeRenderPage($data)
             });
         }
 
-        function openAssignSheet() {
-            var sheet = document.getElementById('assignSheet');
+        function showSheet(id, stateName) {
+            var sheet = document.getElementById(id);
             if (!sheet) {
                 return;
             }
             sheet.className = 'sheet-mask show';
             sheet.setAttribute('aria-hidden', 'false');
+            overlayState = stateName || id;
+            if (!history.state || history.state.badgeOverlay !== overlayState) {
+                history.pushState({badgeOverlay: overlayState}, '', location.href);
+            }
+        }
+
+        function hideSheet(id) {
+            var sheet = document.getElementById(id);
+            if (!sheet) {
+                return;
+            }
+            sheet.className = 'sheet-mask';
+            sheet.setAttribute('aria-hidden', 'true');
+            overlayState = null;
+        }
+
+        function openQuickMenu() {
+            showSheet('quickMenuSheet', 'quickMenu');
+        }
+
+        function closeQuickMenu() {
+            hideSheet('quickMenuSheet');
+        }
+
+        function openQuickAction(url) {
+            if (!url) {
+                toast('该功能暂未配置');
+                return;
+            }
+            location.href = url;
+        }
+
+        function openSelfManageSheet() {
+            showSheet('selfManageSheet', 'selfManage');
+        }
+
+        function closeSelfManageSheet() {
+            hideSheet('selfManageSheet');
+        }
+
+        function openAssignSheet() {
+            var sheet = document.getElementById('assignSheet');
+            if (!sheet) {
+                return;
+            }
+            showSheet('assignSheet', 'assign');
             setTimeout(function() {
                 var input = document.getElementById('personSearch');
                 if (input) {
@@ -617,12 +798,7 @@ function badgeRenderPage($data)
         }
 
         function closeAssignSheet() {
-            var sheet = document.getElementById('assignSheet');
-            if (!sheet) {
-                return;
-            }
-            sheet.className = 'sheet-mask';
-            sheet.setAttribute('aria-hidden', 'true');
+            hideSheet('assignSheet');
         }
 
         function switchAssignKind(kind) {
@@ -834,6 +1010,16 @@ function badgeRenderPage($data)
         }
 
         (function() {
+            window.addEventListener('popstate', function() {
+                if (overlayState === 'quickMenu') {
+                    closeQuickMenu();
+                } else if (overlayState === 'selfManage') {
+                    closeSelfManageSheet();
+                } else if (overlayState === 'assign') {
+                    closeAssignSheet();
+                }
+            });
+
             var input = document.getElementById('personSearch');
             if (!input) {
                 return;
@@ -857,6 +1043,265 @@ function badgeRenderPage($data)
 function badgeNormalizeUid($value)
 {
     return AttendanceService::normalizeUidValue($value);
+}
+
+function badgeIsSameEmployee($assignedEmployee, $currentEmployee, $adminUser)
+{
+    if (!$assignedEmployee) {
+        return false;
+    }
+    $assignedOpenId = (string)($assignedEmployee['open_id'] ?? '');
+    $assignedEmployeeId = (string)($assignedEmployee['employee_id'] ?? '');
+    $candidates = [];
+    if ($currentEmployee) {
+        $candidates[] = [
+            'open_id' => (string)($currentEmployee['open_id'] ?? ''),
+            'employee_id' => (string)($currentEmployee['employee_id'] ?? '')
+        ];
+    }
+    if ($adminUser) {
+        $candidates[] = [
+            'open_id' => (string)($adminUser['open_id'] ?? ''),
+            'employee_id' => (string)($adminUser['employee_id'] ?? '')
+        ];
+    }
+    foreach ($candidates as $candidate) {
+        if ($assignedOpenId !== '' && $candidate['open_id'] !== '' && $assignedOpenId === $candidate['open_id']) {
+            return true;
+        }
+        if ($assignedEmployeeId !== '' && $candidate['employee_id'] !== '' && $assignedEmployeeId === $candidate['employee_id']) {
+            return true;
+        }
+    }
+    return false;
+}
+
+function badgeRoleFromMode($mode)
+{
+    if (strpos($mode, 'learner') !== false) {
+        return 'learner';
+    }
+    if (strpos($mode, 'guest') !== false) {
+        return 'guest';
+    }
+    return 'employee';
+}
+
+function badgeProfileSubtitle($role, $person, $fallback)
+{
+    if (!$person) {
+        return $fallback;
+    }
+    if ($role === 'learner') {
+        $parts = array_values(array_filter([
+            trim((string)($person['training_center'] ?? '')),
+            trim((string)($person['class_name'] ?? ''))
+        ], function($item) { return $item !== ''; }));
+        return count($parts) > 0 ? implode(' | ', $parts) : '学员';
+    }
+    if ($role === 'guest') {
+        return '访客';
+    }
+    $jobTitle = trim((string)($person['job_title'] ?? ''));
+    if ($jobTitle !== '') {
+        return $jobTitle;
+    }
+    return trim((string)($person['department_name'] ?? '')) ?: $fallback;
+}
+
+function badgeTopbarRightText($role, $person, $cardId, $rawUid, $isPersonalProfile, $isAdminMode)
+{
+    if (!$isPersonalProfile || $isAdminMode || !$person) {
+        return $rawUid !== '' ? 'UID ' . $rawUid : 'NDEF 工牌';
+    }
+    $profile = badgeRoleProfileConfig($role);
+    $days = badgeProfileDays($role, $person, intval($profile['fallbackDays'] ?? 0));
+    $template = (string)($profile['textTemplate'] ?? badgeDefaultProfile($role)['textTemplate']);
+    $base = badgeApplyTemplate($template, [
+        'days' => (string)$days,
+        'name' => (string)($person['name'] ?? ''),
+        'card_id' => $cardId,
+        'uid' => $rawUid
+    ]);
+    $blessing = badgeStableBlessing($profile['blessings'] ?? [], $cardId . '|' . $role);
+    return $blessing !== '' ? $base . '，' . $blessing : $base;
+}
+
+function badgeProfileDays($role, $person, $fallback)
+{
+    $timestamp = 0;
+    if ($role === 'learner') {
+        $timestamp = intval($person['created_at'] ?? 0);
+    } else if ($role === 'employee') {
+        $timestamp = intval($person['joined_at'] ?? 0);
+    }
+    if ($timestamp <= 0) {
+        return max(0, intval($fallback));
+    }
+    return max(1, intval(floor((time() - $timestamp) / 86400)) + 1);
+}
+
+function badgeRoleProfileConfig($role)
+{
+    $config = badgeLookupConfig();
+    $profiles = is_array($config['profile'] ?? null) ? $config['profile'] : [];
+    $default = badgeDefaultProfile($role);
+    $profile = is_array($profiles[$role] ?? null) ? $profiles[$role] : [];
+    return array_merge($default, $profile);
+}
+
+function badgeDefaultProfile($role)
+{
+    if ($role === 'learner') {
+        return [
+            'textTemplate' => '您已入学 {days} 天',
+            'fallbackDays' => 0,
+            'blessings' => ['愿你每天都有新的成长', '保持好奇，继续进阶', '把练习变成作品', '今天也向目标更近一步', '愿灵感和努力都在线']
+        ];
+    }
+    if ($role === 'guest') {
+        return [
+            'textTemplate' => '感谢到访两点十分',
+            'fallbackDays' => 0,
+            'blessings' => ['愿这次相遇留下好印象', '欢迎常来交流', '期待与你一起创造可能', '感谢你走进两点十分', '愿今天的行程顺利愉快']
+        ];
+    }
+    return [
+        'textTemplate' => '您已与两点十分并肩 {days} 天',
+        'fallbackDays' => 0,
+        'blessings' => ['感恩一路有你', '今天也一起创造精彩', '愿每一次靠近都带来新的灵感', '继续一起把想象做成作品', '并肩同行，热爱常在']
+    ];
+}
+
+function badgeStableBlessing($items, $seed)
+{
+    if (!is_array($items) || count($items) === 0) {
+        return '';
+    }
+    $clean = [];
+    foreach ($items as $item) {
+        $item = trim((string)$item);
+        if ($item !== '') {
+            $clean[] = $item;
+        }
+    }
+    if (count($clean) === 0) {
+        return '';
+    }
+    $index = abs(crc32($seed . '|' . date('Ymd'))) % count($clean);
+    return $clean[$index];
+}
+
+function badgeQuickActions($role, $person, $cardId, $rawUid, $isPersonalProfile)
+{
+    if (!$isPersonalProfile) {
+        return [];
+    }
+    $config = badgeLookupConfig();
+    $items = $config['quickActions'] ?? [
+        ['name' => '打卡记录', 'icon' => 'history', 'url' => '/?page=userpanel']
+    ];
+    if (!is_array($items)) {
+        return [];
+    }
+    $actions = [];
+    foreach ($items as $item) {
+        if (!is_array($item)) {
+            continue;
+        }
+        $name = trim((string)($item['name'] ?? ''));
+        $icon = trim((string)($item['icon'] ?? 'link'));
+        $url = badgeResolveActionUrl((string)($item['url'] ?? ''), $role, $person, $cardId, $rawUid);
+        if ($name === '' || $url === '') {
+            continue;
+        }
+        $actions[] = ['name' => $name, 'icon' => $icon, 'url' => $url];
+        if (count($actions) >= 12) {
+            break;
+        }
+    }
+    return $actions;
+}
+
+function badgeResolveActionUrl($url, $role, $person, $cardId, $rawUid)
+{
+    $url = trim($url);
+    if ($url === '' || !badgeIsSafeActionUrl($url)) {
+        return '';
+    }
+    return badgeApplyTemplate($url, [
+        'role' => $role,
+        'card_id' => $cardId,
+        'uid' => $rawUid,
+        'open_id' => (string)($person['open_id'] ?? ''),
+        'employee_id' => (string)($person['employee_id'] ?? ''),
+        'student_no' => (string)($person['student_no'] ?? ''),
+        'name' => (string)($person['name'] ?? '')
+    ]);
+}
+
+function badgeIsSafeActionUrl($url)
+{
+    return !preg_match('/^\s*(javascript|data|vbscript):/i', $url);
+}
+
+function badgeApplyTemplate($template, $vars)
+{
+    foreach ($vars as $key => $value) {
+        $template = str_replace('{' . $key . '}', (string)$value, $template);
+        $template = str_replace('{' . $key . ':url}', rawurlencode((string)$value), $template);
+    }
+    return $template;
+}
+
+function badgeActionIconHtml($icon)
+{
+    $icon = trim((string)$icon);
+    if ($icon === '') {
+        $icon = 'link';
+    }
+    if (preg_match('/^(https?:)?\/\//i', $icon) || preg_match('/^\//', $icon)) {
+        return '<img src="' . badgeH($icon) . '" alt="">';
+    }
+    $class = badgeIconClass($icon);
+    return '<i class="' . badgeH($class) . '"></i>';
+}
+
+function badgeIconClass($icon)
+{
+    if (strpos($icon, 'fa-') !== false) {
+        return $icon;
+    }
+    $map = [
+        'history' => 'fa-solid fa-clock-rotate-left',
+        'attendance' => 'fa-solid fa-clipboard-check',
+        'feishu' => 'fa-solid fa-paper-plane',
+        'oa' => 'fa-solid fa-briefcase',
+        'asset' => 'fa-solid fa-box-archive',
+        'calendar' => 'fa-solid fa-calendar-days',
+        'help' => 'fa-solid fa-circle-question',
+        'profile' => 'fa-solid fa-user',
+        'badge' => 'fa-solid fa-id-card',
+        'admin' => 'fa-solid fa-sliders',
+        'course' => 'fa-solid fa-graduation-cap',
+        'docs' => 'fa-solid fa-file-lines',
+        'cloud' => 'fa-solid fa-cloud',
+        'feedback' => 'fa-solid fa-comment-dots',
+        'link' => 'fa-solid fa-arrow-up-right-from-square'
+    ];
+    return $map[$icon] ?? 'fa-solid fa-arrow-up-right-from-square';
+}
+
+function badgeJs($value)
+{
+    return json_encode((string)$value, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+}
+
+function badgeLookupConfig()
+{
+    global $_config;
+    $config = $_config['feishu']['badgeLookup'] ?? [];
+    return is_array($config) ? $config : [];
 }
 
 function badgeAvatarUrl($person)

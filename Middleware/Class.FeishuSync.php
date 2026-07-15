@@ -144,6 +144,8 @@ class FeishuContactSync {
             'mobile' => $user['mobile'] ?? ($exists['mobile'] ?? ''),
             'tenant_key' => $payload['header']['tenant_key'] ?? ($exists['tenant_key'] ?? ''),
             'avatar_url' => self::extractAvatarUrl($user, $exists['avatar_url'] ?? ''),
+            'job_title' => self::extractProfileText($user, ['job_title', 'position', 'title'], $exists['job_title'] ?? ''),
+            'joined_at' => self::extractProfileTime($user, ['join_time', 'joined_at', 'hire_date', 'entry_time'], intval($exists['joined_at'] ?? 0)),
             'updated_at' => $now
         ];
         if ($identity['open_id'] !== '') {
@@ -236,6 +238,8 @@ class FeishuContactSync {
                 'mobile' => $member['mobile'],
                 'tenant_key' => $member['tenant_key'],
                 'avatar_url' => $member['avatar_url'] ?? '',
+                'job_title' => $member['job_title'] ?? '',
+                'joined_at' => intval($member['joined_at'] ?? 0),
                 'updated_at' => time()
             ];
             if (!$active) {
@@ -493,6 +497,76 @@ class FeishuContactSync {
             'employee_id' => $user['employee_no'] ?? $user['employee_id'] ?? $user['employee_number'] ?? $event['employee_no'] ?? $event['employee_id'] ?? '',
             'user' => $user
         ];
+    }
+
+    private static function extractProfileText($user, $fields, $fallback = '')
+    {
+        foreach ($fields as $field) {
+            if (isset($user[$field]) && self::valueText($user[$field]) !== '') {
+                return self::utf8Limit(self::valueText($user[$field]), 100);
+            }
+        }
+        return (string)$fallback;
+    }
+
+    private static function extractProfileTime($user, $fields, $fallback = 0)
+    {
+        foreach ($fields as $field) {
+            if (isset($user[$field])) {
+                $timestamp = self::parseTimeValue($user[$field]);
+                if ($timestamp > 0) {
+                    return $timestamp;
+                }
+            }
+        }
+        return intval($fallback);
+    }
+
+    private static function valueText($value)
+    {
+        if (is_scalar($value)) {
+            return trim((string)$value);
+        }
+        if (!is_array($value)) {
+            return '';
+        }
+        foreach (['text', 'value', 'name', 'date', 'datetime'] as $key) {
+            if (isset($value[$key]) && is_scalar($value[$key]) && trim((string)$value[$key]) !== '') {
+                return trim((string)$value[$key]);
+            }
+        }
+        foreach ($value as $item) {
+            $text = self::valueText($item);
+            if ($text !== '') {
+                return $text;
+            }
+        }
+        return '';
+    }
+
+    private static function parseTimeValue($value)
+    {
+        if (is_numeric($value)) {
+            $timestamp = intval($value);
+            if ($timestamp > 100000000000) {
+                $timestamp = intval($timestamp / 1000);
+            }
+            return $timestamp > 0 ? $timestamp : 0;
+        }
+        $text = self::valueText($value);
+        if ($text === '') {
+            return 0;
+        }
+        $timestamp = strtotime($text);
+        return $timestamp !== false ? intval($timestamp) : 0;
+    }
+
+    private static function utf8Limit($value, $limit)
+    {
+        if (preg_match_all('/./u', $value, $matches) === false) {
+            return substr($value, 0, $limit);
+        }
+        return implode('', array_slice($matches[0], 0, $limit));
     }
 
     private static function extractAvatarUrl($user, $fallback = '')

@@ -374,6 +374,8 @@ class appLinkFeishu {
                 $lifecycle = $this->statusLifecycle($statusDetail);
                 $status = $lifecycle === 'active';
                 $realName = $this->extractRealName($item);
+                $jobTitle = $this->extractJobTitle($item);
+                $joinedAt = $this->extractJoinedAt($item);
                 $departmentIds = $item['department_ids'] ?? [$canonicalDepartmentId];
 
                 $allMembers[] = [
@@ -392,7 +394,9 @@ class appLinkFeishu {
                     'email' => $item['email'] ?? '',
                     'mobile' => $item['mobile'] ?? '',
                     'tenant_key' => $item['tenant_key'] ?? '',
-                    'avatar_url' => $this->extractAvatarUrl($item)
+                    'avatar_url' => $this->extractAvatarUrl($item),
+                    'job_title' => $jobTitle,
+                    'joined_at' => $joinedAt
                 ];
             }
         }
@@ -460,6 +464,113 @@ class appLinkFeishu {
             }
         }
         return '';
+    }
+
+    private function extractJobTitle($item) {
+        $value = $this->extractFieldByConfig($item, 'employeePositionFields', 'jobTitle', ['job_title', 'position', 'title']);
+        return $this->limitText($value, 100);
+    }
+
+    private function extractJoinedAt($item) {
+        $value = $this->extractFieldByConfig($item, 'employeeJoinedAtFields', 'joinedAt', ['join_time', 'joined_at', 'hire_date', 'entry_time']);
+        return $this->parseDateTimeValue($value);
+    }
+
+    private function extractFieldByConfig($item, $fieldKey, $customKey, $defaults) {
+        $profile = $this->_config['feishu']['badgeLookup']['profile'] ?? [];
+        $fields = $profile[$fieldKey] ?? $defaults;
+        if (!is_array($fields)) {
+            $fields = $defaults;
+        }
+        foreach ($fields as $field) {
+            $field = trim((string)$field);
+            if ($field === '') {
+                continue;
+            }
+            if (isset($item[$field]) && $this->customValueText($item[$field]) !== '') {
+                return $this->customValueText($item[$field]);
+            }
+        }
+
+        $map = $profile['customAttrMap'][$customKey] ?? [];
+        return $this->extractCustomAttrValue($item, $map);
+    }
+
+    private function extractCustomAttrValue($item, $map) {
+        if (!isset($item['custom_attrs']) || !is_array($item['custom_attrs']) || !is_array($map)) {
+            return '';
+        }
+        $ids = isset($map['ids']) && is_array($map['ids']) ? array_map('strval', $map['ids']) : [];
+        $names = isset($map['names']) && is_array($map['names']) ? array_map('strval', $map['names']) : [];
+        foreach ($item['custom_attrs'] as $attr) {
+            $attrId = (string)($attr['id'] ?? '');
+            $i18nName = is_array($attr['i18n_name'] ?? null) ? $attr['i18n_name'] : [];
+            $attrName = (string)($attr['name'] ?? ($i18nName['zh_cn'] ?? ($i18nName['zh-CN'] ?? '')));
+            $idMatched = $attrId !== '' && in_array($attrId, $ids, true);
+            $nameMatched = $attrName !== '' && in_array($attrName, $names, true);
+            if (!$idMatched && !$nameMatched) {
+                continue;
+            }
+            $text = $this->customValueText($attr['value'] ?? '');
+            if ($text !== '') {
+                return $text;
+            }
+        }
+        return '';
+    }
+
+    private function customValueText($value) {
+        if (is_scalar($value)) {
+            return trim((string)$value);
+        }
+        if (!is_array($value)) {
+            return '';
+        }
+        foreach (['text', 'value', 'name', 'date', 'datetime'] as $key) {
+            if (isset($value[$key]) && is_scalar($value[$key]) && trim((string)$value[$key]) !== '') {
+                return trim((string)$value[$key]);
+            }
+        }
+        if (isset($value['option']) && is_array($value['option'])) {
+            $text = $this->customValueText($value['option']);
+            if ($text !== '') {
+                return $text;
+            }
+        }
+        foreach ($value as $item) {
+            $text = $this->customValueText($item);
+            if ($text !== '') {
+                return $text;
+            }
+        }
+        return '';
+    }
+
+    private function parseDateTimeValue($value) {
+        if (is_numeric($value)) {
+            $timestamp = intval($value);
+            if ($timestamp > 100000000000) {
+                $timestamp = intval($timestamp / 1000);
+            }
+            return $timestamp > 0 ? $timestamp : 0;
+        }
+        $text = trim((string)$value);
+        if ($text === '') {
+            return 0;
+        }
+        $timestamp = strtotime($text);
+        return $timestamp !== false ? intval($timestamp) : 0;
+    }
+
+    private function limitText($value, $limit) {
+        $value = trim((string)$value);
+        if ($value === '') {
+            return '';
+        }
+        if (preg_match_all('/./u', $value, $matches) === false) {
+            return substr($value, 0, $limit);
+        }
+        return implode('', array_slice($matches[0], 0, $limit));
     }
 
     private function isActiveStatus($status) {
