@@ -1653,7 +1653,7 @@ function badgeStableBlessing($items, $seed)
     if (count($clean) === 0) {
         return '';
     }
-    $index = abs(crc32($seed . '|' . date('Ymd'))) % count($clean);
+    $index = abs(crc32($seed . '|' . time())) % count($clean);
     return $clean[$index];
 }
 
