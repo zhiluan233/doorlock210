@@ -31,10 +31,30 @@ function roleH($value) {
 	return htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8');
 }
 
+function roleSubjectKind($value) {
+	return in_array($value, ['employee', 'learner', 'guest'], true) ? $value : 'employee';
+}
+
+function roleSubjectLabel($value) {
+	$value = roleSubjectKind($value);
+	if ($value === 'learner') { return '学员'; }
+	if ($value === 'guest') { return '访客'; }
+	return '员工';
+}
+
+function roleAllScopeLabel($value) {
+	$value = roleSubjectKind($value);
+	if ($value === 'learner') { return '全体学员'; }
+	if ($value === 'guest') { return '全体访客'; }
+	return '全体员工';
+}
+
 Database::delete('access_role_members', "DELETE m FROM `access_role_members` m LEFT JOIN `employee` e ON e.`open_id`=m.`employee_open_id` WHERE IFNULL(m.`member_kind`, 'employee')='employee' AND e.`open_id` IS NULL", '', true);
+Database::delete('access_role_members', "DELETE m FROM `access_role_members` m LEFT JOIN `learner` l ON l.`student_no`=m.`employee_open_id` WHERE m.`member_kind`='learner' AND l.`student_no` IS NULL", '', true);
 Database::delete('access_role_members', "DELETE m FROM `access_role_members` m LEFT JOIN `guest` g ON g.`open_id`=m.`employee_open_id` WHERE m.`member_kind`='guest' AND g.`open_id` IS NULL", '', true);
 
 $employeesRaw = roleFetchRows("SELECT `open_id`, `name`, `employee_id`, `status` FROM `employee` WHERE `open_id`<>'' ORDER BY `status` DESC, `name` ASC", 'employee');
+$learnersRaw = roleFetchRows("SELECT `student_no`, `name`, `status` FROM `learner` WHERE `student_no`<>'' ORDER BY `status` DESC, `name` ASC", 'learner');
 $guestsRaw = roleFetchRows("SELECT `open_id`, `name`, `status` FROM `guest` WHERE `open_id`<>'' ORDER BY `status` DESC, `name` ASC", 'guest');
 $devicesRaw = roleFetchRows("SELECT `id`, `name`, `ip` FROM `devices` ORDER BY `id` ASC", 'devices');
 $rolesRaw = roleFetchRows("SELECT r.*, (SELECT COUNT(*) FROM `access_role_members` m WHERE m.`role_id`=r.`id`) AS member_count FROM `access_roles` r WHERE r.`enabled`=1 ORDER BY r.`builtin_key` DESC, r.`id` ASC", 'access_roles');
@@ -56,6 +76,15 @@ foreach ($guestsRaw as $guest) {
 	$guests[] = [
 		'value' => $guest['open_id'],
 		'title' => $guest['name'].$statusText
+	];
+}
+
+$learners = [];
+foreach ($learnersRaw as $learner) {
+	$statusText = ($learner['status'] ?? '') === 'true' ? '' : '，禁用';
+	$learners[] = [
+		'value' => $learner['student_no'],
+		'title' => $learner['name'].'（'.$learner['student_no'].$statusText.'）'
 	];
 }
 
@@ -88,7 +117,7 @@ foreach ($rolePoliciesRaw as $policy) {
 $roles = [];
 foreach ($rolesRaw as $role) {
 	$roleId = intval($role['id']);
-	$subjectKind = ($role['subject_kind'] ?? 'employee') === 'guest' ? 'guest' : 'employee';
+	$subjectKind = roleSubjectKind($role['subject_kind'] ?? 'employee');
 	$roles[] = [
 		'id' => $roleId,
 		'name' => $role['name'],
@@ -131,8 +160,8 @@ foreach ($rolesRaw as $role) {
 								<tr>
 									<td><?php echo intval($role['id']); ?></td>
 									<td><?php echo roleH($role['name']); ?></td>
-									<td><?php echo $role['subject_kind'] === 'guest' ? '访客' : '员工'; ?></td>
-									<td><?php echo intval($role['allow_all']) === 1 ? ($role['subject_kind'] === 'guest' ? '全体访客' : '全体员工') : '指定成员'; ?></td>
+									<td><?php echo roleSubjectLabel($role['subject_kind']); ?></td>
+									<td><?php echo intval($role['allow_all']) === 1 ? roleAllScopeLabel($role['subject_kind']) : '指定成员'; ?></td>
 									<td><?php echo intval($role['allow_all']) === 1 ? '动态全体' : intval($role['member_count']); ?></td>
 									<td><?php echo count($role['device_ids']); ?></td>
 									<td><?php echo roleH($role['description']); ?></td>
@@ -157,6 +186,7 @@ foreach ($rolesRaw as $role) {
 <script>
 var csrf_token = "<?php echo $_SESSION['token']; ?>";
 var employeeList = <?php echo json_encode($employees, JSON_UNESCAPED_UNICODE); ?>;
+var learnerList = <?php echo json_encode($learners, JSON_UNESCAPED_UNICODE); ?>;
 var guestList = <?php echo json_encode($guests, JSON_UNESCAPED_UNICODE); ?>;
 var deviceList = <?php echo json_encode($devices, JSON_UNESCAPED_UNICODE); ?>;
 var roleData = <?php echo json_encode($roles, JSON_UNESCAPED_UNICODE); ?>;
@@ -182,7 +212,20 @@ layui.use(['layer', 'form', 'transfer'], function(){
 	}
 
 	function currentSubjectKind() {
-		return $('#subject_kind').val() === 'guest' ? 'guest' : 'employee';
+		var kind = $('#subject_kind').val();
+		return kind === 'learner' || kind === 'guest' ? kind : 'employee';
+	}
+
+	function subjectLabel(kind) {
+		if (kind === 'learner') { return '学员'; }
+		if (kind === 'guest') { return '访客'; }
+		return '员工';
+	}
+
+	function memberListByKind(kind) {
+		if (kind === 'learner') { return learnerList; }
+		if (kind === 'guest') { return guestList; }
+		return employeeList;
 	}
 
 	function renderMemberTransfer(values) {
@@ -190,8 +233,8 @@ layui.use(['layer', 'form', 'transfer'], function(){
 		$('#roleMemberTransfer').empty();
 		transfer.render({
 			elem: '#roleMemberTransfer',
-			title: [kind === 'guest' ? '可选访客' : '可选员工', '角色成员'],
-			data: kind === 'guest' ? guestList : employeeList,
+			title: ['可选' + subjectLabel(kind), '角色成员'],
+			data: memberListByKind(kind),
 			value: values || [],
 			width: 300,
 			height: 300,
@@ -219,7 +262,7 @@ layui.use(['layer', 'form', 'transfer'], function(){
 		}
 		var html = '<div class="layui-form layui-form-pane" style="padding:16px;">'
 			+ '<div class="layui-form-item"><label class="layui-form-label">角色名</label><div class="layui-input-block"><input type="text" id="role_name" class="layui-input" value="' + escapeHtml(role.name) + '"></div></div>'
-			+ '<div class="layui-form-item"><label class="layui-form-label">对象</label><div class="layui-input-block"><select id="subject_kind"><option value="employee" ' + (role.subject_kind === 'guest' ? '' : 'selected') + '>员工</option><option value="guest" ' + (role.subject_kind === 'guest' ? 'selected' : '') + '>访客</option></select></div></div>'
+			+ '<div class="layui-form-item"><label class="layui-form-label">对象</label><div class="layui-input-block"><select id="subject_kind"><option value="employee" ' + (role.subject_kind === 'employee' ? 'selected' : '') + '>员工</option><option value="learner" ' + (role.subject_kind === 'learner' ? 'selected' : '') + '>学员</option><option value="guest" ' + (role.subject_kind === 'guest' ? 'selected' : '') + '>访客</option></select></div></div>'
 			+ '<div class="layui-form-item"><label class="layui-form-label">备注</label><div class="layui-input-block"><input type="text" id="role_description" class="layui-input" value="' + escapeHtml(role.description) + '"></div></div>'
 			+ '<div class="layui-form-item"><input type="checkbox" id="allow_all" title="全体角色" lay-skin="primary" ' + (parseInt(role.allow_all, 10) === 1 ? 'checked' : '') + '></div>'
 			+ '<div id="roleMemberWrap"><div id="roleMemberTransfer"></div></div>'

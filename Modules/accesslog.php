@@ -41,7 +41,7 @@ while ($row = mysqli_fetch_assoc($logData)) {
 			<div class="panel panel-white">
 				<div class="panel-body" style="font-weight: 400;overflow-x: auto;max-width: ;">
 					<h4 style="font-weight: 400">出入记录查询</h4><br>
-					<h6>倒序展示所有员工出入记录</h6><br />
+					<h6>倒序展示所有人员出入记录</h6><br />
 
 					<table id="devices1" class="table table-bordered table-auto" data-toggle="table" data-pagination="true" data-page-size="10" data-page-list="[5, 10, 20, 30, 40, 50, 'All']" data-sortable="true" data-search="true"  style="clear: both;margin-top: 20px;">
                         <thead>

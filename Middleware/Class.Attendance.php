@@ -79,6 +79,38 @@ class AttendanceService {
         return false;
     }
 
+    public static function canLearnerPass($learnerInfo, $deviceInfo, &$reason = '')
+    {
+        if (!$learnerInfo) {
+            $reason = '未找到学员';
+            return false;
+        }
+        if (($learnerInfo['status'] ?? '') !== 'true') {
+            $reason = '学员已禁用';
+            return false;
+        }
+
+        $studentNo = $learnerInfo['student_no'] ?? '';
+        $policies = self::getPolicies($deviceInfo['id'], 'learner');
+        foreach ($policies as $policy) {
+            if (($policy['subject_type'] ?? '') === 'all') {
+                $reason = '全体学员';
+                return true;
+            }
+            if (($policy['subject_type'] ?? '') === 'learner' && ($policy['subject_value'] ?? '') === $studentNo) {
+                $reason = '学员名单权限';
+                return true;
+            }
+            if (($policy['subject_type'] ?? '') === 'role' && self::learnerMatchesRole($policy['subject_value'] ?? '', $learnerInfo)) {
+                $reason = self::policyLabel($policy);
+                return true;
+            }
+        }
+
+        $reason = '没有权限';
+        return false;
+    }
+
     public static function writeAccessLog($username, $userType, $doorName, $cardId, $action, $eventTime = null)
     {
         $eventTime = $eventTime ?: time();
@@ -1004,6 +1036,34 @@ class AttendanceService {
         return (bool)$member;
     }
 
+    private static function learnerMatchesRole($roleId, $learnerInfo)
+    {
+        $roleId = trim((string)$roleId);
+        if ($roleId === '' || !preg_match('/^[0-9]+$/', $roleId)) {
+            return false;
+        }
+
+        $role = Database::querySingleLine('access_roles', ['id' => intval($roleId), 'enabled' => 1]);
+        if (!$role || ($role['subject_kind'] ?? '') !== 'learner') {
+            return false;
+        }
+        if (intval($role['allow_all'] ?? 0) === 1) {
+            return true;
+        }
+
+        $studentNo = $learnerInfo['student_no'] ?? '';
+        if ($studentNo === '') {
+            return false;
+        }
+
+        $member = Database::querySingleLine('access_role_members', [
+            'role_id' => intval($roleId),
+            'member_kind' => 'learner',
+            'employee_open_id' => $studentNo
+        ]);
+        return (bool)$member;
+    }
+
     private static function employeeDepartments($employeeInfo)
     {
         $values = [];
@@ -1066,6 +1126,7 @@ class AttendanceService {
         $typeMap = [
             'all' => '全员',
             'employee' => '员工名单',
+            'learner' => '学员名单',
             'department' => '部门',
             'group' => '组',
             'role' => '角色',

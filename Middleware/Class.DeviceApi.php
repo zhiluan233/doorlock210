@@ -90,6 +90,7 @@ class deviceApi {
                         $card = AttendanceService::normalizeCardNumber($card);
 
                         $employeeInfo = Database::querySingleLine("employee", Array("card_id" => $card));
+                        $learnerInfo = Database::querySingleLine("learner", Array("card_id" => $card));
                         $guestInfo = Database::querySingleLine("guest", Array("card_id" => $card));
 
                         if ($guestInfo != null) {
@@ -115,6 +116,32 @@ class deviceApi {
                                 ];
 
                                 AttendanceService::writeAccessLog($guestInfo['name'], '访客', $deviceInfo['name'], $card, '开门成功', $eventTime);
+                                exit(json_encode($resp));
+                        }
+
+                        if ($learnerInfo != null) {
+                            $reason = '';
+                            $allowPass = AttendanceService::canLearnerPass($learnerInfo, $deviceInfo, $reason);
+                            if ($allowPass === false) {
+                                http_response_code(200);
+                                $resp = [
+                                    'ActIndex' => '0',
+                                    'AcsRes' => '0',
+                                    'Time' => (string)$_config['doorOpenTime'],
+                                    'OEM' => (string)$deviceInfo['oemcode']
+                                ];
+                                AttendanceService::writeAccessLog($learnerInfo['name'], '学员', $deviceInfo['name'], $card, '开门失败：'.$reason, $eventTime);
+                                exit(json_encode($resp));
+                            }
+                                http_response_code(200);
+                                $resp = [
+                                    'ActIndex' => '0',
+                                    'AcsRes' => '1',
+                                    'Time' => (string)$_config['doorOpenTime'],
+                                    'OEM' => (string)$deviceInfo['oemcode']
+                                ];
+
+                                AttendanceService::writeAccessLog($learnerInfo['name'], '学员', $deviceInfo['name'], $card, '开门成功', $eventTime);
                                 exit(json_encode($resp));
                         }
 

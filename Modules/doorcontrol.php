@@ -29,8 +29,27 @@ function fetchAssocRows($sql, $table = 'devices') {
 	return $rows;
 }
 
+function doorcontrolSubjectKind($value) {
+	return in_array($value, ['employee', 'learner', 'guest'], true) ? $value : 'employee';
+}
+
+function doorcontrolSubjectLabel($value) {
+	$value = doorcontrolSubjectKind($value);
+	if ($value === 'learner') { return '学员'; }
+	if ($value === 'guest') { return '访客'; }
+	return '员工';
+}
+
+function doorcontrolAllScopeLabel($value) {
+	$value = doorcontrolSubjectKind($value);
+	if ($value === 'learner') { return '全体学员'; }
+	if ($value === 'guest') { return '全体访客'; }
+	return '全体员工';
+}
+
 $devices = fetchAssocRows('SELECT * FROM `devices` ORDER BY `id` ASC', 'devices');
 $employeesRaw = fetchAssocRows("SELECT * FROM `employee` WHERE `status`='true' ORDER BY `name` ASC", 'employee');
+$learnersRaw = fetchAssocRows("SELECT * FROM `learner` WHERE `status`='true' ORDER BY `name` ASC", 'learner');
 $guestsRaw = fetchAssocRows("SELECT * FROM `guest` WHERE `status`='true' ORDER BY `name` ASC", 'guest');
 $departmentsRaw = fetchAssocRows("SELECT * FROM `feishu_departments` WHERE `status`='active' ORDER BY `name` ASC, `department_id` ASC", 'feishu_departments');
 $rolesRaw = fetchAssocRows("SELECT r.*, (SELECT COUNT(*) FROM `access_role_members` m WHERE m.`role_id`=r.`id`) AS member_count FROM `access_roles` r WHERE r.`enabled`=1 ORDER BY r.`id` ASC", 'access_roles');
@@ -52,9 +71,14 @@ foreach ($departmentsRaw as $department) {
 $roles = [];
 foreach ($rolesRaw as $role) {
 	$roleId = (string)$role['id'];
-	$subjectKind = ($role['subject_kind'] ?? 'employee') === 'guest' ? 'guest' : 'employee';
-	$scope = intval($role['allow_all'] ?? 0) === 1 ? ($subjectKind === 'guest' ? '全体访客' : '全体员工') : (intval($role['member_count'] ?? 0).'人');
-	$roles[] = ['value' => $roleId, 'title' => $role['name'].'（'.($subjectKind === 'guest' ? '访客，' : '员工，').$scope.'）', 'subject_kind' => $subjectKind];
+	$subjectKind = doorcontrolSubjectKind($role['subject_kind'] ?? 'employee');
+	$scope = intval($role['allow_all'] ?? 0) === 1 ? doorcontrolAllScopeLabel($subjectKind) : (intval($role['member_count'] ?? 0).'人');
+	$roles[] = ['value' => $roleId, 'title' => $role['name'].'（'.doorcontrolSubjectLabel($subjectKind).'，'.$scope.'）', 'subject_kind' => $subjectKind];
+}
+
+$learners = [];
+foreach ($learnersRaw as $learner) {
+	$learners[] = ['value' => $learner['student_no'], 'title' => $learner['name'].'（'.$learner['student_no'].'）'];
 }
 
 $guests = [];
@@ -66,8 +90,10 @@ $policyMap = [];
 foreach ($devices as $device) {
 	$policyMap[$device['id']] = [
 		'all_employee' => false,
+		'all_learner' => false,
 		'all_guest' => false,
 		'employees' => [],
+		'learners' => [],
 		'guests' => [],
 		'departments' => [],
 		'roles' => []
@@ -97,8 +123,14 @@ foreach ($policiesRaw as $policy) {
 	if ($policy['subject_kind'] === 'guest' && $policy['subject_type'] === 'all') {
 		$policyMap[$deviceId]['all_guest'] = true;
 	}
+	if ($policy['subject_kind'] === 'learner' && $policy['subject_type'] === 'all') {
+		$policyMap[$deviceId]['all_learner'] = true;
+	}
 	if ($policy['subject_kind'] === 'employee' && $policy['subject_type'] === 'employee') {
 		$policyMap[$deviceId]['employees'][] = $policy['subject_value'];
+	}
+	if ($policy['subject_kind'] === 'learner' && $policy['subject_type'] === 'learner') {
+		$policyMap[$deviceId]['learners'][] = $policy['subject_value'];
 	}
 	if ($policy['subject_kind'] === 'guest' && $policy['subject_type'] === 'guest') {
 		$policyMap[$deviceId]['guests'][] = $policy['subject_value'];
@@ -128,7 +160,7 @@ foreach ($policyMap as $deviceId => $policy) {
 			<div class="panel panel-white">
 				<div class="panel-body" style="font-weight: 400;overflow-x: auto;">
 					<h4 style="font-weight: 400">门禁控制与权限</h4><br>
-					<h6>按设备设置员工、访客、部门和角色通行策略</h6><br />
+					<h6>按设备设置员工、学员、访客、部门和角色通行策略</h6><br />
 					<table id="devices1" class="table table-bordered table-auto" style="clear: both;margin-top: 20px;">
                         <thead>
                             <tr>
@@ -191,6 +223,7 @@ foreach ($policyMap as $deviceId => $policy) {
 <script>
 var csrf_token = "<?php echo $_SESSION['token']; ?>";
 var employeeList = <?php echo json_encode($employees, JSON_UNESCAPED_UNICODE); ?>;
+var learnerList = <?php echo json_encode($learners, JSON_UNESCAPED_UNICODE); ?>;
 var guestList = <?php echo json_encode($guests, JSON_UNESCAPED_UNICODE); ?>;
 var departmentList = <?php echo json_encode($departments, JSON_UNESCAPED_UNICODE); ?>;
 var roleList = <?php echo json_encode($roles, JSON_UNESCAPED_UNICODE); ?>;
@@ -221,6 +254,9 @@ layui.use(['layer', 'util', 'form', 'transfer'], function(){
 			+ '<div class="access-policy-section"><div class="access-policy-title">员工</div>'
 			+ '<div class="layui-form-item access-policy-switch"><input type="checkbox" id="all_employee" title="允许全体员工通行" lay-skin="primary" ' + (policy.all_employee ? 'checked' : '') + '></div>'
 			+ '<div id="employeeTransfer"></div></div>'
+			+ '<div class="access-policy-section"><div class="access-policy-title">学员</div>'
+			+ '<div class="layui-form-item access-policy-switch"><input type="checkbox" id="all_learner" title="允许全体学员通行" lay-skin="primary" ' + (policy.all_learner ? 'checked' : '') + '></div>'
+			+ '<div id="learnerTransfer"></div></div>'
 			+ '<div class="access-policy-section"><div class="access-policy-title">访客</div>'
 			+ '<div class="layui-form-item access-policy-switch"><input type="checkbox" id="all_guest" title="允许全体访客通行" lay-skin="primary" ' + (policy.all_guest ? 'checked' : '') + '></div>'
 			+ '<div id="guestTransfer"></div></div>'
@@ -244,6 +280,16 @@ layui.use(['layer', 'util', 'form', 'transfer'], function(){
 					height: 260,
 					showSearch: true,
 					id: 'employeePolicy'
+				});
+				transfer.render({
+					elem: '#learnerTransfer',
+					title: ['可选学员', '已允许学员'],
+					data: learnerList,
+					value: policy.learners || [],
+					width: 300,
+					height: 220,
+					showSearch: true,
+					id: 'learnerPolicy'
 				});
 				transfer.render({
 					elem: '#guestTransfer',
@@ -285,11 +331,17 @@ layui.use(['layer', 'util', 'form', 'transfer'], function(){
 		if ($('#all_employee').is(':checked')) {
 			policies.push({subject_kind: 'employee', subject_type: 'all', subject_value: ''});
 		}
+		if ($('#all_learner').is(':checked')) {
+			policies.push({subject_kind: 'learner', subject_type: 'all', subject_value: ''});
+		}
 		if ($('#all_guest').is(':checked')) {
 			policies.push({subject_kind: 'guest', subject_type: 'all', subject_value: ''});
 		}
 		transfer.getData('employeePolicy').forEach(function(item) {
 			policies.push({subject_kind: 'employee', subject_type: 'employee', subject_value: item.value, title: item.title});
+		});
+		transfer.getData('learnerPolicy').forEach(function(item) {
+			policies.push({subject_kind: 'learner', subject_type: 'learner', subject_value: item.value, title: item.title});
 		});
 		transfer.getData('guestPolicy').forEach(function(item) {
 			policies.push({subject_kind: 'guest', subject_type: 'guest', subject_value: item.value, title: item.title});

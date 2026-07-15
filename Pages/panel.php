@@ -135,6 +135,9 @@ if ($isReadonly && !in_array($module, ['home', 'admininfo', 'accesslog', ''], tr
                             <li class="<?php echo $module == "submitcard" || $module == "" ? "active-page" : ""; ?>">
 								<a href="/?page=panel&module=submitcard"><i class="fa-solid fa-credit-card" style="padding-left: 2.5px; padding-right: 2px"></i><span>发卡管理</span></a>
 							</li>
+							<li class="<?php echo $module == "learner" || $module == "" ? "active-page" : ""; ?>">
+								<a href="/?page=panel&module=learner"><i class="fa-solid fa-user-graduate" style="padding-left: 2.5px; padding-right: 2px"></i><span>学员管理</span></a>
+							</li>
 							<li class="<?php echo $module == "deviceopt" || $module == "" ? "active-page" : ""; ?>">
 								<a href="/?page=panel&module=deviceopt"><i class="fa-solid fa-cog" style="padding-left: 2.5px; padding-right: 2px"></i><span>设备管理</span></a>
 							</li>

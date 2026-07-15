@@ -16,6 +16,12 @@ $_config = [
 
 	// 通用物联网API请求key
 	'apiCommonKey' => '',
+	// 开放API中心请求key，支持配置多个；为空时API中心不可调用
+	'apiCenter' => [
+		'keys' => [
+			// 'replace-with-a-long-random-key'
+		]
+	],
 	// 门单次开5秒
 	'doorOpenTime' => 5,
 

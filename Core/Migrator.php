@@ -11,7 +11,7 @@ namespace anim210System;
 
 class Migrator {
 
-    const SCHEMA_VERSION = '20260708';
+    const SCHEMA_VERSION = '20260715';
 
     public static function ensure()
     {
@@ -77,6 +77,22 @@ class Migrator {
             PRIMARY KEY (`id`),
             UNIQUE KEY `uniq_access_role_name` (`name`),
             KEY `idx_access_role_enabled` (`enabled`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4", $errors);
+
+        self::exec("CREATE TABLE IF NOT EXISTS `learner` (
+            `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+            `student_no` varchar(128) NOT NULL,
+            `name` varchar(255) NOT NULL DEFAULT '',
+            `card_id` varchar(64) NOT NULL DEFAULT '',
+            `status` varchar(16) NOT NULL DEFAULT 'true',
+            `remark` varchar(255) NOT NULL DEFAULT '',
+            `created_at` int unsigned NOT NULL DEFAULT 0,
+            `updated_at` int unsigned NOT NULL DEFAULT 0,
+            PRIMARY KEY (`id`),
+            UNIQUE KEY `uniq_learner_student_no` (`student_no`),
+            KEY `idx_learner_card_id` (`card_id`),
+            KEY `idx_learner_status` (`status`),
+            KEY `idx_learner_name` (`name`(191))
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4", $errors);
 
         self::exec("CREATE TABLE IF NOT EXISTS `access_role_members` (
@@ -182,6 +198,14 @@ class Migrator {
 
         self::addColumn('guest', 'card_id', "varchar(64) NOT NULL DEFAULT ''", $errors);
 
+        self::addColumn('learner', 'student_no', "varchar(128) NOT NULL DEFAULT ''", $errors);
+        self::addColumn('learner', 'name', "varchar(255) NOT NULL DEFAULT ''", $errors);
+        self::addColumn('learner', 'card_id', "varchar(64) NOT NULL DEFAULT ''", $errors);
+        self::addColumn('learner', 'status', "varchar(16) NOT NULL DEFAULT 'true'", $errors);
+        self::addColumn('learner', 'remark', "varchar(255) NOT NULL DEFAULT ''", $errors);
+        self::addColumn('learner', 'created_at', "int unsigned NOT NULL DEFAULT 0", $errors);
+        self::addColumn('learner', 'updated_at', "int unsigned NOT NULL DEFAULT 0", $errors);
+
         self::addColumn('access_roles', 'subject_kind', "varchar(20) NOT NULL DEFAULT 'employee'", $errors);
         self::addColumn('access_roles', 'builtin_key', "varchar(64) NOT NULL DEFAULT ''", $errors);
         self::addColumn('access_role_members', 'member_kind', "varchar(20) NOT NULL DEFAULT 'employee'", $errors);
@@ -204,6 +228,9 @@ class Migrator {
         self::addIndex('employee', 'idx_employee_card_id', ['card_id'], $errors);
         self::addIndex('employee', 'idx_employee_open_id', ['open_id'], $errors);
         self::addIndex('guest', 'idx_guest_card_id', ['card_id'], $errors);
+        self::addIndex('learner', 'idx_learner_card_id', ['card_id'], $errors);
+        self::addIndex('learner', 'idx_learner_status', ['status'], $errors);
+        self::addIndex('learner', 'idx_learner_name', [['name' => 'name', 'length' => 191]], $errors);
         self::addIndex('devices', 'idx_devices_did', ['did'], $errors);
         self::addIndex('devices', 'idx_devices_ip', ['ip'], $errors);
         self::addIndex('user', 'idx_user_open_id', ['open_id'], $errors);
@@ -253,6 +280,7 @@ class Migrator {
         self::exec("UPDATE `system_settings` SET `setting_value`='/cdor.cgi?open=1&door=0?' WHERE `setting_key`='remote_open_path' AND `setting_value`='/cdor.cgi?open=0'", $errors);
         self::exec("UPDATE `employee` SET `card_id`=LPAD(`card_id`, 10, '0') WHERE `card_id`<>'' AND `card_id` REGEXP '^[0-9]+$' AND CHAR_LENGTH(`card_id`)<10", $errors);
         self::exec("UPDATE `guest` SET `card_id`=LPAD(`card_id`, 10, '0') WHERE `card_id`<>'' AND `card_id` REGEXP '^[0-9]+$' AND CHAR_LENGTH(`card_id`)<10", $errors);
+        self::exec("UPDATE `learner` SET `card_id`=LPAD(`card_id`, 10, '0') WHERE `card_id`<>'' AND `card_id` REGEXP '^[0-9]+$' AND CHAR_LENGTH(`card_id`)<10", $errors);
         self::exec("UPDATE `logs` SET `cardid`=LPAD(`cardid`, 10, '0') WHERE `cardid`<>'' AND `cardid` REGEXP '^[0-9]+$' AND CHAR_LENGTH(`cardid`)<10", $errors);
         self::exec("UPDATE `access_roles` SET `subject_kind`='employee' WHERE `subject_kind`=''", $errors);
         self::exec("UPDATE `access_role_members` SET `member_kind`='employee' WHERE `member_kind`=''", $errors);
@@ -273,6 +301,12 @@ class Migrator {
                 'description' => '系统内置角色，动态包含所有启用员工',
                 'subject_kind' => 'employee',
                 'builtin_key' => 'all_employee'
+            ],
+            [
+                'name' => '全体学员角色',
+                'description' => '系统内置角色，动态包含所有启用学员',
+                'subject_kind' => 'learner',
+                'builtin_key' => 'all_learner'
             ],
             [
                 'name' => '全体访客角色',

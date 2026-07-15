@@ -61,6 +61,7 @@ if (!$currentEmployee && !$isAdmin) {
 }
 
 $assignedEmployee = Database::querySingleLine('employee', ['card_id' => $cardId]);
+$assignedLearner = Database::querySingleLine('learner', ['card_id' => $cardId]);
 $assignedGuest = Database::querySingleLine('guest', ['card_id' => $cardId]);
 $isOwnBadge = $assignedEmployee && ($assignedEmployee['open_id'] ?? '') === ($_SESSION['member_open_id'] ?? '');
 $lostFoundUrl = trim((string)($_config['feishu']['badgeLookup']['lostFoundUrl'] ?? ''));
@@ -88,10 +89,21 @@ if ($isAdmin) {
             'csrf' => $_SESSION['token'] ?? ''
         ]);
     }
+    if ($assignedLearner) {
+        badgeRenderPage([
+            'mode' => 'admin_learner',
+            'title' => '学员工牌',
+            'subtitle' => '当前工牌已绑定学员',
+            'raw_uid' => $rawUid,
+            'card_id' => $cardId,
+            'person' => $assignedLearner,
+            'csrf' => $_SESSION['token'] ?? ''
+        ]);
+    }
     badgeRenderPage([
         'mode' => 'admin_empty',
         'title' => '空置工牌',
-        'subtitle' => '当前工牌尚未绑定员工或访客',
+        'subtitle' => '当前工牌尚未绑定员工、学员或访客',
         'raw_uid' => $rawUid,
         'card_id' => $cardId,
         'person' => null,
@@ -133,6 +145,7 @@ function badgeRenderPage($data)
     $initial = $person ? badgeInitial($person['name'] ?? '') : '卡';
     $name = $person['name'] ?? ($mode === 'admin_empty' ? '空置工牌' : '工牌');
     $employeeNo = $person['employee_id'] ?? '';
+    $studentNo = $person['student_no'] ?? '';
     $department = $person['department_name'] ?? '';
     $realname = $person['realname'] ?? '';
     $isAdminMode = strpos($mode, 'admin_') === 0;
@@ -448,6 +461,7 @@ function badgeRenderPage($data)
                 <div class="info-row"><span>卡片 UID</span><span><?php echo badgeH($rawUid !== '' ? $rawUid : '--'); ?></span></div>
                 <?php if ($person && !$isMismatch) { ?>
                     <?php if ($employeeNo !== '') { ?><div class="info-row"><span>工号</span><span><?php echo badgeH($employeeNo); ?></span></div><?php } ?>
+                    <?php if ($studentNo !== '') { ?><div class="info-row"><span>学号</span><span><?php echo badgeH($studentNo); ?></span></div><?php } ?>
                     <?php if ($realname !== '' && $realname !== '--') { ?><div class="info-row"><span>真实姓名</span><span><?php echo badgeH($realname); ?></span></div><?php } ?>
                     <?php if ($department !== '') { ?><div class="info-row"><span>部门</span><span><?php echo badgeH($department); ?></span></div><?php } ?>
                 <?php } elseif ($person && $isMismatch) { ?>
@@ -457,9 +471,9 @@ function badgeRenderPage($data)
             </div>
 
             <div class="actions">
-                <?php if ($mode === 'admin_employee' || $mode === 'admin_guest') { ?>
+                <?php if ($mode === 'admin_employee' || $mode === 'admin_learner' || $mode === 'admin_guest') { ?>
                     <button class="btn btn-danger" type="button" onclick="releaseBadge()"><i class="fa-solid fa-rotate-left"></i>回收该工牌</button>
-                    <a class="btn" href="/?page=panel&module=submitcard"><i class="fa-solid fa-list"></i>返回发卡管理</a>
+                    <a class="btn" href="/?page=panel&module=<?php echo $mode === 'admin_learner' ? 'learner' : 'submitcard'; ?>"><i class="fa-solid fa-list"></i>返回<?php echo $mode === 'admin_learner' ? '学员管理' : '发卡管理'; ?></a>
                 <?php } elseif ($mode === 'admin_empty') { ?>
                     <button class="btn btn-primary" type="button" onclick="openAssignSheet()"><i class="fa-solid fa-id-card"></i>发工牌</button>
                     <a class="btn" href="/?page=panel&module=submitcard"><i class="fa-solid fa-list"></i>返回发卡管理</a>

@@ -71,6 +71,7 @@ include(ROOT . "/Middleware/Class.Feishu.php");
 include(ROOT . "/Middleware/Class.FeishuSync.php");
 include(ROOT . "/Middleware/Class.FeishuEvent.php");
 include(ROOT . "/Middleware/Class.DeviceApi.php");
+include(ROOT . "/Middleware/Class.ApiCenter.php");
 include(ROOT . "/Middleware/Class.PostHandler.php");
 
 $conn = null;

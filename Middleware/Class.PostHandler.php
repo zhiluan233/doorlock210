@@ -35,6 +35,10 @@ class PostHandler {
                     	exit("Key不正确！");
 					}
 				break;
+				case "apiCenter":
+					$apiCenter = new anim210System\ApiCenter();
+					$apiCenter->handle($params);
+				break;
 				case "login":
 				    //Header("HTTP/1.1 403 Forbidden");
                     //exit("银影暂时终止对外服务，请在公测群等候通知");
@@ -244,6 +248,111 @@ class PostHandler {
 						exit("登录会话已超时，请重新登录");
 					}
 				break;
+				case "saveLearner":
+					$this->requireAdminUser();
+					$id = intval($_POST['id'] ?? 0);
+					$name = trim((string)($_POST['name'] ?? ''));
+					$studentNo = $this->normalizeStudentNo($_POST['student_no'] ?? '');
+					$remark = trim((string)($_POST['remark'] ?? ''));
+					if ($name === '') {
+						Header("HTTP/1.1 400 Bad Request");
+						exit("学员姓名不能为空");
+					}
+					if ($studentNo === '') {
+						Header("HTTP/1.1 400 Bad Request");
+						exit("学号只能包含字母、数字、下划线和中划线，长度1-64位");
+					}
+					if ($this->utf8Length($name) > 100 || $this->utf8Length($remark) > 200) {
+						Header("HTTP/1.1 400 Bad Request");
+						exit("学员姓名或备注过长");
+					}
+					$studentNoEsc = Database::escape($studentNo);
+					$duplicateSql = "SELECT * FROM `learner` WHERE `student_no`='{$studentNoEsc}' AND `id`<>{$id} LIMIT 1";
+					if (Database::querySingleLine('learner', $duplicateSql, true)) {
+						Header("HTTP/1.1 400 Bad Request");
+						exit("学号已存在");
+					}
+					$now = time();
+					$data = [
+						'student_no' => $studentNo,
+						'name' => $name,
+						'remark' => $remark,
+						'updated_at' => $now
+					];
+					if ($id > 0) {
+						$learner = Database::querySingleLine('learner', ['id' => $id]);
+						if (!$learner) {
+							Header("HTTP/1.1 404 Not Found");
+							exit("学员不存在");
+						}
+						$result = Database::update('learner', $data, ['id' => $id]);
+						if ($result === true && ($learner['student_no'] ?? '') !== $studentNo) {
+							Database::update('access_role_members', ['employee_open_id' => $studentNo], [
+								'member_kind' => 'learner',
+								'employee_open_id' => $learner['student_no']
+							]);
+							Database::update('access_policies', ['subject_value' => $studentNo], [
+								'subject_kind' => 'learner',
+								'subject_type' => 'learner',
+								'subject_value' => $learner['student_no']
+							]);
+						}
+					} else {
+						$data['id'] = null;
+						$data['card_id'] = '';
+						$data['status'] = 'true';
+						$data['created_at'] = $now;
+						$result = Database::insert('learner', $data);
+					}
+					if ($result === true) {
+						exit($id > 0 ? "学员资料已保存" : "创建学员 ".$name." 成功");
+					}
+					Header("HTTP/1.1 500 Internal Error");
+					exit("学员资料保存失败：".$result);
+				break;
+				case "setLearnerStatus":
+					$this->requireAdminUser();
+					$id = intval($_POST['id'] ?? 0);
+					$status = ($_POST['status'] ?? '') === 'true' ? 'true' : 'false';
+					$learner = Database::querySingleLine('learner', ['id' => $id]);
+					if (!$learner) {
+						Header("HTTP/1.1 404 Not Found");
+						exit("学员不存在");
+					}
+					$result = Database::update('learner', ['status' => $status, 'updated_at' => time()], ['id' => $id]);
+					if ($result === true) {
+						exit($status === 'true' ? "学员通行权限已启用" : "学员通行权限已禁用");
+					}
+					Header("HTTP/1.1 500 Internal Error");
+					exit("学员状态更新失败：".$result);
+				break;
+				case "deleteLearner":
+					$this->requireAdminUser();
+					$id = intval($_POST['id'] ?? 0);
+					$learner = Database::querySingleLine('learner', ['id' => $id]);
+					if (!$learner) {
+						Header("HTTP/1.1 404 Not Found");
+						exit("学员不存在");
+					}
+					$studentNo = $learner['student_no'] ?? '';
+					if ($studentNo !== '') {
+						Database::delete('access_role_members', [
+							'member_kind' => 'learner',
+							'employee_open_id' => $studentNo
+						]);
+						Database::delete('access_policies', [
+							'subject_kind' => 'learner',
+							'subject_type' => 'learner',
+							'subject_value' => $studentNo
+						]);
+					}
+					$result = Database::delete('learner', ['id' => $id]);
+					if ($result === true) {
+						exit("学员已删除");
+					}
+					Header("HTTP/1.1 500 Internal Error");
+					exit("学员删除失败：".$result);
+				break;
 				case "submitcard":
 					$um = new anim210System\UserCheck();
 					if($um->isLogged()) {
@@ -255,6 +364,16 @@ class PostHandler {
 						}
 						$id = $_POST['id'];
 						$type = $_POST['type'];
+						if (!in_array($type, ['employee', 'learner', 'guest'], true)) {
+							Header("HTTP/1.1 400 Bad Request");
+							exit("发卡对象类型不合法");
+						}
+						$targetTable = $type === 'learner' ? 'learner' : $type;
+						$targetInfo = Database::querySingleLine($targetTable, Array("id" => $id));
+						if (!$targetInfo) {
+							Header("HTTP/1.1 404 Not Found");
+							exit("发卡对象不存在");
+						}
 						$cardId = AttendanceService::normalizeCardNumber($_POST['cardid'] ?? '');
 						if (!preg_match('/^[0-9]{10}$/', $cardId)) {
 							Header("HTTP/1.1 400 Bad Request");
@@ -262,11 +381,16 @@ class PostHandler {
 						}
 						$employeeInfo = Database::querySingleLine("employee", Array("card_id" => $cardId));
 						$guestInfo = Database::querySingleLine("guest", Array("card_id" => $cardId));
-						if ($employeeInfo && $cardId !== '') {
+						$learnerInfo = Database::querySingleLine("learner", Array("card_id" => $cardId));
+						if ($employeeInfo && !($type === 'employee' && intval($employeeInfo['id']) === intval($id))) {
 							Header("HTTP/1.1 400 Bad Request");
 							exit("卡已经发给了员工 ".$employeeInfo['name']);
 						}
-						if ($guestInfo && $cardId !== '') {
+						if ($learnerInfo && !($type === 'learner' && intval($learnerInfo['id']) === intval($id))) {
+							Header("HTTP/1.1 400 Bad Request");
+							exit("卡已经发给了学员 ".$learnerInfo['name']);
+						}
+						if ($guestInfo && !($type === 'guest' && intval($guestInfo['id']) === intval($id))) {
 							Header("HTTP/1.1 400 Bad Request");
 							exit("卡已经发给了访客 ".$guestInfo['name']);
 						}
@@ -279,6 +403,9 @@ class PostHandler {
 						}
 						if ($type == 'employee') {
 							$update = Database::update("employee", $data, Array("id" => $id));
+						}
+						if ($type == 'learner') {
+							$update = Database::update("learner", array_merge($data, ['updated_at' => time()]), Array("id" => $id));
 						}
 						
 						if($update === true) {
@@ -324,9 +451,18 @@ class PostHandler {
 							}
 							$released[] = "访客 ".$guestInfo['name'];
 						}
+						$learnerInfo = Database::querySingleLine("learner", Array("card_id" => $cardId));
+						if ($learnerInfo) {
+							$update = Database::update("learner", Array("card_id" => '', "updated_at" => time()), Array("id" => $learnerInfo['id']));
+							if ($update !== true) {
+								Header("HTTP/1.1 500 Internal Server Error");
+								exit("学员工牌回收失败：{$update}");
+							}
+							$released[] = "学员 ".$learnerInfo['name'];
+						}
 						if (count($released) === 0) {
 							Header("HTTP/1.1 404 Not Found");
-							exit("未找到绑定该工牌的员工或访客");
+							exit("未找到绑定该工牌的员工、学员或访客");
 						}
 						exit("工牌 {$cardId} 已回收：".implode("，", $released));
 					} else {
@@ -608,7 +744,7 @@ class PostHandler {
 					$roleId = intval($_POST['role_id'] ?? 0);
 					$name = trim($_POST['name'] ?? '');
 					$description = trim($_POST['description'] ?? '');
-					$subjectKind = ($_POST['subject_kind'] ?? 'employee') === 'guest' ? 'guest' : 'employee';
+					$subjectKind = $this->normalizeSubjectKind($_POST['subject_kind'] ?? 'employee');
 					$allowAll = $this->truthy($_POST['allow_all'] ?? 'false') ? 1 : 0;
 					$members = json_decode($_POST['members'] ?? '[]', true);
 					$devices = json_decode($_POST['devices'] ?? '[]', true);
@@ -679,9 +815,7 @@ class PostHandler {
 							if ($openId === '' || isset($seenMembers[$openId])) {
 								continue;
 							}
-							$member = Database::querySingleLine($subjectKind === 'guest' ? 'guest' : 'employee', [
-								'open_id' => $openId
-							]);
+							$member = $this->findAccessSubject($subjectKind, $openId);
 							if (!$member) {
 								continue;
 							}
@@ -738,7 +872,7 @@ class PostHandler {
 						exit("角色不存在");
 					}
 					$now = time();
-					$subjectKind = ($role['subject_kind'] ?? 'employee') === 'guest' ? 'guest' : 'employee';
+					$subjectKind = $this->normalizeSubjectKind($role['subject_kind'] ?? 'employee');
 					$roleIdEsc = Database::escape((string)$roleId);
 					Database::delete('access_policies', "DELETE FROM `access_policies` WHERE `subject_type`='role' AND `subject_value`='{$roleIdEsc}'", '', true);
 					$seenDevices = [];
@@ -824,10 +958,10 @@ class PostHandler {
 							$type = $item['subject_type'] ?? '';
 							$value = trim($item['subject_value'] ?? '');
 							$extra = trim($item['subject_extra'] ?? '');
-							if (!in_array($kind, ['employee', 'guest'], true)) {
+							if (!in_array($kind, ['employee', 'learner', 'guest'], true)) {
 								continue;
 							}
-							if (!in_array($type, ['all', 'employee', 'guest', 'department', 'group', 'role', 'department_group'], true)) {
+							if (!in_array($type, ['all', 'employee', 'learner', 'guest', 'department', 'group', 'role', 'department_group'], true)) {
 								continue;
 							}
 							if ($type !== 'all' && $value === '') {
@@ -836,12 +970,30 @@ class PostHandler {
 							if (in_array($type, ['department', 'group', 'department_group'], true) && $kind !== 'employee') {
 								continue;
 							}
+							if ($type === 'employee' && $kind !== 'employee') {
+								continue;
+							}
+							if ($type === 'learner' && $kind !== 'learner') {
+								continue;
+							}
+							if ($type === 'guest' && $kind !== 'guest') {
+								continue;
+							}
 							if ($type === 'department') {
 								$department = Database::querySingleLine('feishu_departments', [
 									'department_id' => $value,
 									'status' => 'active'
 								]);
 								if (!$department) {
+									continue;
+								}
+							}
+							if ($type === 'learner') {
+								$learner = Database::querySingleLine('learner', [
+									'student_no' => $value,
+									'status' => 'true'
+								]);
+								if (!$learner) {
 									continue;
 								}
 							}
@@ -1026,6 +1178,36 @@ class PostHandler {
 	private function truthy($value)
 	{
 		return $value === true || $value === 1 || $value === '1' || $value === 'true' || $value === 'on';
+	}
+
+	private function normalizeSubjectKind($value)
+	{
+		$value = (string)$value;
+		if (in_array($value, ['employee', 'learner', 'guest'], true)) {
+			return $value;
+		}
+		return 'employee';
+	}
+
+	private function findAccessSubject($subjectKind, $value)
+	{
+		$subjectKind = $this->normalizeSubjectKind($subjectKind);
+		if ($subjectKind === 'learner') {
+			return Database::querySingleLine('learner', ['student_no' => $value]);
+		}
+		if ($subjectKind === 'guest') {
+			return Database::querySingleLine('guest', ['open_id' => $value]);
+		}
+		return Database::querySingleLine('employee', ['open_id' => $value]);
+	}
+
+	private function normalizeStudentNo($value)
+	{
+		$value = trim((string)$value);
+		if (!preg_match('/^[A-Za-z0-9\_\-]{1,64}$/', $value)) {
+			return '';
+		}
+		return $value;
 	}
 
 	private function feishuReadableUsername($employee, $openId, $currentUserId = 0)
