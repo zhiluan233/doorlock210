@@ -140,8 +140,8 @@ Header('Content-Type: text/html; charset=utf-8');
                 <h1>工牌链接无效</h1>
                 <p>NDEF 链接缺少有效的卡片 UID。</p>
             <?php } else { ?>
-                <h1><?php echo $canOpenApp ? '正在打开飞书门禁' : '需要配置飞书应用链接'; ?></h1>
-                <p><?php echo $canOpenApp ? '请稍候，系统正在尝试拉起飞书并进入工牌查询页。' : '请在 config.php 中配置 feishu.badgeLookup.appLinkTemplate。'; ?></p>
+                <h1><?php echo $canOpenApp ? '正在进入工牌系统' : '需要配置飞书应用链接'; ?></h1>
+                <p><?php echo $canOpenApp ? '请稍候，系统正在尝试拉起飞书。' : '请在 config.php 中配置 feishu.badgeLookup.appLinkTemplate。'; ?></p>
                 <div class="meta">
                     UID：<?php echo openfeishuH($rawUid); ?><br>
                     WG34：<?php echo $cardId !== '' ? openfeishuH($cardId) : '无法转换'; ?>
@@ -152,7 +152,7 @@ Header('Content-Type: text/html; charset=utf-8');
                     <?php } ?>
                     <a class="btn" href="<?php echo openfeishuH($targetPath); ?>">继续在浏览器中查看</a>
                 </div>
-                <p class="hint">如果未自动跳转，请点击上方按钮。iOS 只有飞书官方 AppLink/Universal Link 可做到无感拉起。</p>
+                <p class="hint">如果未自动跳转，请点击上方按钮。</p>
             <?php } ?>
         </section>
     </main>

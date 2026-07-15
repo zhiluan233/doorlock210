@@ -622,7 +622,7 @@ function badgeRenderPage($data)
                     <?php if ($isAdminSelfMode) { ?>
                         <button class="btn" type="button" onclick="openSelfManageSheet()"><i class="fa-solid fa-sliders"></i>管理自己的工牌</button>
                     <?php } ?>
-                    <a class="btn btn-primary" href="/?page=userpanel"><i class="fa-solid fa-clock-rotate-left"></i>查看工牌打卡记录</a>
+                    <a class="btn btn-primary" href="/?page=userpanel"><i class="fa-solid fa-clock-rotate-left"></i>查看刷卡记录</a>
                     <a class="btn" href="/?page=logout&csrf=<?php echo badgeH($csrf); ?>"><i class="fa-solid fa-right-from-bracket"></i>退出</a>
                 <?php } elseif ($mode === 'member_mismatch') { ?>
                     <a class="btn" href="/?page=logout&csrf=<?php echo badgeH($csrf); ?>"><i class="fa-solid fa-right-from-bracket"></i>退出</a>
