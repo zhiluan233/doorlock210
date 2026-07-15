@@ -228,7 +228,7 @@ if ($isReadonly && !in_array($module, ['home', 'admininfo', 'accesslog', ''], tr
                     }
                 ?>
 					<div class="page-footer afcFooter" style="display: flex; flex-direction: column">
-						<p class="textCenter copyright" style="margin-top: -90px">Copyright © 2024 武汉两点十分文化传播有限公司. All Rights Reserved.</p>
+						<p class="textCenter copyright" style="margin-top: -90px">Copyright © 2026 武汉两点十分文化传播有限公司. All Rights Reserved.</p>
 						<p>Core Version: <?php echo $data ?></p>
 						<p>Developed by 秩乱.</p>
 					</div>
