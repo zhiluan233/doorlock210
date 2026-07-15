@@ -254,7 +254,7 @@ function feishuOauthDisplayName($employee, $userData)
 function feishuOauthAvatarUrl($userData, $fallback = '')
 {
     if (isset($userData['avatar']) && is_array($userData['avatar'])) {
-        foreach (['avatar_240', 'avatar_72', 'avatar_origin', 'avatar_url'] as $key) {
+        foreach (['avatar_origin', 'avatar_640', 'avatar_240', 'avatar_72', 'avatar_url'] as $key) {
             if (!empty($userData['avatar'][$key])) {
                 return (string)$userData['avatar'][$key];
             }

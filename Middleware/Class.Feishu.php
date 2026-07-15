@@ -64,13 +64,17 @@ class appLinkFeishu {
         if (!$token) {
             return true;
         }
-        $url = $this->_config['feishu']['appEndpoint']['getMemberInfo'].$open_id.'?department_id_type=open_department_id&user_id_type=open_id';
-
-        $data = $this->requestFeishu($url, 'GET', $token, null, 2);
-        if (!isset($data['response']['data']['user']['status'])) {
+        $url = $this->memberProfileUrl($this->_config['feishu']['appEndpoint']['getMemberInfo'] ?? '', $open_id);
+        if ($url === '') {
             return true;
         }
-        return $this->isActiveStatus($data['response']['data']['user']['status']);
+
+        $data = $this->requestFeishu($url, 'GET', $token, null, 2);
+        $user = $this->extractMemberProfileFromResponse($data['response'] ?? [], $open_id);
+        if (!isset($user['status'])) {
+            return true;
+        }
+        return $this->isActiveStatus($user['status']);
     }
 
     public function getTenantAccessToken() {
@@ -429,12 +433,9 @@ class appLinkFeishu {
             return null;
         }
 
-        $url = $endpoint . rawurlencode($openId);
-        if ($this->urlQueryParam($url, 'department_id_type') === '') {
-            $url .= (strpos($url, '?') === false ? '?' : '&') . 'department_id_type=department_id';
-        }
-        if ($this->urlQueryParam($url, 'user_id_type') === '') {
-            $url .= '&user_id_type=open_id';
+        $url = $this->memberProfileUrl($endpoint, $openId);
+        if ($url === '') {
+            return null;
         }
         $data = $this->requestFeishu($url, 'GET', $token, null, 5, 1);
         if (($data['status_code'] ?? 0) < 200 || ($data['status_code'] ?? 0) >= 300) {
@@ -444,8 +445,84 @@ class appLinkFeishu {
             }
             return null;
         }
-        $user = $data['response']['data']['user'] ?? null;
+        $user = $this->extractMemberProfileFromResponse($data['response'] ?? [], $openId);
         return is_array($user) ? $user : null;
+    }
+
+    private function memberProfileUrl($endpoint, $openId) {
+        $endpoint = trim((string)$endpoint);
+        $openId = trim((string)$openId);
+        if ($endpoint === '' || $openId === '') {
+            return '';
+        }
+
+        foreach (['{open_id}', '{user_id}', '{id}'] as $placeholder) {
+            if (strpos($endpoint, $placeholder) !== false) {
+                $url = str_replace($placeholder, rawurlencode($openId), $endpoint);
+                return $this->appendMemberProfileQuery($url);
+            }
+        }
+
+        $path = (string)parse_url($endpoint, PHP_URL_PATH);
+        if (strpos($endpoint, '?') === false) {
+            if (preg_match('/\/(?:batch|batch_get)\/?$/', $path)) {
+                $url = $endpoint . '?user_ids=' . rawurlencode($openId);
+            } else {
+                $url = rtrim($endpoint, '/') . '/' . rawurlencode($openId);
+            }
+        } else if (preg_match('/(?:^|[?&])(?:user_ids|user_id|open_id)=$/', $endpoint) || preg_match('/[=\/]$/', $endpoint)) {
+            $url = $endpoint . rawurlencode($openId);
+        } else if (preg_match('/[?&]$/', $endpoint)) {
+            $url = $endpoint . 'user_ids=' . rawurlencode($openId);
+        } else if ($this->urlQueryParam($endpoint, 'user_ids') === '' && $this->urlQueryParam($endpoint, 'user_id') === '' && $this->urlQueryParam($endpoint, 'open_id') === '') {
+            $url = $endpoint . '&user_ids=' . rawurlencode($openId);
+        } else {
+            $url = $endpoint;
+        }
+
+        return $this->appendMemberProfileQuery($url);
+    }
+
+    private function appendMemberProfileQuery($url) {
+        if ($url === '') {
+            return '';
+        }
+        if ($this->urlQueryParam($url, 'department_id_type') === '') {
+            $url .= (strpos($url, '?') === false ? '?' : '&') . 'department_id_type=department_id';
+        }
+        if ($this->urlQueryParam($url, 'user_id_type') === '') {
+            $url .= (strpos($url, '?') === false ? '?' : '&') . 'user_id_type=open_id';
+        }
+        return $url;
+    }
+
+    private function extractMemberProfileFromResponse($response, $openId = '') {
+        if (!is_array($response)) {
+            return null;
+        }
+        $data = is_array($response['data'] ?? null) ? $response['data'] : $response;
+        if (isset($data['user']) && is_array($data['user'])) {
+            return $data['user'];
+        }
+        if (isset($data['items']) && is_array($data['items'])) {
+            foreach ($data['items'] as $item) {
+                if (!is_array($item)) {
+                    continue;
+                }
+                if ($openId === '' || ($item['open_id'] ?? '') === $openId || ($item['user_id'] ?? '') === $openId) {
+                    return $item;
+                }
+            }
+            foreach ($data['items'] as $item) {
+                if (is_array($item)) {
+                    return $item;
+                }
+            }
+        }
+        if (isset($data['open_id']) || isset($data['user_id']) || isset($data['job_title']) || isset($data['join_time'])) {
+            return $data;
+        }
+        return null;
     }
 
     private function departmentIdForType($department, $departmentIdType) {
@@ -494,7 +571,7 @@ class appLinkFeishu {
 
     private function extractAvatarUrl($item) {
         if (isset($item['avatar']) && is_array($item['avatar'])) {
-            foreach (['avatar_240', 'avatar_72', 'avatar_origin', 'avatar_url'] as $key) {
+            foreach (['avatar_origin', 'avatar_640', 'avatar_240', 'avatar_72', 'avatar_url'] as $key) {
                 if (!empty($item['avatar'][$key])) {
                     return (string)$item['avatar'][$key];
                 }

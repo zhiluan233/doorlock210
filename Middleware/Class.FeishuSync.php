@@ -608,7 +608,7 @@ class FeishuContactSync {
     private static function extractAvatarUrl($user, $fallback = '')
     {
         if (isset($user['avatar']) && is_array($user['avatar'])) {
-            foreach (['avatar_240', 'avatar_72', 'avatar_origin', 'avatar_url'] as $key) {
+            foreach (['avatar_origin', 'avatar_640', 'avatar_240', 'avatar_72', 'avatar_url'] as $key) {
                 if (!empty($user['avatar'][$key])) {
                     return (string)$user['avatar'][$key];
                 }

@@ -349,12 +349,12 @@ function badgeRenderPage($data)
             height: 54px;
             border: 0;
             border-radius: 50%;
-            background: #13b887;
+            background: #f67302;
             color: #fff;
             display: flex;
             align-items: center;
             justify-content: center;
-            box-shadow: 0 14px 28px rgba(19, 184, 135, .28);
+            box-shadow: 0 14px 28px rgba(246, 115, 2, .28);
             z-index: 900;
             font-size: 20px;
             touch-action: none;
@@ -363,7 +363,7 @@ function badgeRenderPage($data)
         }
         .quick-fab.dragging {
             transition: none;
-            box-shadow: 0 18px 34px rgba(19, 184, 135, .34);
+            box-shadow: 0 18px 34px rgba(246, 115, 2, .34);
             cursor: grabbing;
         }
         .quick-menu-grid {
@@ -389,8 +389,8 @@ function badgeRenderPage($data)
             width: 38px;
             height: 38px;
             border-radius: 8px;
-            background: #ecfdf6;
-            color: #13b887;
+            background: #fff3e8;
+            color: #f67302;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -635,7 +635,6 @@ function badgeRenderPage($data)
         <div class="sheet-mask centered" id="quickMenuSheet" aria-hidden="true">
             <section class="sheet">
                 <div class="sheet-head">
-                    <h2>工牌菜单</h2>
                     <button class="icon-btn" type="button" onclick="closeQuickMenu()" aria-label="关闭"><i class="fa-solid fa-xmark"></i></button>
                 </div>
                 <div class="quick-menu-grid">
