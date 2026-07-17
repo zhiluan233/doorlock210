@@ -173,9 +173,18 @@ function badgeRenderPage($data)
     $isPersonalProfile = in_array($mode, ['member_own', 'member_own_admin'], true);
     $isMismatch = $mode === 'member_mismatch';
     $isInvalid = $mode === 'invalid';
-    $subtitle = badgeProfileSubtitle($role, $person, (string)($data['subtitle'] ?? ''));
-    $topbarRight = badgeTopbarRightText($role, $person, $cardId, $rawUid, $isPersonalProfile, $isAdminMode);
-    $quickActions = badgeQuickActions($role, $person, $cardId, $rawUid, $isPersonalProfile);
+    if ($isMismatch) {
+        $avatarUrl = '';
+        $initial = '?';
+        $name = '不是你的工牌';
+        $subtitle = '你可以点击下方按钮挂失，或碰一碰自己的工牌';
+        $topbarRight = '';
+        $quickActions = [];
+    } else {
+        $subtitle = badgeProfileSubtitle($role, $person, (string)($data['subtitle'] ?? ''));
+        $topbarRight = badgeTopbarRightText($role, $person, $cardId, $rawUid, $isPersonalProfile, $isAdminMode);
+        $quickActions = badgeQuickActions($role, $person, $cardId, $rawUid, $isPersonalProfile);
+    }
 
     Header('Content-Type: text/html; charset=utf-8');
 ?>
@@ -616,26 +625,25 @@ function badgeRenderPage($data)
             <h1><?php echo badgeH($isMismatch ? '不是你的工牌' : $name); ?></h1>
             <p class="subtitle"><?php echo badgeH($subtitle); ?></p>
 
-            <div class="info-list">
-                <button class="info-row info-toggle" id="badgeIdentityToggle" type="button" data-card-id="<?php echo badgeH($cardId !== '' ? $cardId : '无法转换'); ?>" data-raw-uid="<?php echo badgeH($rawUid !== '' ? $rawUid : '--'); ?>">
-                    <span id="badgeIdentityLabel">工牌 ID</span>
-                    <span id="badgeIdentityValue"><?php echo badgeH($cardId !== '' ? $cardId : '无法转换'); ?></span>
-                </button>
-                <?php if ($person && !$isMismatch) { ?>
-                    <?php if ($employeeNo !== '') { ?><div class="info-row"><span>工号</span><span><?php echo badgeH($employeeNo); ?></span></div><?php } ?>
-                    <?php if ($studentNo !== '') { ?><div class="info-row"><span>学号</span><span><?php echo badgeH($studentNo); ?></span></div><?php } ?>
-                    <?php if ($isPersonalProfile && $role === 'employee' && $joinedAt > 0) { ?><div class="info-row"><span>入职日期</span><span><?php echo badgeH(date('Y-m-d', $joinedAt)); ?></span></div><?php } ?>
-                    <?php if (!$isPersonalProfile && $realname !== '' && $realname !== '--') { ?><div class="info-row"><span>真实姓名</span><span><?php echo badgeH($realname); ?></span></div><?php } ?>
-                    <?php if ($mobile !== '') { ?><div class="info-row"><span>手机号</span><span><?php echo badgeH($mobile); ?></span></div><?php } ?>
-                    <?php if ($className !== '') { ?><div class="info-row"><span>班级</span><span><?php echo badgeH($className); ?></span></div><?php } ?>
-                    <?php if ($trainingCenter !== '') { ?><div class="info-row"><span>培养中心</span><span><?php echo badgeH($trainingCenter); ?></span></div><?php } ?>
-                    <?php if ($studentNo !== '' && $enrolledAt > 0) { ?><div class="info-row"><span>入学时间</span><span><?php echo badgeH(date('Y-m-d', $enrolledAt)); ?></span></div><?php } ?>
-                    <?php if ($departmentDisplay['value'] !== '') { ?><div class="info-row"><span><?php echo badgeH($departmentDisplay['label']); ?></span><span><?php echo badgeH($departmentDisplay['value']); ?></span></div><?php } ?>
-                <?php } elseif ($person && $isMismatch) { ?>
-                    <div class="info-row"><span>当前账号</span><span><?php echo badgeH($person['name'] ?? ''); ?></span></div>
-                    <?php if (($person['employee_id'] ?? '') !== '') { ?><div class="info-row"><span>当前工号</span><span><?php echo badgeH($person['employee_id']); ?></span></div><?php } ?>
-                <?php } ?>
-            </div>
+            <?php if (!$isMismatch) { ?>
+                <div class="info-list">
+                    <button class="info-row info-toggle" id="badgeIdentityToggle" type="button" data-card-id="<?php echo badgeH($cardId !== '' ? $cardId : '无法转换'); ?>" data-raw-uid="<?php echo badgeH($rawUid !== '' ? $rawUid : '--'); ?>">
+                        <span id="badgeIdentityLabel">工牌 ID</span>
+                        <span id="badgeIdentityValue"><?php echo badgeH($cardId !== '' ? $cardId : '无法转换'); ?></span>
+                    </button>
+                    <?php if ($person) { ?>
+                        <?php if ($employeeNo !== '') { ?><div class="info-row"><span>工号</span><span><?php echo badgeH($employeeNo); ?></span></div><?php } ?>
+                        <?php if ($studentNo !== '') { ?><div class="info-row"><span>学号</span><span><?php echo badgeH($studentNo); ?></span></div><?php } ?>
+                        <?php if ($isPersonalProfile && $role === 'employee' && $joinedAt > 0) { ?><div class="info-row"><span>入职日期</span><span><?php echo badgeH(date('Y-m-d', $joinedAt)); ?></span></div><?php } ?>
+                        <?php if (!$isPersonalProfile && $realname !== '' && $realname !== '--') { ?><div class="info-row"><span>真实姓名</span><span><?php echo badgeH($realname); ?></span></div><?php } ?>
+                        <?php if ($mobile !== '') { ?><div class="info-row"><span>手机号</span><span><?php echo badgeH($mobile); ?></span></div><?php } ?>
+                        <?php if ($className !== '') { ?><div class="info-row"><span>班级</span><span><?php echo badgeH($className); ?></span></div><?php } ?>
+                        <?php if ($trainingCenter !== '') { ?><div class="info-row"><span>培养中心</span><span><?php echo badgeH($trainingCenter); ?></span></div><?php } ?>
+                        <?php if ($studentNo !== '' && $enrolledAt > 0) { ?><div class="info-row"><span>入学时间</span><span><?php echo badgeH(date('Y-m-d', $enrolledAt)); ?></span></div><?php } ?>
+                        <?php if ($departmentDisplay['value'] !== '') { ?><div class="info-row"><span><?php echo badgeH($departmentDisplay['label']); ?></span><span><?php echo badgeH($departmentDisplay['value']); ?></span></div><?php } ?>
+                    <?php } ?>
+                </div>
+            <?php } ?>
 
             <div class="actions">
                 <?php if ($mode === 'admin_employee' || $mode === 'admin_learner' || $mode === 'admin_guest') { ?>
@@ -653,9 +661,9 @@ function badgeRenderPage($data)
                 <?php } elseif ($mode === 'member_mismatch') { ?>
                     <a class="btn" href="/?page=logout&csrf=<?php echo badgeH($csrf); ?>"><i class="fa-solid fa-right-from-bracket"></i>退出</a>
                     <?php if (!empty($data['lost_found_url'])) { ?>
-                        <a class="btn btn-primary" href="<?php echo badgeH($data['lost_found_url']); ?>"><i class="fa-solid fa-hand-holding-heart"></i>捡到了别人的工牌？</a>
+                        <a class="btn btn-primary" href="<?php echo badgeH($data['lost_found_url']); ?>"><i class="fa-solid fa-hand-holding-heart"></i>捡到了这张工牌？</a>
                     <?php } else { ?>
-                        <button class="btn btn-primary disabled" type="button" disabled><i class="fa-solid fa-hand-holding-heart"></i>捡到了别人的工牌？</button>
+                        <button class="btn btn-primary disabled" type="button" disabled><i class="fa-solid fa-hand-holding-heart"></i>捡到了这张工牌？</button>
                     <?php } ?>
                 <?php } else { ?>
                     <a class="btn" href="/?page=login"><i class="fa-solid fa-arrow-left"></i>返回登录</a>

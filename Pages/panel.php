@@ -24,10 +24,12 @@ if (!$isAdmin && !$isReadonly) {
     exit("<script>location='/?page=login';</script>");
 }
 
-if ($isReadonly && !in_array($module, ['home', 'admininfo', 'accesslog', ''], true)) {
+if ($isReadonly && !in_array($module, ['home', 'admininfo', 'accesslog', 'operationlog', ''], true)) {
     $module = 'accesslog';
     $_GET['module'] = 'accesslog';
 }
+
+OperationLog::logPanelView($module, $rs);
 
 ?>
 <!DOCTYPE html>
@@ -150,6 +152,9 @@ if ($isReadonly && !in_array($module, ['home', 'admininfo', 'accesslog', ''], tr
                             <?php } ?>
 							<li class="<?php echo $module == "accesslog" || $module == "" ? "active-page" : ""; ?>">
                                 <a href="/?page=panel&module=accesslog"><i class="fa-solid fa-file-text" style="padding-left: 2.5px; padding-right: 2px"></i><span> 出入日志</span></a>
+                            </li>
+							<li class="<?php echo $module == "operationlog" || $module == "" ? "active-page" : ""; ?>">
+                                <a href="/?page=panel&module=operationlog"><i class="fa-solid fa-clipboard-list" style="padding-left: 2.5px; padding-right: 2px"></i><span> 操作日志</span></a>
                             </li>
                             <?php if($isAdmin) { ?>
                                 <li class="menu-divider"></li>

@@ -190,6 +190,33 @@ class Migrator {
             KEY `idx_locked_at` (`locked_at`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4", $errors);
 
+        self::exec("CREATE TABLE IF NOT EXISTS `operation_logs` (
+            `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+            `user_id` bigint unsigned NOT NULL DEFAULT 0,
+            `username` varchar(128) NOT NULL DEFAULT '',
+            `display_name` varchar(255) NOT NULL DEFAULT '',
+            `role` varchar(32) NOT NULL DEFAULT '',
+            `action_code` varchar(64) NOT NULL DEFAULT '',
+            `action_name` varchar(128) NOT NULL DEFAULT '',
+            `module` varchar(64) NOT NULL DEFAULT '',
+            `target_type` varchar(64) NOT NULL DEFAULT '',
+            `target_id` varchar(128) NOT NULL DEFAULT '',
+            `target_name` varchar(255) NOT NULL DEFAULT '',
+            `detail` text,
+            `method` varchar(16) NOT NULL DEFAULT '',
+            `request_path` varchar(512) NOT NULL DEFAULT '',
+            `ip` varchar(64) NOT NULL DEFAULT '',
+            `user_agent` varchar(255) NOT NULL DEFAULT '',
+            `status_code` int unsigned NOT NULL DEFAULT 200,
+            `created_at` int unsigned NOT NULL DEFAULT 0,
+            PRIMARY KEY (`id`),
+            KEY `idx_operation_actor_time` (`username`, `created_at`),
+            KEY `idx_operation_role_time` (`role`, `created_at`),
+            KEY `idx_operation_action_time` (`action_code`, `created_at`),
+            KEY `idx_operation_target` (`target_type`, `target_id`),
+            KEY `idx_operation_created_at` (`created_at`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4", $errors);
+
         self::addColumn('feishu_sync_jobs', 'delete_count', "int unsigned NOT NULL DEFAULT 0", $errors);
         self::addColumn('feishu_sync_jobs', 'job_title_count', "int unsigned NOT NULL DEFAULT 0", $errors);
         self::addColumn('feishu_sync_jobs', 'joined_at_count', "int unsigned NOT NULL DEFAULT 0", $errors);

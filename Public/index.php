@@ -17,6 +17,7 @@ include(ROOT . "/Core/Utils.php");
 include(ROOT . "/Core/DataBase.php");
 include(ROOT . "/Core/Settings.php");
 include(ROOT . "/Core/Migrator.php");
+include(ROOT . "/Core/OperationLog.php");
 include(ROOT . "/Core/UserCheck.php");
 
 /*

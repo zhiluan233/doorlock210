@@ -22,18 +22,38 @@ if(!$rs) {
 
 $um = new anim210System\UserCheck();
 
-$mainSQL = 'SELECT * FROM `logs`';
-$countSQL = 'SELECT count(*) FROM `logs`';
-$logData = Database::query("logs", $mainSQL, true);
-$countData = Database::query("logs", $countSQL, true);
+function accessLogH($value) {
+	return htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8');
+}
+
+$keyword = trim((string)($_GET['q'] ?? ($_GET['search'] ?? '')));
+if ($keyword !== '') {
+	if (preg_match_all('/./u', $keyword, $matches) !== false) {
+		$keyword = implode('', array_slice($matches[0], 0, 80));
+	} else {
+		$keyword = substr($keyword, 0, 80);
+	}
+}
+$where = [];
+if ($keyword !== '') {
+	$safeKeyword = Database::escape($keyword);
+	$like = "'%{$safeKeyword}%'";
+	$where[] = "(`passusername` LIKE {$like} OR `passusertype` LIKE {$like} OR `passdoor` LIKE {$like} OR `cardid` LIKE {$like} OR `action` LIKE {$like})";
+}
+$whereSql = count($where) > 0 ? ' WHERE ' . implode(' AND ', $where) : '';
+$mainSQL = "SELECT * FROM `logs`{$whereSql} ORDER BY `time` DESC LIMIT 3000";
+$logData = Database::query("logs", $mainSQL, '', true);
 $rows = [];
-while ($row = mysqli_fetch_assoc($logData)) {
+while ($logData instanceof \mysqli_result && $row = mysqli_fetch_assoc($logData)) {
     $rows[] = $row;
+}
+if ($logData instanceof \mysqli_result) {
+	mysqli_free_result($logData);
 }
 
 ?>
 <div class="page-title">
-	<h3 class="breadcrumb-header">您好, <?php echo $rs['username'] ?>！</h3>
+	<h3 class="breadcrumb-header">您好, <?php echo accessLogH($rs['username']); ?>！</h3>
 </div>
 <div id="main-wrapper">
 	<div class="row">
@@ -41,7 +61,16 @@ while ($row = mysqli_fetch_assoc($logData)) {
 			<div class="panel panel-white">
 				<div class="panel-body" style="font-weight: 400;overflow-x: auto;max-width: ;">
 					<h4 style="font-weight: 400">出入记录查询</h4><br>
-					<h6>倒序展示所有人员出入记录</h6><br />
+					<h6>倒序展示人员出入记录，最多展示最近 3000 条</h6><br />
+					<form class="form-inline" method="GET" action="/" style="margin-bottom: 16px;">
+						<input type="hidden" name="page" value="panel">
+						<input type="hidden" name="module" value="accesslog">
+						<div class="form-group">
+							<input type="text" class="form-control" name="q" value="<?php echo accessLogH($keyword); ?>" placeholder="搜索姓名、卡号、门禁、动作">
+						</div>
+						<button type="submit" class="btn btn-default">搜索</button>
+						<?php if ($keyword !== '') { ?><a class="btn btn-default" href="/?page=panel&module=accesslog">清空</a><?php } ?>
+					</form>
 
 					<table id="devices1" class="table table-bordered table-auto" data-toggle="table" data-pagination="true" data-page-size="10" data-page-list="[5, 10, 20, 30, 40, 50, 'All']" data-sortable="true" data-search="true"  style="clear: both;margin-top: 20px;">
                         <thead>
@@ -56,16 +85,15 @@ while ($row = mysqli_fetch_assoc($logData)) {
                         </thead>
 						<tbody>
 							<?php
-                                $rows = array_reverse($rows);
                                 foreach ($rows as $lData) {
                                     $formattime = date('Y-m-d H:i:s', $lData['time']);
                                     echo "<tr>
-                                    <td>{$lData['passusername']}</td>
-                                    <td>{$lData['passusertype']}</td>
-									<td>{$lData['passdoor']}</td>
-									<td>{$lData['cardid']}</td>
-                                    <td>{$lData['action']}</td>
-                                    <td>{$formattime}</td>
+                                    <td>".accessLogH($lData['passusername'])."</td>
+                                    <td>".accessLogH($lData['passusertype'])."</td>
+									<td>".accessLogH($lData['passdoor'])."</td>
+									<td>".accessLogH($lData['cardid'])."</td>
+                                    <td>".accessLogH($lData['action'])."</td>
+                                    <td>".accessLogH($formattime)."</td>
                                     </tr>";
                                 }
                             ?>

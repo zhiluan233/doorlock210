@@ -19,6 +19,7 @@ class PostHandler {
 		global $_config;
 		
 		if(isset($params['action']) && preg_match("/^[A-Za-z0-9\_\-]{1,30}$/", $params['action'])) {
+			anim210System\OperationLog::capturePostAction($params);
 			switch($params['action']) {
 				case "api":
 					if (!isset($params['key'])) {
