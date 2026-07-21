@@ -205,6 +205,100 @@ function submitcardLatestSyncJobText($job) {
 	}
 	return $text;
 }
+
+function submitcardEmployeeDepartmentPathText($employee) {
+	$paths = [];
+	foreach (submitcardEmployeeDepartmentIds($employee) as $departmentId) {
+		$path = submitcardDepartmentPathById($departmentId);
+		if (count($path) > 0) {
+			$paths[] = implode('/', $path);
+		}
+	}
+	$paths = array_values(array_unique(array_filter($paths, function($path) {
+		return trim((string)$path) !== '';
+	})));
+	if (count($paths) > 0) {
+		return implode('；', $paths);
+	}
+	$fallback = trim((string)($employee['department_name'] ?? ''));
+	return $fallback !== '' ? $fallback : '--';
+}
+
+function submitcardEmployeeDepartmentIds($employee) {
+	$ids = [];
+	$raw = $employee['department_ids'] ?? '';
+	if (is_string($raw) && trim($raw) !== '') {
+		$decoded = json_decode($raw, true);
+		if (is_array($decoded)) {
+			$raw = $decoded;
+		} else if (strpos($raw, ',') !== false) {
+			$raw = array_map('trim', explode(',', $raw));
+		}
+	}
+	if (is_array($raw)) {
+		foreach ($raw as $item) {
+			if (is_scalar($item) && trim((string)$item) !== '') {
+				$ids[] = trim((string)$item);
+			} else if (is_array($item)) {
+				foreach (['department_id', 'open_department_id', 'id'] as $key) {
+					if (!empty($item[$key])) {
+						$ids[] = trim((string)$item[$key]);
+						break;
+					}
+				}
+			}
+		}
+	}
+	if (!empty($employee['department_id'])) {
+		$ids[] = trim((string)$employee['department_id']);
+	}
+	return array_values(array_unique(array_filter($ids, function($id) {
+		return $id !== '';
+	})));
+}
+
+function submitcardDepartmentPathById($departmentId) {
+	$path = [];
+	$seen = [];
+	$department = submitcardFindDepartment($departmentId);
+	while (is_array($department)) {
+		$id = trim((string)($department['department_id'] ?? ''));
+		$openId = trim((string)($department['open_department_id'] ?? ''));
+		$seenKey = $id !== '' ? $id : $openId;
+		if ($seenKey !== '' && isset($seen[$seenKey])) {
+			break;
+		}
+		if ($seenKey !== '') {
+			$seen[$seenKey] = true;
+		}
+		$name = trim((string)($department['name'] ?? ''));
+		if ($name !== '') {
+			array_unshift($path, $name);
+		}
+		$parentId = trim((string)($department['parent_department_id'] ?? ''));
+		if ($parentId === '' || $parentId === '0') {
+			break;
+		}
+		$department = submitcardFindDepartment($parentId);
+	}
+	return $path;
+}
+
+function submitcardFindDepartment($departmentId) {
+	static $cache = [];
+	$departmentId = trim((string)$departmentId);
+	if ($departmentId === '') {
+		return null;
+	}
+	if (array_key_exists($departmentId, $cache)) {
+		return $cache[$departmentId];
+	}
+	$escaped = Database::escape($departmentId);
+	$sql = "SELECT * FROM `feishu_departments` WHERE `department_id`='{$escaped}' OR `open_department_id`='{$escaped}' LIMIT 1";
+	$row = Database::querySingleLine('feishu_departments', $sql, true);
+	$cache[$departmentId] = is_array($row) ? $row : null;
+	return $cache[$departmentId];
+}
 ?>
 <div class="page-title">
 	<h3 class="breadcrumb-header">您好, 门禁管理员：<?php echo $rs['username'] ?></h3>
@@ -230,6 +324,7 @@ function submitcardLatestSyncJobText($job) {
                                 <th>ID</th>
                                 <th>花名</th>
                                 <th>工号</th>
+                                <th>部门</th>
                                 <th>真实姓名</th>
                                 <th>状态</th>
                                 <th>门禁卡号</th>
@@ -249,15 +344,20 @@ function submitcardLatestSyncJobText($job) {
 									if ($employeeId == '') {
 										$employeeId = '未分配工号';
 									} 
-									$cardId = $eData['card_id'] ?? '暂无工牌';
+									$departmentPath = submitcardEmployeeDepartmentPathText($eData);
+									$cardId = trim((string)($eData['card_id'] ?? ''));
+									if ($cardId === '') {
+										$cardId = '暂无工牌';
+									}
                                     echo "<tr>
-                                    <td>{$eData['id']}</td>
-                                    <td>{$eData['name']}</td>
-                                    <td>{$employeeId}</td>
-                                    <td>{$eData['realname']}</td>
-                                    <td>{$eStatus}</td>
-                                    <td>{$cardId}</td>
-                                    <td><button class=\"btn btn-default\" onclick=\"submitemployeecard({$eData['id']})\">发卡</button>&nbsp{$eStatusBtn}</td>
+                                    <td>".intval($eData['id'])."</td>
+                                    <td>".submitcardH($eData['name'])."</td>
+                                    <td>".submitcardH($employeeId)."</td>
+                                    <td>".submitcardH($departmentPath)."</td>
+                                    <td>".submitcardH($eData['realname'])."</td>
+                                    <td>".submitcardH($eStatus)."</td>
+                                    <td>".submitcardH($cardId)."</td>
+                                    <td><button class=\"btn btn-default\" onclick=\"submitemployeecard(".intval($eData['id']).")\">发卡</button>&nbsp{$eStatusBtn}</td>
                                     </tr>";
                                 }
                             ?>

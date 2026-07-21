@@ -83,7 +83,7 @@ if ($learnerRs && $learnerRs instanceof \mysqli_result) {
 									<td><?php echo learnerH($learner['training_center'] ?? ''); ?></td>
 									<td><?php echo learnerH(learnerDate($learner['enrolled_at'] ?? 0)); ?></td>
 									<td><?php echo $statusText; ?></td>
-									<td><?php echo learnerH($learner['card_id'] ?? '暂无工牌'); ?></td>
+									<td><?php echo learnerH(trim((string)($learner['card_id'] ?? '')) !== '' ? $learner['card_id'] : '暂无工牌'); ?></td>
 									<td><?php echo learnerH($learner['remark']); ?></td>
 									<td><?php echo learnerH(learnerTime($learner['updated_at'])); ?></td>
 									<td>
