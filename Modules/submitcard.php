@@ -206,6 +206,7 @@ function submitcardLatestSyncJobText($job) {
 	return $text;
 }
 
+/*
 function submitcardEmployeeDepartmentPathText($employee) {
 	$paths = [];
 	foreach (submitcardEmployeeDepartmentIds($employee) as $departmentId) {
@@ -220,6 +221,20 @@ function submitcardEmployeeDepartmentPathText($employee) {
 	if (count($paths) > 0) {
 		return implode('；', $paths);
 	}
+	$fallback = trim((string)($employee['department_name'] ?? ''));
+	return $fallback !== '' ? $fallback : '--';
+}
+*/
+
+function submitcardEmployeeDepartmentPathText($employee) {
+	foreach (submitcardEmployeeDepartmentIds($employee) as $departmentId) {
+		$path = submitcardDepartmentPathById($departmentId);
+
+		if (count($path) > 0) {
+			return implode('/', $path);
+		}
+	}
+
 	$fallback = trim((string)($employee['department_name'] ?? ''));
 	return $fallback !== '' ? $fallback : '--';
 }
