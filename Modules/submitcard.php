@@ -249,13 +249,14 @@ function submitcardLatestSyncJobText($job) {
 									if ($employeeId == '') {
 										$employeeId = '未分配工号';
 									} 
+									$cardId = $eData['card_id'] ?? '暂无工牌';
                                     echo "<tr>
                                     <td>{$eData['id']}</td>
                                     <td>{$eData['name']}</td>
                                     <td>{$employeeId}</td>
                                     <td>{$eData['realname']}</td>
                                     <td>{$eStatus}</td>
-                                    <td>{$eData['card_id']}</td>
+                                    <td>{$cardId}</td>
                                     <td><button class=\"btn btn-default\" onclick=\"submitemployeecard({$eData['id']})\">发卡</button>&nbsp{$eStatusBtn}</td>
                                     </tr>";
                                 }
