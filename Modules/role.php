@@ -49,6 +49,11 @@ function roleAllScopeLabel($value) {
 	return '全体员工';
 }
 
+function roleExpiresText($expiresAt) {
+	$expiresAt = intval($expiresAt);
+	return $expiresAt > 0 ? date('Y-m-d', $expiresAt) : '永久有效';
+}
+
 Database::delete('access_role_members', "DELETE m FROM `access_role_members` m LEFT JOIN `employee` e ON e.`open_id`=m.`employee_open_id` WHERE IFNULL(m.`member_kind`, 'employee')='employee' AND e.`open_id` IS NULL", '', true);
 Database::delete('access_role_members', "DELETE m FROM `access_role_members` m LEFT JOIN `learner` l ON l.`student_no`=m.`employee_open_id` WHERE m.`member_kind`='learner' AND l.`student_no` IS NULL", '', true);
 Database::delete('access_role_members', "DELETE m FROM `access_role_members` m LEFT JOIN `guest` g ON g.`open_id`=m.`employee_open_id` WHERE m.`member_kind`='guest' AND g.`open_id` IS NULL", '', true);
@@ -132,6 +137,7 @@ foreach ($rolesRaw as $role) {
 		'subject_kind' => $subjectKind,
 		'allow_all' => intval($role['allow_all']),
 		'builtin_key' => $role['builtin_key'] ?? '',
+		'expires_at' => intval($role['expires_at'] ?? 0),
 		'member_count' => intval($role['member_count']),
 		'members' => $membersByRole[$roleId] ?? [],
 		'device_ids' => array_values(array_unique($devicesByRole[$roleId] ?? []))
@@ -158,6 +164,7 @@ foreach ($rolesRaw as $role) {
 								<th>范围</th>
 								<th>成员数</th>
 								<th>已下发门禁</th>
+								<th>过期时间</th>
 								<th>备注</th>
                                 <th>操作</th>
 							</tr>
@@ -171,6 +178,7 @@ foreach ($rolesRaw as $role) {
 									<td><?php echo intval($role['allow_all']) === 1 ? roleAllScopeLabel($role['subject_kind']) : '指定成员'; ?></td>
 									<td><?php echo intval($role['allow_all']) === 1 ? '动态全体' : intval($role['member_count']); ?></td>
 									<td><?php echo count($role['device_ids']); ?></td>
+									<td><?php echo roleH(roleExpiresText($role['expires_at'])); ?></td>
 									<td><?php echo roleH($role['description']); ?></td>
 									<td>
 										<?php if ($role['builtin_key'] === '') { ?>
@@ -229,6 +237,22 @@ layui.use(['layer', 'form', 'transfer'], function(){
 		return '员工';
 	}
 
+	function roleExpiresDate(role) {
+		var expiresAt = parseInt((role && role.expires_at) || 0, 10);
+		if (!expiresAt) {
+			return '';
+		}
+		var d = new Date(expiresAt * 1000);
+		var month = String(d.getMonth() + 1);
+		var day = String(d.getDate());
+		return d.getFullYear() + '-' + (month.length === 1 ? '0' + month : month) + '-' + (day.length === 1 ? '0' + day : day);
+	}
+
+	function syncRoleExpiresDate() {
+		var isPermanent = $('#role_permanent').is(':checked');
+		$('#role_expires_date').prop('disabled', isPermanent).toggle(!isPermanent);
+	}
+
 	function memberListByKind(kind) {
 		if (kind === 'learner') { return learnerList; }
 		if (kind === 'guest') { return guestList; }
@@ -265,12 +289,14 @@ layui.use(['layer', 'form', 'transfer'], function(){
 			return;
 		}
 		if (!role) {
-			role = {id: 0, name: '', description: '', subject_kind: 'employee', allow_all: 0, members: [], device_ids: []};
+			role = {id: 0, name: '', description: '', subject_kind: 'employee', allow_all: 0, expires_at: 0, members: [], device_ids: []};
 		}
+		var rolePermanent = parseInt(role.expires_at || 0, 10) <= 0;
 		var html = '<div class="layui-form layui-form-pane" style="padding:16px;">'
 			+ '<div class="layui-form-item"><label class="layui-form-label">角色名</label><div class="layui-input-block"><input type="text" id="role_name" class="layui-input" value="' + escapeHtml(role.name) + '"></div></div>'
 			+ '<div class="layui-form-item"><label class="layui-form-label">对象</label><div class="layui-input-block"><select id="subject_kind"><option value="employee" ' + (role.subject_kind === 'employee' ? 'selected' : '') + '>员工</option><option value="learner" ' + (role.subject_kind === 'learner' ? 'selected' : '') + '>学员</option><option value="guest" ' + (role.subject_kind === 'guest' ? 'selected' : '') + '>访客</option></select></div></div>'
 			+ '<div class="layui-form-item"><label class="layui-form-label">备注</label><div class="layui-input-block"><input type="text" id="role_description" class="layui-input" value="' + escapeHtml(role.description) + '"></div></div>'
+			+ '<div class="layui-form-item"><label class="layui-form-label">有效期</label><div class="layui-input-block"><input type="checkbox" id="role_permanent" title="永久有效" lay-skin="primary" lay-filter="role_permanent" ' + (rolePermanent ? 'checked' : '') + '><input type="date" id="role_expires_date" class="layui-input" style="margin-top:10px;' + (rolePermanent ? 'display:none;' : '') + '" value="' + escapeHtml(roleExpiresDate(role)) + '" ' + (rolePermanent ? 'disabled' : '') + '></div></div>'
 			+ '<div class="layui-form-item"><input type="checkbox" id="allow_all" title="全体角色" lay-skin="primary" ' + (parseInt(role.allow_all, 10) === 1 ? 'checked' : '') + '></div>'
 			+ '<div id="roleMemberWrap"><div id="roleMemberTransfer"></div></div>'
 			+ '<hr><div id="roleDeviceTransfer"></div>'
@@ -280,7 +306,7 @@ layui.use(['layer', 'form', 'transfer'], function(){
 		layer.open({
 			type: 1,
 			title: role.id ? '编辑门禁角色' : '创建门禁角色',
-			area: ['760px', '760px'],
+			area: ['760px', '800px'],
 			content: html,
 			success: function() {
 				renderMemberTransfer(role.members || []);
@@ -299,7 +325,18 @@ layui.use(['layer', 'form', 'transfer'], function(){
 					renderMemberTransfer([]);
 					form.render();
 				});
+				form.on('checkbox(role_permanent)', function() {
+					syncRoleExpiresDate();
+				});
+				$('#role_expires_date').on('change', function() {
+					if ($(this).val() !== '') {
+						$('#role_permanent').prop('checked', false);
+						syncRoleExpiresDate();
+						form.render('checkbox');
+					}
+				});
 				setMemberVisible();
+				syncRoleExpiresDate();
 				form.render();
 			}
 		});
@@ -325,6 +362,8 @@ layui.use(['layer', 'form', 'transfer'], function(){
 				description: $('#role_description').val(),
 				subject_kind: currentSubjectKind(),
 				allow_all: $('#allow_all').is(':checked') ? 'true' : 'false',
+				role_permanent: $('#role_permanent').is(':checked') ? 'true' : 'false',
+				expires_date: $('#role_expires_date').val(),
 				members: JSON.stringify(members),
 				devices: JSON.stringify(devices)
 			},

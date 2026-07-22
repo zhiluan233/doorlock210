@@ -162,6 +162,7 @@ class OperationLog {
             'releasecard' => '回收工牌',
             'searchBadgeEmployees' => '搜索可发卡员工',
             'searchBadgeLearners' => '搜索可发卡学员',
+            'searchBadgeGuests' => '搜索可发卡访客',
             'addDevice' => '添加设备',
             'syncFeishuMember' => '同步飞书通讯录',
             'editPassPermission' => '修改通行权限',
@@ -256,6 +257,7 @@ class OperationLog {
                 break;
             case 'searchBadgeEmployees':
             case 'searchBadgeLearners':
+            case 'searchBadgeGuests':
                 $keyword = self::limit((string)($_POST['q'] ?? ''), 80);
                 $descriptor = self::withTarget($descriptor, 'search', $keyword, $keyword);
                 $descriptor['detail'] = ($map[$action] ?? $action) . ($keyword !== '' ? '：' . $keyword : '');

@@ -38,6 +38,8 @@ include(ROOT . "/Core/Utils.php");
 include(ROOT . "/Core/DataBase.php");
 include(ROOT . "/Core/Settings.php");
 include(ROOT . "/Core/Migrator.php");
+include(ROOT . "/Core/OperationLog.php");
+include(ROOT . "/Core/RuntimeMaintenance.php");
 include(ROOT . "/Middleware/Class.Feishu.php");
 include(ROOT . "/Middleware/Class.FeishuSync.php");
 include(ROOT . "/Middleware/Class.Attendance.php");
@@ -46,6 +48,7 @@ $conn = null;
 $db = new Database();
 
 $migration = Migrator::ensure();
+$maintenance = RuntimeMaintenance::runScheduledCleanup();
 $queue = AttendanceService::processAllQueues();
 $contactSyncSchedule = FeishuContactSync::scheduleDailyIfDue();
 $contactSync = FeishuContactSync::processNextJob(1);
@@ -53,6 +56,7 @@ $contactSync = FeishuContactSync::processNextJob(1);
 $result = [
     'time' => date('Y-m-d H:i:s'),
     'migration' => $migration,
+    'maintenance' => $maintenance,
     'queue' => $queue,
     'contact_sync_schedule' => $contactSyncSchedule,
     'contact_sync' => $contactSync

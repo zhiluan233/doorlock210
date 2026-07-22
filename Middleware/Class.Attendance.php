@@ -52,6 +52,10 @@ class AttendanceService {
             $reason = '访客已禁用';
             return false;
         }
+        if (intval($guestInfo['expires_at'] ?? 0) > 0 && intval($guestInfo['expires_at']) < time()) {
+            $reason = '访客已过期';
+            return false;
+        }
 
         $openId = $guestInfo['open_id'] ?? '';
         if (self::matchLegacyList($deviceInfo['allowedGuest'] ?? '', $openId)) {
@@ -988,6 +992,9 @@ class AttendanceService {
         if (!$role) {
             return false;
         }
+        if (self::roleExpired($role)) {
+            return false;
+        }
         if (($role['subject_kind'] ?? 'employee') !== 'employee') {
             return false;
         }
@@ -1019,6 +1026,9 @@ class AttendanceService {
         if (!$role || ($role['subject_kind'] ?? '') !== 'guest') {
             return false;
         }
+        if (self::roleExpired($role)) {
+            return false;
+        }
         if (intval($role['allow_all'] ?? 0) === 1) {
             return true;
         }
@@ -1045,6 +1055,9 @@ class AttendanceService {
 
         $role = Database::querySingleLine('access_roles', ['id' => intval($roleId), 'enabled' => 1]);
         if (!$role || ($role['subject_kind'] ?? '') !== 'learner') {
+            return false;
+        }
+        if (self::roleExpired($role)) {
             return false;
         }
         if (intval($role['allow_all'] ?? 0) === 1) {
@@ -1133,5 +1146,11 @@ class AttendanceService {
             'department_group' => '部门+组'
         ];
         return $typeMap[$policy['subject_type'] ?? ''] ?? '策略';
+    }
+
+    private static function roleExpired($role)
+    {
+        $expiresAt = intval($role['expires_at'] ?? 0);
+        return $expiresAt > 0 && $expiresAt < time();
     }
 }

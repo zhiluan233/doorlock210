@@ -166,6 +166,9 @@ function badgeRenderPage($data)
     $enrolledAt = intval($person['enrolled_at'] ?? 0);
     $joinedAt = intval($person['joined_at'] ?? 0);
     $realname = $person['realname'] ?? '';
+    $guestExpiresAt = intval($person['expires_at'] ?? 0);
+    $guestInviterName = trim((string)($person['inviter_name'] ?? ''));
+    $guestInviterDepartmentName = trim((string)($person['inviter_department_name'] ?? ''));
     $role = badgeRoleFromMode($mode);
     $departmentDisplay = badgeDepartmentDisplay($person, $role);
     $isAdminMode = strpos($mode, 'admin_') === 0;
@@ -524,7 +527,7 @@ function badgeRenderPage($data)
         }
         .assign-tabs {
             display: grid;
-            grid-template-columns: 1fr 1fr;
+            grid-template-columns: repeat(3, 1fr);
             gap: 8px;
         }
         .assign-tab {
@@ -640,6 +643,9 @@ function badgeRenderPage($data)
                         <?php if ($className !== '') { ?><div class="info-row"><span>班级</span><span><?php echo badgeH($className); ?></span></div><?php } ?>
                         <?php if ($trainingCenter !== '') { ?><div class="info-row"><span>培养中心</span><span><?php echo badgeH($trainingCenter); ?></span></div><?php } ?>
                         <?php if ($studentNo !== '' && $enrolledAt > 0) { ?><div class="info-row"><span>入学时间</span><span><?php echo badgeH(date('Y-m-d', $enrolledAt)); ?></span></div><?php } ?>
+                        <?php if ($role === 'guest') { ?><div class="info-row"><span>有效期</span><span><?php echo badgeH($guestExpiresAt > 0 ? date('Y-m-d', $guestExpiresAt) : '永久有效'); ?></span></div><?php } ?>
+                        <?php if ($role === 'guest' && $guestInviterName !== '') { ?><div class="info-row"><span>邀约人</span><span><?php echo badgeH($guestInviterName); ?></span></div><?php } ?>
+                        <?php if ($role === 'guest' && $guestInviterDepartmentName !== '') { ?><div class="info-row"><span>邀约部门</span><span><?php echo badgeH($guestInviterDepartmentName); ?></span></div><?php } ?>
                         <?php if ($departmentDisplay['value'] !== '') { ?><div class="info-row"><span><?php echo badgeH($departmentDisplay['label']); ?></span><span><?php echo badgeH($departmentDisplay['value']); ?></span></div><?php } ?>
                     <?php } ?>
                 </div>
@@ -717,6 +723,7 @@ function badgeRenderPage($data)
                 <div class="assign-tabs" role="tablist" aria-label="发卡对象">
                     <button class="assign-tab active" type="button" data-kind="employee" onclick="switchAssignKind('employee')">员工</button>
                     <button class="assign-tab" type="button" data-kind="learner" onclick="switchAssignKind('learner')">学员</button>
+                    <button class="assign-tab" type="button" data-kind="guest" onclick="switchAssignKind('guest')">访客</button>
                 </div>
                 <label class="search-field">
                     <i class="fa-solid fa-magnifying-glass"></i>
@@ -740,8 +747,8 @@ function badgeRenderPage($data)
         var assignKind = 'employee';
         var selectedPerson = null;
         var searchTimer = null;
-        var personSearchCache = {employee: null, learner: null};
-        var personSearchPromise = {employee: null, learner: null};
+        var personSearchCache = {employee: null, learner: null, guest: null};
+        var personSearchPromise = {employee: null, learner: null, guest: null};
         var overlayState = null;
 
         function toast(message) {
@@ -877,8 +884,26 @@ function badgeRenderPage($data)
             hideSheet('assignSheet');
         }
 
+        function normalizeAssignKind(kind) {
+            if (kind === 'learner' || kind === 'guest') {
+                return kind;
+            }
+            return 'employee';
+        }
+
+        function assignKindLabel(kind) {
+            kind = normalizeAssignKind(kind);
+            if (kind === 'learner') {
+                return '学员';
+            }
+            if (kind === 'guest') {
+                return '访客';
+            }
+            return '员工';
+        }
+
         function switchAssignKind(kind) {
-            assignKind = kind === 'learner' ? 'learner' : 'employee';
+            assignKind = normalizeAssignKind(kind);
             selectedPerson = null;
             var assignButton = document.getElementById('assignButton');
             if (assignButton) {
@@ -890,7 +915,7 @@ function badgeRenderPage($data)
             var input = document.getElementById('personSearch');
             if (input) {
                 input.value = '';
-                input.placeholder = assignKind === 'learner' ? '搜索花名、拼音、学号、班级、培养中心' : '搜索花名、拼音、工号、部门';
+                input.placeholder = assignKind === 'learner' ? '搜索花名、拼音、学号、班级、培养中心' : (assignKind === 'guest' ? '搜索访客姓名、拼音、手机、邀约人' : '搜索花名、拼音、工号、部门');
                 input.focus();
             }
             searchPeople('');
@@ -902,7 +927,7 @@ function badgeRenderPage($data)
                 return;
             }
             if (!items || !items.length) {
-                list.innerHTML = '<div class="person-option"><strong>未找到' + (assignKind === 'learner' ? '学员' : '员工') + '</strong><span>换个关键词再试</span></div>';
+                list.innerHTML = '<div class="person-option"><strong>未找到' + assignKindLabel(assignKind) + '</strong><span>换个关键词再试</span></div>';
                 return;
             }
             list.innerHTML = items.map(function(item) {
@@ -918,6 +943,19 @@ function badgeRenderPage($data)
                     return '<button class="person-option" type="button" data-id="' + item.id + '">' +
                         '<strong>' + escapeHtml(item.name || '未设置花名') + '</strong>' +
                         '<span>' + escapeHtml(learnerMeta) + '</span>' +
+                        '</button>';
+                }
+                if (assignKind === 'guest') {
+                    var guestMeta = [
+                        item.phone || '未设置手机号',
+                        item.inviter_name ? '邀约人 ' + item.inviter_name : '未设置邀约人',
+                        item.inviter_department_name || '',
+                        item.expires_text || '永久有效',
+                        cardText
+                    ].filter(function(part) { return part !== ''; }).join(' · ');
+                    return '<button class="person-option" type="button" data-id="' + item.id + '">' +
+                        '<strong>' + escapeHtml(item.name || '未设置姓名') + '</strong>' +
+                        '<span>' + escapeHtml(guestMeta) + '</span>' +
                         '</button>';
                 }
                 var dept = item.department_name || '未设置部门';
@@ -953,7 +991,8 @@ function badgeRenderPage($data)
         }
 
         function searchPeopleFromServer(keyword) {
-            postAction(assignKind === 'learner' ? 'searchBadgeLearners' : 'searchBadgeEmployees', {q: keyword || ''}).then(function(text) {
+            var actionMap = {employee: 'searchBadgeEmployees', learner: 'searchBadgeLearners', guest: 'searchBadgeGuests'};
+            postAction(actionMap[normalizeAssignKind(assignKind)], {q: keyword || ''}).then(function(text) {
                 var data = JSON.parse(text);
                 renderPeople(data.items || []);
             }).catch(function(error) {
@@ -962,14 +1001,15 @@ function badgeRenderPage($data)
         }
 
         function loadPersonSearchCache(kind) {
-            kind = kind === 'learner' ? 'learner' : 'employee';
+            kind = normalizeAssignKind(kind);
             if (personSearchCache[kind]) {
                 return Promise.resolve(personSearchCache[kind]);
             }
             if (personSearchPromise[kind]) {
                 return personSearchPromise[kind];
             }
-            personSearchPromise[kind] = postAction(kind === 'learner' ? 'searchBadgeLearners' : 'searchBadgeEmployees', {q: '', all: '1'}).then(function(text) {
+            var actionMap = {employee: 'searchBadgeEmployees', learner: 'searchBadgeLearners', guest: 'searchBadgeGuests'};
+            personSearchPromise[kind] = postAction(actionMap[kind], {q: '', all: '1'}).then(function(text) {
                 var data = JSON.parse(text);
                 personSearchCache[kind] = data.items || [];
                 personSearchCache[kind].forEach(function(item) {
@@ -1014,6 +1054,7 @@ function badgeRenderPage($data)
         }
 
         function buildPersonSearchText(item, kind) {
+            kind = normalizeAssignKind(kind);
             var parts = kind === 'learner' ? [
                 item.name || '',
                 item.realname || '',
@@ -1022,13 +1063,20 @@ function badgeRenderPage($data)
                 item.class_name || '',
                 item.training_center || '',
                 item.card_id || ''
+            ] : (kind === 'guest' ? [
+                item.name || '',
+                item.phone || '',
+                item.inviter_name || '',
+                item.inviter_department_name || '',
+                item.expires_text || '',
+                item.card_id || ''
             ] : [
                 item.name || '',
                 item.realname || '',
                 item.employee_id || '',
                 item.department_name || '',
                 item.card_id || ''
-            ];
+            ]);
             var raw = normalizeSearchText(parts.join(' '));
             var fullPinyin = normalizeSearchText(toPinyinText(raw, 'pinyin', ' ', 'spaced'));
             var firstPinyin = normalizeSearchText(toPinyinText(raw, 'first', '', 'removed'));
@@ -1059,10 +1107,10 @@ function badgeRenderPage($data)
 
         function assignBadge() {
             if (!selectedPerson) {
-                toast('请选择' + (assignKind === 'learner' ? '学员' : '员工'));
+                toast('请选择' + assignKindLabel(assignKind));
                 return;
             }
-            var subjectLabel = assignKind === 'learner' ? '学员' : '员工';
+            var subjectLabel = assignKindLabel(assignKind);
             var message = selectedPerson.card_id ? '该' + subjectLabel + '已有工牌，继续会替换为当前工牌。是否继续？' : '确定为 ' + selectedPerson.name + ' 发放该工牌？';
             if (!confirm(message)) {
                 return;

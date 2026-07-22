@@ -159,9 +159,9 @@ if(isset($_GET['updateEmployeeId']) && isset($_GET['updateEmployeeAction']) && p
 $um = new anim210System\UserCheck();
 
 $mainEmployeeSQL = 'SELECT * FROM `employee`';
-$employeeData = Database::query("employee", $mainEmployeeSQL, true);
+$employeeData = submitcardFetchRows($mainEmployeeSQL, "employee");
 $mainGuestSQL = 'SELECT * FROM `guest`';
-$guestData = Database::query("guest", $mainGuestSQL, true);
+$guestData = submitcardFetchRows($mainGuestSQL, "guest");
 $latestFullSyncJob = Database::querySingleLine("feishu_sync_jobs", "SELECT * FROM `feishu_sync_jobs` WHERE `job_type`='full_contact' ORDER BY `id` DESC LIMIT 1", true);
 $lastSuccessfulFullSyncJob = Database::querySingleLine("feishu_sync_jobs", "SELECT * FROM `feishu_sync_jobs` WHERE `job_type`='full_contact' AND `status`='success' AND `finished_at`>0 ORDER BY `finished_at` DESC, `id` DESC LIMIT 1", true);
 $lastFullSyncAt = intval(Settings::get('feishu_contact_sync_last_full_at', '0'));
@@ -173,6 +173,18 @@ $lastIncrementalEvent = Settings::get('feishu_contact_incremental_last_event', '
 
 function submitcardH($value) {
 	return htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8');
+}
+
+function submitcardFetchRows($sql, $table) {
+	$rs = Database::query($table, $sql, '', true);
+	$rows = [];
+	if ($rs instanceof \mysqli_result) {
+		while ($row = mysqli_fetch_assoc($rs)) {
+			$rows[] = $row;
+		}
+		mysqli_free_result($rs);
+	}
+	return $rows;
 }
 
 function submitcardFormatSyncTime($timestamp, $emptyText) {
@@ -314,6 +326,21 @@ function submitcardFindDepartment($departmentId) {
 	$cache[$departmentId] = is_array($row) ? $row : null;
 	return $cache[$departmentId];
 }
+
+$guestInviters = [];
+foreach ($employeeData as $employee) {
+	$openId = trim((string)($employee['open_id'] ?? ''));
+	if ($openId === '' || ($employee['status'] ?? '') !== 'true') {
+		continue;
+	}
+	$guestInviters[] = [
+		'open_id' => $openId,
+		'name' => trim((string)($employee['name'] ?? '')),
+		'employee_id' => trim((string)($employee['employee_id'] ?? '')),
+		'department_id' => trim((string)($employee['department_id'] ?? '')),
+		'department_name' => submitcardEmployeeDepartmentPathText($employee)
+	];
+}
 ?>
 <div class="page-title">
 	<h3 class="breadcrumb-header">您好, 门禁管理员：<?php echo $rs['username'] ?></h3>
@@ -395,6 +422,9 @@ function submitcardFindDepartment($departmentId) {
                                 <th>ID</th>
                                 <th>姓名</th>
                                 <th>手机号</th>
+                                <th>邀约人</th>
+                                <th>邀约部门</th>
+                                <th>过期时间</th>
                                 <th>状态</th>
                                 <th>门禁临时卡号</th>
                                 <th>操作</th>
@@ -404,18 +434,28 @@ function submitcardFindDepartment($departmentId) {
 							<?php
                                 foreach ($guestData as $gData) {
                                     $gStatus = '已启用';
-									$gStatusBtn = '<button class="btn btn-default" onclick="deactivateGuest('.$gData['id'].')">禁用</button>';
+									$guestRowId = intval($gData['id']);
+									$gStatusBtn = '<button class="btn btn-default" onclick="deactivateGuest('.$guestRowId.')">禁用</button>';
                                     if ($gData['status'] != 'true') {
                                         $gStatus = '已禁用';
-										$gStatusBtn = '<button class="btn btn-default" onclick="activateGuest('.$gData['id'].')">启用</button>';
+										$gStatusBtn = '<button class="btn btn-default" onclick="activateGuest('.$guestRowId.')">启用</button>';
                                     }
+									$guestCardId = trim((string)($gData['card_id'] ?? ''));
+									if ($guestCardId === '') {
+										$guestCardId = '暂无工牌';
+									}
+									$guestExpiresAt = intval($gData['expires_at'] ?? 0);
+									$guestExpiresText = $guestExpiresAt > 0 ? date('Y-m-d', $guestExpiresAt) : '永久有效';
                                     echo "<tr>
-                                    <td>{$gData['id']}</td>
-                                    <td>{$gData['name']}</td>
-                                    <td>{$gData['phone']}</td>
-                                    <td>{$gStatus}</td>
-                                    <td>{$gData['card_id']}</td>
-                                    <td><button class=\"btn btn-default\" onclick=\"submitguestcard({$gData['id']})\">发卡</button>&nbsp{$gStatusBtn}&nbsp<button class=\"btn btn-default\" onclick=\"deleteGuest({$gData['id']})\">删除</button></td>
+                                    <td>".$guestRowId."</td>
+                                    <td>".submitcardH($gData['name'])."</td>
+                                    <td>".submitcardH($gData['phone'])."</td>
+                                    <td>".submitcardH($gData['inviter_name'] ?? '--')."</td>
+                                    <td>".submitcardH($gData['inviter_department_name'] ?? '--')."</td>
+                                    <td>".submitcardH($guestExpiresText)."</td>
+                                    <td>".submitcardH($gStatus)."</td>
+                                    <td>".submitcardH($guestCardId)."</td>
+                                    <td><button class=\"btn btn-default\" onclick=\"submitguestcard(".$guestRowId.")\">发卡</button>&nbsp{$gStatusBtn}&nbsp<button class=\"btn btn-default\" onclick=\"deleteGuest(".$guestRowId.")\">删除</button></td>
                                     </tr>";
                                 }
                             ?>
@@ -440,6 +480,30 @@ function submitcardFindDepartment($departmentId) {
       <label class="layui-form-label">手机号</label>
       <div class="layui-input-block">
         <input type="text" id="phone" class="layui-input" placeholder="18888888888">
+      </div>
+    </div>
+    <div class="layui-form-item">
+      <label class="layui-form-label">邀约人</label>
+      <div class="layui-input-block">
+        <select id="guest_inviter_open_id" lay-filter="guest_inviter" lay-search>
+          <option value="">请选择飞书成员</option>
+          <?php foreach ($guestInviters as $inviter) { ?>
+            <option value="<?php echo submitcardH($inviter['open_id']); ?>" data-department-id="<?php echo submitcardH($inviter['department_id']); ?>" data-department-name="<?php echo submitcardH($inviter['department_name']); ?>"><?php echo submitcardH($inviter['name'].'（'.($inviter['employee_id'] !== '' ? $inviter['employee_id'] : '无工号').'）'); ?></option>
+          <?php } ?>
+        </select>
+      </div>
+    </div>
+    <div class="layui-form-item">
+      <label class="layui-form-label">主部门</label>
+      <div class="layui-input-block">
+        <input type="text" id="guest_inviter_department_name" class="layui-input" value="" placeholder="选择邀约人后自动带出" readonly>
+      </div>
+    </div>
+    <div class="layui-form-item">
+      <label class="layui-form-label">过期时间</label>
+      <div class="layui-input-block">
+        <input type="checkbox" id="guest_permanent" title="永久有效" lay-skin="primary" lay-filter="guest_permanent" checked>
+        <input type="date" id="guest_expires_date" class="layui-input" style="margin-top: 10px; display:none;" disabled>
       </div>
     </div>
     <div class="layui-form-item">
@@ -532,6 +596,7 @@ function submitcardFindDepartment($departmentId) {
 <script>
   var employeeid;
   var guestid;
+  var guestInviterList = <?php echo json_encode($guestInviters, JSON_UNESCAPED_UNICODE); ?>;
   layui.use(['layer', 'form'], function() {
     var layer = layui.layer;
     var form = layui.form;
@@ -1860,9 +1925,42 @@ function submitcardFindDepartment($departmentId) {
         type: 1,
         title: '创建访客',
         content: $('#createGuestDialogTpl').html(),
-        area: ['400px', '300px']
+        area: isMobileClient() ? ['92%', '560px'] : ['460px', '560px'],
+		success: function() {
+			prepareGuestDialog();
+		}
       });
     }
+
+	function prepareGuestDialog() {
+		form.render();
+		updateGuestInviterDepartment();
+		syncGuestExpiresDate();
+		form.on('select(guest_inviter)', function() {
+			updateGuestInviterDepartment();
+		});
+		form.on('checkbox(guest_permanent)', function() {
+			syncGuestExpiresDate();
+		});
+		$('#guest_expires_date').off('change.guest').on('change.guest', function() {
+			if ($(this).val() !== '') {
+				$('#guest_permanent').prop('checked', false);
+				syncGuestExpiresDate();
+				form.render('checkbox');
+			}
+		});
+	}
+
+	function updateGuestInviterDepartment() {
+		var $option = $('#guest_inviter_open_id option:selected');
+		var departmentName = $option.attr('data-department-name') || '';
+		$('#guest_inviter_department_name').val(departmentName);
+	}
+
+	function syncGuestExpiresDate() {
+		var isPermanent = $('#guest_permanent').is(':checked');
+		$('#guest_expires_date').prop('disabled', isPermanent).toggle(!isPermanent);
+	}
 
 	function openReleaseCard() {
 		layer.open({
@@ -1886,6 +1984,21 @@ function submitcardFindDepartment($departmentId) {
     function createGuest() {
       var name = $('#name').val();
       var phone = $('#phone').val();
+	  var inviterOpenId = $('#guest_inviter_open_id').val();
+	  var permanent = $('#guest_permanent').is(':checked');
+	  var expiresDate = $('#guest_expires_date').val();
+	  if ($.trim(name) === '') {
+		vt.error('访客姓名不能为空', {position: 'top-center'});
+		return;
+	  }
+	  if (!inviterOpenId) {
+		vt.error('请选择邀约人', {position: 'top-center'});
+		return;
+	  }
+	  if (!permanent && !expiresDate) {
+		vt.error('请选择访客过期时间或勾选永久有效', {position: 'top-center'});
+		return;
+	  }
       
       var htmlobj = $.ajax({
 		type: 'POST',
@@ -1893,7 +2006,10 @@ function submitcardFindDepartment($departmentId) {
 		async:true,
 		data: {
             name: name,
-			phone: phone
+			phone: phone,
+			inviter_open_id: inviterOpenId,
+			guest_permanent: permanent ? 'true' : 'false',
+			expires_date: expiresDate
 		},
 		error: function() {
 			vt.error("错误：" + htmlobj.responseText, {

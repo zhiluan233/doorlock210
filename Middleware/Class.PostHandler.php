@@ -223,31 +223,62 @@ class PostHandler {
 					}
 				break;
 				case "createguest":
-					$um = new anim210System\UserCheck();
-					if($um->isLogged()) {
-						anim210System\Utils::checkCsrf();
-						$us = $um->getInfoByUser($_SESSION['user']);
-						if($us['type'] !== "admin") {
-							Header("HTTP/1.1 403 Forbidden");
-							exit("你没有足够的权限这么做");
+					$this->requireAdminUser();
+					$name = trim((string)($_POST['name'] ?? ''));
+					$phone = trim((string)($_POST['phone'] ?? ''));
+					$inviterOpenId = trim((string)($_POST['inviter_open_id'] ?? ''));
+					$permanent = $this->truthy($_POST['guest_permanent'] ?? 'true');
+					$expiresAt = 0;
+					if (!$permanent) {
+						$expiresAt = $this->parseDateEndOfDay($_POST['expires_date'] ?? '', '访客过期时间');
+						if ($expiresAt <= time()) {
+							Header("HTTP/1.1 400 Bad Request");
+							exit("访客过期时间必须晚于当前时间");
 						}
-						$localGuestId = 'local-guest_'.preg_replace('/[^0-9A-Za-z\_\-]/', '', $_POST['phone']).'_'.time();
-						$update = Database::insert("guest", Array(
-			                    "id"         => null,
-								"open_id"    => $localGuestId,
-			                    "name"       => $_POST['name'],
-			                    "phone"      => $_POST['phone'],
-								"status"     => 'true'
-	                    ));
-						if($update === true) {
-							exit("创建新访客 ".$_POST['name']." 成功！");
-						} else {
-							Header("HTTP/1.1 404 Not Found");
-							exit("该用户不存在！{$update}");
-						}
-					} else {
-						exit("登录会话已超时，请重新登录");
 					}
+					if ($name === '') {
+						Header("HTTP/1.1 400 Bad Request");
+						exit("访客姓名不能为空");
+					}
+					if ($this->utf8Length($name) > 100) {
+						Header("HTTP/1.1 400 Bad Request");
+						exit("访客姓名过长");
+					}
+					if ($this->utf8Length($phone) > 64) {
+						Header("HTTP/1.1 400 Bad Request");
+						exit("访客手机号过长");
+					}
+					if ($inviterOpenId === '') {
+						Header("HTTP/1.1 400 Bad Request");
+						exit("请选择邀约人");
+					}
+					$inviter = Database::querySingleLine('employee', ['open_id' => $inviterOpenId, 'status' => 'true']);
+					if (!$inviter) {
+						Header("HTTP/1.1 400 Bad Request");
+						exit("邀约人不存在或已禁用");
+					}
+					$now = time();
+					$localGuestId = 'local-guest_'.substr(hash('sha256', $phone.'|'.$name.'|'.$inviterOpenId.'|'.$now.'|'.mt_rand()), 0, 24);
+					$departmentId = trim((string)($inviter['department_id'] ?? ''));
+					$departmentName = $this->employeeDepartmentPathText($inviter);
+					$update = Database::insert("guest", Array(
+						"id" => null,
+						"open_id" => $localGuestId,
+						"name" => $name,
+						"phone" => $phone,
+						"status" => 'true',
+						"expires_at" => $expiresAt,
+						"inviter_open_id" => $inviterOpenId,
+						"inviter_name" => $inviter['name'] ?? '',
+						"inviter_department_id" => $departmentId,
+						"inviter_department_name" => $departmentName,
+						"updated_at" => $now
+					));
+					if($update === true) {
+						exit("创建新访客 ".$name." 成功！");
+					}
+					Header("HTTP/1.1 404 Not Found");
+					exit("访客创建失败！{$update}");
 				break;
 				case "saveLearner":
 					$this->requireAdminUser();
@@ -393,6 +424,10 @@ class PostHandler {
 							Header("HTTP/1.1 404 Not Found");
 							exit("发卡对象不存在");
 						}
+						if ($type === 'guest' && intval($targetInfo['expires_at'] ?? 0) > 0 && intval($targetInfo['expires_at']) < time()) {
+							Header("HTTP/1.1 400 Bad Request");
+							exit("访客已过期，不能发卡");
+						}
 						$cardId = AttendanceService::normalizeCardNumber($_POST['cardid'] ?? '');
 						if (!preg_match('/^[0-9]{10}$/', $cardId)) {
 							Header("HTTP/1.1 400 Bad Request");
@@ -418,7 +453,7 @@ class PostHandler {
 						);
 						$update = false;
 						if ($type == 'guest') {
-							$update = Database::update("guest", $data, Array("id" => $id));
+							$update = Database::update("guest", array_merge($data, ['updated_at' => time()]), Array("id" => $id));
 						}
 						if ($type == 'employee') {
 							$update = Database::update("employee", $data, Array("id" => $id));
@@ -463,7 +498,7 @@ class PostHandler {
 						}
 						$guestInfo = Database::querySingleLine("guest", Array("card_id" => $cardId));
 						if ($guestInfo) {
-							$update = Database::update("guest", Array("card_id" => ''), Array("id" => $guestInfo['id']));
+							$update = Database::update("guest", Array("card_id" => '', "updated_at" => time()), Array("id" => $guestInfo['id']));
 							if ($update !== true) {
 								Header("HTTP/1.1 500 Internal Server Error");
 								exit("访客工牌回收失败：{$update}");
@@ -557,6 +592,47 @@ class PostHandler {
 								'training_center' => $row['training_center'] ?? '',
 								'card_id' => $row['card_id'] ?? '',
 								'status' => $row['status'] ?? ''
+							];
+						}
+						mysqli_free_result($rs);
+					}
+					exit(json_encode(['ok' => true, 'items' => $items], JSON_UNESCAPED_UNICODE));
+				break;
+				case "searchBadgeGuests":
+					$this->requireAdminUser();
+					Header("Content-Type: application/json; charset=utf-8");
+					$keyword = trim((string)($_POST['q'] ?? ''));
+					if (preg_match_all('/./u', $keyword, $matches) !== false) {
+						$keyword = implode('', array_slice($matches[0], 0, 40));
+					} else {
+						$keyword = substr($keyword, 0, 40);
+					}
+					$now = time();
+					$where = ["`status`='true'", "(`expires_at`=0 OR `expires_at`>={$now})"];
+					$loadAll = isset($_POST['all']) && (string)$_POST['all'] === '1';
+					if ($keyword !== '' && !$loadAll) {
+						$safeKeyword = Database::escape($keyword);
+						$like = "'%{$safeKeyword}%'";
+						$where[] = "(`name` LIKE {$like} OR `phone` LIKE {$like} OR `inviter_name` LIKE {$like} OR `inviter_department_name` LIKE {$like} OR `card_id` LIKE {$like})";
+					}
+					$limit = $loadAll ? 3000 : 20;
+					$sql = "SELECT `id`, `open_id`, `name`, `phone`, `card_id`, `status`, `expires_at`, `inviter_name`, `inviter_department_name` FROM `guest` WHERE " . implode(' AND ', $where) . " ORDER BY CASE WHEN `card_id`='' THEN 0 ELSE 1 END, `name` ASC LIMIT {$limit}";
+					$rs = Database::query('guest', $sql, '', true);
+					$items = [];
+					if ($rs instanceof \mysqli_result) {
+						while ($row = mysqli_fetch_assoc($rs)) {
+							$expiresAt = intval($row['expires_at'] ?? 0);
+							$items[] = [
+								'id' => intval($row['id']),
+								'open_id' => $row['open_id'] ?? '',
+								'name' => $row['name'] ?? '',
+								'phone' => $row['phone'] ?? '',
+								'card_id' => $row['card_id'] ?? '',
+								'status' => $row['status'] ?? '',
+								'expires_at' => $expiresAt,
+								'expires_text' => $expiresAt > 0 ? date('Y-m-d', $expiresAt) : '永久有效',
+								'inviter_name' => $row['inviter_name'] ?? '',
+								'inviter_department_name' => $row['inviter_department_name'] ?? ''
 							];
 						}
 						mysqli_free_result($rs);
@@ -803,6 +879,15 @@ class PostHandler {
 					$description = trim($_POST['description'] ?? '');
 					$subjectKind = $this->normalizeSubjectKind($_POST['subject_kind'] ?? 'employee');
 					$allowAll = $this->truthy($_POST['allow_all'] ?? 'false') ? 1 : 0;
+					$rolePermanent = $this->truthy($_POST['role_permanent'] ?? 'true');
+					$expiresAt = 0;
+					if (!$rolePermanent) {
+						$expiresAt = $this->parseDateEndOfDay($_POST['expires_date'] ?? '', '角色过期时间');
+						if ($expiresAt <= time()) {
+							Header("HTTP/1.1 400 Bad Request");
+							exit("角色过期时间必须晚于当前时间");
+						}
+					}
 					$members = json_decode($_POST['members'] ?? '[]', true);
 					$devices = json_decode($_POST['devices'] ?? '[]', true);
 					if (!is_array($members)) {
@@ -848,6 +933,7 @@ class PostHandler {
 						'subject_kind' => $subjectKind,
 						'allow_all' => $allowAll,
 						'builtin_key' => '',
+						'expires_at' => $expiresAt,
 						'enabled' => 1,
 						'updated_at' => $now
 					];
@@ -1258,6 +1344,97 @@ class PostHandler {
 		return Database::querySingleLine('employee', ['open_id' => $value]);
 	}
 
+	private function employeeDepartmentPathText($employee)
+	{
+		foreach ($this->employeeDepartmentIds($employee) as $departmentId) {
+			$path = $this->departmentPathById($departmentId);
+			if (count($path) > 0) {
+				return implode('/', $path);
+			}
+		}
+		$fallback = trim((string)($employee['department_name'] ?? ''));
+		return $fallback !== '' ? $fallback : '--';
+	}
+
+	private function employeeDepartmentIds($employee)
+	{
+		$ids = [];
+		$raw = $employee['department_ids'] ?? '';
+		if (is_string($raw) && trim($raw) !== '') {
+			$decoded = json_decode($raw, true);
+			if (is_array($decoded)) {
+				$raw = $decoded;
+			} else if (strpos($raw, ',') !== false) {
+				$raw = array_map('trim', explode(',', $raw));
+			}
+		}
+		if (is_array($raw)) {
+			foreach ($raw as $item) {
+				if (is_scalar($item) && trim((string)$item) !== '') {
+					$ids[] = trim((string)$item);
+				} else if (is_array($item)) {
+					foreach (['department_id', 'open_department_id', 'id'] as $key) {
+						if (!empty($item[$key])) {
+							$ids[] = trim((string)$item[$key]);
+							break;
+						}
+					}
+				}
+			}
+		}
+		if (!empty($employee['department_id'])) {
+			$ids[] = trim((string)$employee['department_id']);
+		}
+		return array_values(array_unique(array_filter($ids, function($id) {
+			return $id !== '';
+		})));
+	}
+
+	private function departmentPathById($departmentId)
+	{
+		$path = [];
+		$seen = [];
+		$department = $this->findDepartment($departmentId);
+		while (is_array($department)) {
+			$id = trim((string)($department['department_id'] ?? ''));
+			$openId = trim((string)($department['open_department_id'] ?? ''));
+			$seenKey = $id !== '' ? $id : $openId;
+			if ($seenKey !== '' && isset($seen[$seenKey])) {
+				break;
+			}
+			if ($seenKey !== '') {
+				$seen[$seenKey] = true;
+			}
+			$name = trim((string)($department['name'] ?? ''));
+			if ($name !== '') {
+				array_unshift($path, $name);
+			}
+			$parentId = trim((string)($department['parent_department_id'] ?? ''));
+			if ($parentId === '' || $parentId === '0') {
+				break;
+			}
+			$department = $this->findDepartment($parentId);
+		}
+		return $path;
+	}
+
+	private function findDepartment($departmentId)
+	{
+		static $cache = [];
+		$departmentId = trim((string)$departmentId);
+		if ($departmentId === '') {
+			return null;
+		}
+		if (array_key_exists($departmentId, $cache)) {
+			return $cache[$departmentId];
+		}
+		$escaped = Database::escape($departmentId);
+		$sql = "SELECT * FROM `feishu_departments` WHERE `department_id`='{$escaped}' OR `open_department_id`='{$escaped}' LIMIT 1";
+		$row = Database::querySingleLine('feishu_departments', $sql, true);
+		$cache[$departmentId] = is_array($row) ? $row : null;
+		return $cache[$departmentId];
+	}
+
 	private function normalizeStudentNo($value)
 	{
 		$value = trim((string)$value);
@@ -1283,6 +1460,16 @@ class PostHandler {
 			exit($label."不是有效日期");
 		}
 		return strtotime($value.' 00:00:00');
+	}
+
+	private function parseDateEndOfDay($value, $label)
+	{
+		$start = $this->parseDateInput($value, $label);
+		if ($start <= 0) {
+			Header("HTTP/1.1 400 Bad Request");
+			exit($label."不能为空");
+		}
+		return $start + 86399;
 	}
 
 	private function feishuReadableUsername($employee, $openId, $currentUserId = 0)

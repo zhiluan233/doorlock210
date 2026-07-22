@@ -11,7 +11,7 @@ namespace anim210System;
 
 class Migrator {
 
-    const SCHEMA_VERSION = '20260715';
+    const SCHEMA_VERSION = '20260722';
 
     public static function ensure()
     {
@@ -71,6 +71,7 @@ class Migrator {
             `subject_kind` varchar(20) NOT NULL DEFAULT 'employee',
             `allow_all` tinyint(1) NOT NULL DEFAULT 0,
             `builtin_key` varchar(64) NOT NULL DEFAULT '',
+            `expires_at` int unsigned NOT NULL DEFAULT 0,
             `enabled` tinyint(1) NOT NULL DEFAULT 1,
             `created_at` int unsigned NOT NULL DEFAULT 0,
             `updated_at` int unsigned NOT NULL DEFAULT 0,
@@ -238,6 +239,12 @@ class Migrator {
         self::addColumn('employee', 'updated_at', "int unsigned NOT NULL DEFAULT 0", $errors);
 
         self::addColumn('guest', 'card_id', "varchar(64) NOT NULL DEFAULT ''", $errors);
+        self::addColumn('guest', 'expires_at', "int unsigned NOT NULL DEFAULT 0", $errors);
+        self::addColumn('guest', 'inviter_open_id', "varchar(128) NOT NULL DEFAULT ''", $errors);
+        self::addColumn('guest', 'inviter_name', "varchar(255) NOT NULL DEFAULT ''", $errors);
+        self::addColumn('guest', 'inviter_department_id', "varchar(128) NOT NULL DEFAULT ''", $errors);
+        self::addColumn('guest', 'inviter_department_name', "varchar(255) NOT NULL DEFAULT ''", $errors);
+        self::addColumn('guest', 'updated_at', "int unsigned NOT NULL DEFAULT 0", $errors);
 
         self::addColumn('learner', 'student_no', "varchar(128) NOT NULL DEFAULT ''", $errors);
         self::addColumn('learner', 'name', "varchar(255) NOT NULL DEFAULT ''", $errors);
@@ -254,6 +261,7 @@ class Migrator {
 
         self::addColumn('access_roles', 'subject_kind', "varchar(20) NOT NULL DEFAULT 'employee'", $errors);
         self::addColumn('access_roles', 'builtin_key', "varchar(64) NOT NULL DEFAULT ''", $errors);
+        self::addColumn('access_roles', 'expires_at', "int unsigned NOT NULL DEFAULT 0", $errors);
         self::addColumn('access_role_members', 'member_kind', "varchar(20) NOT NULL DEFAULT 'employee'", $errors);
 
         self::addColumn('devices', 'allowedEmployee', "longtext", $errors);
@@ -274,6 +282,8 @@ class Migrator {
         self::addIndex('employee', 'idx_employee_card_id', ['card_id'], $errors);
         self::addIndex('employee', 'idx_employee_open_id', ['open_id'], $errors);
         self::addIndex('guest', 'idx_guest_card_id', ['card_id'], $errors);
+        self::addIndex('guest', 'idx_guest_expires_at', ['expires_at'], $errors);
+        self::addIndex('guest', 'idx_guest_inviter_open_id', ['inviter_open_id'], $errors);
         self::addIndex('learner', 'idx_learner_card_id', ['card_id'], $errors);
         self::addIndex('learner', 'idx_learner_status', ['status'], $errors);
         self::addIndex('learner', 'idx_learner_name', [['name' => 'name', 'length' => 191]], $errors);
@@ -285,6 +295,7 @@ class Migrator {
         self::addIndex('user', 'idx_user_open_id', ['open_id'], $errors);
         self::addIndex('access_roles', 'idx_access_role_subject', ['subject_kind'], $errors);
         self::addIndex('access_roles', 'idx_access_role_builtin', ['builtin_key'], $errors);
+        self::addIndex('access_roles', 'idx_access_role_expires_at', ['expires_at'], $errors);
         self::addIndex('access_role_members', 'idx_access_role_member_kind', ['member_kind'], $errors);
 
         self::seedDefaults();
@@ -372,8 +383,8 @@ class Migrator {
             $description = Database::escape($role['description']);
             $subjectKind = Database::escape($role['subject_kind']);
             $builtinKey = Database::escape($role['builtin_key']);
-            self::exec("INSERT INTO `access_roles` (`name`, `description`, `subject_kind`, `allow_all`, `builtin_key`, `enabled`, `created_at`, `updated_at`) SELECT '{$name}', '{$description}', '{$subjectKind}', 1, '{$builtinKey}', 1, {$now}, {$now} WHERE NOT EXISTS (SELECT 1 FROM `access_roles` WHERE `builtin_key`='{$builtinKey}' OR `name`='{$name}')", $errors);
-            self::exec("UPDATE `access_roles` SET `description`='{$description}', `subject_kind`='{$subjectKind}', `allow_all`=1, `builtin_key`='{$builtinKey}', `enabled`=1, `updated_at`={$now} WHERE `builtin_key`='{$builtinKey}' OR `name`='{$name}'", $errors);
+            self::exec("INSERT INTO `access_roles` (`name`, `description`, `subject_kind`, `allow_all`, `builtin_key`, `expires_at`, `enabled`, `created_at`, `updated_at`) SELECT '{$name}', '{$description}', '{$subjectKind}', 1, '{$builtinKey}', 0, 1, {$now}, {$now} WHERE NOT EXISTS (SELECT 1 FROM `access_roles` WHERE `builtin_key`='{$builtinKey}' OR `name`='{$name}')", $errors);
+            self::exec("UPDATE `access_roles` SET `description`='{$description}', `subject_kind`='{$subjectKind}', `allow_all`=1, `builtin_key`='{$builtinKey}', `expires_at`=0, `enabled`=1, `updated_at`={$now} WHERE `builtin_key`='{$builtinKey}' OR `name`='{$name}'", $errors);
         }
     }
 

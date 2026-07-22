@@ -50,9 +50,10 @@ function doorcontrolAllScopeLabel($value) {
 $devices = fetchAssocRows('SELECT * FROM `devices` ORDER BY `id` ASC', 'devices');
 $employeesRaw = fetchAssocRows("SELECT * FROM `employee` WHERE `status`='true' ORDER BY `name` ASC", 'employee');
 $learnersRaw = fetchAssocRows("SELECT * FROM `learner` WHERE `status`='true' ORDER BY `name` ASC", 'learner');
-$guestsRaw = fetchAssocRows("SELECT * FROM `guest` WHERE `status`='true' ORDER BY `name` ASC", 'guest');
+$now = time();
+$guestsRaw = fetchAssocRows("SELECT * FROM `guest` WHERE `status`='true' AND (`expires_at`=0 OR `expires_at`>={$now}) ORDER BY `name` ASC", 'guest');
 $departmentsRaw = fetchAssocRows("SELECT * FROM `feishu_departments` WHERE `status`='active' ORDER BY `name` ASC, `department_id` ASC", 'feishu_departments');
-$rolesRaw = fetchAssocRows("SELECT r.*, (SELECT COUNT(*) FROM `access_role_members` m WHERE m.`role_id`=r.`id`) AS member_count FROM `access_roles` r WHERE r.`enabled`=1 ORDER BY r.`id` ASC", 'access_roles');
+$rolesRaw = fetchAssocRows("SELECT r.*, (SELECT COUNT(*) FROM `access_role_members` m WHERE m.`role_id`=r.`id`) AS member_count FROM `access_roles` r WHERE r.`enabled`=1 AND (r.`expires_at`=0 OR r.`expires_at`>={$now}) ORDER BY r.`id` ASC", 'access_roles');
 $policiesRaw = fetchAssocRows('SELECT * FROM `access_policies` WHERE `enabled`=1 ORDER BY `id` ASC', 'access_policies');
 
 $employees = [];
