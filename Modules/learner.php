@@ -49,6 +49,7 @@ if ($learnerRs && $learnerRs instanceof \mysqli_result) {
 				<div class="panel-body" style="font-weight: 400;overflow-x: auto;">
 					<h4 style="font-weight: 400">学员管理</h4><br>
 					<button class="btn btn-default" onclick="openLearnerDialog()">添加学员</button>
+					<button class="btn btn-default" style="margin-left: 8px;" onclick="openLearnerImportDialog()">从文件导入</button>
 					<table id="learner1" class="table table-bordered table-auto" data-toggle="table" data-pagination="true" data-page-size="10" data-page-list="[5, 10, 20, 30, 50, 'All']" data-sortable="true" data-search="true" style="clear: both;margin-top: 20px;">
 						<thead>
 							<tr>
@@ -165,6 +166,37 @@ if ($learnerRs && $learnerRs instanceof \mysqli_result) {
 	</div>
 </script>
 
+<script type="text/html" id="learnerImportDialogTpl">
+	<div class="layui-form layui-form-pane" style="padding: 20px;">
+		<div class="learner-import-note">
+			仅支持使用系统模板填写后的 .xlsx 文件。第一行提示和第二行表头不得修改，第三行开始填写学员数据；任意一行校验失败时，本次导入不会写入数据库。
+		</div>
+		<div class="learner-import-panel">
+			<a class="learner-import-template" href="/templates/learner_import_template.xlsx" download>
+				<span>下载导入模板</span>
+				<small>学号、姓名、花名必填；已存在学号会自动跳过</small>
+			</a>
+		</div>
+		<div class="layui-form-item">
+			<label class="layui-form-label">Excel文件</label>
+			<div class="layui-input-block">
+				<input type="file" id="learner_import_file" class="layui-input" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">
+			</div>
+		</div>
+		<div class="learner-import-progress-wrap">
+			<div class="layui-progress layui-progress-big" lay-filter="learnerImportProgress" lay-showPercent="true">
+				<div class="layui-progress-bar" lay-percent="0%"></div>
+			</div>
+		</div>
+		<div id="learner_import_result" class="learner-import-result"></div>
+		<div class="layui-form-item">
+			<div class="layui-input-block card-dialog-actions">
+				<button class="layui-btn" type="button" onclick="submitLearnerImport()">开始导入</button>
+			</div>
+		</div>
+	</div>
+</script>
+
 <script type="text/html" id="learnerCardDialogTpl">
 	<div class="layui-form layui-form-pane" style="padding: 20px;">
 		<input type="hidden" id="learner_card_id">
@@ -200,14 +232,74 @@ if ($learnerRs && $learnerRs instanceof \mysqli_result) {
 		margin-left: 0;
 		margin-right: 0;
 	}
+	.learner-import-note {
+		margin-bottom: 14px;
+		padding: 10px 12px;
+		border-radius: 8px;
+		background: #f8fafc;
+		color: #667085;
+		line-height: 1.6;
+	}
+	.learner-import-panel {
+		margin-bottom: 14px;
+	}
+	.learner-import-template {
+		display: block;
+		padding: 12px 14px;
+		border: 1px solid #e4e7ec;
+		border-radius: 8px;
+		background: #ffffff;
+		color: #253858;
+		text-decoration: none;
+	}
+	.learner-import-template:hover {
+		border-color: #13B887;
+		color: #13B887;
+		text-decoration: none;
+	}
+	.learner-import-template span {
+		display: block;
+		font-size: 14px;
+		line-height: 1.4;
+	}
+	.learner-import-template small {
+		display: block;
+		margin-top: 4px;
+		color: #98a2b3;
+		font-size: 12px;
+		line-height: 1.4;
+	}
+	.learner-import-progress-wrap {
+		margin: 16px 0 18px 110px;
+	}
+	.learner-import-result {
+		display: none;
+		max-height: 128px;
+		margin: 0 0 14px 110px;
+		padding: 10px 12px;
+		overflow: auto;
+		border-radius: 8px;
+		background: #f6ffed;
+		color: #135200;
+		line-height: 1.6;
+		white-space: normal;
+		word-break: break-word;
+	}
+	@media (max-width: 600px) {
+		.learner-import-progress-wrap,
+		.learner-import-result {
+			margin-left: 0;
+		}
+	}
 </style>
 <script>
 var csrf_token = "<?php echo $_SESSION['token']; ?>";
 var learnerData = <?php echo json_encode($learnerData, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
 
-layui.use(['layer', 'form'], function(){
+layui.use(['layer', 'form', 'element'], function(){
 	var layer = layui.layer;
 	var form = layui.form;
+	var element = layui.element;
 
 	function findLearner(id) {
 		for (var i = 0; i < learnerData.length; i++) {
@@ -298,6 +390,103 @@ layui.use(['layer', 'form'], function(){
 			}
 		});
 	};
+
+	window.openLearnerImportDialog = function() {
+		var dialogWidth = Math.min(540, Math.max(320, window.innerWidth - 32));
+		layer.open({
+			type: 1,
+			title: '导入学员Excel',
+			content: $('#learnerImportDialogTpl').html(),
+			area: [dialogWidth + 'px', '430px'],
+			success: function() {
+				setLearnerImportProgress(0);
+				form.render();
+				element.render('progress');
+			}
+		});
+	};
+
+	window.submitLearnerImport = function() {
+		var fileInput = document.getElementById('learner_import_file');
+		if (!fileInput || !fileInput.files || !fileInput.files.length) {
+			notifyError('请选择要导入的Excel文件');
+			return;
+		}
+		var file = fileInput.files[0];
+		if (!/\.xlsx$/i.test(file.name || '')) {
+			notifyError('仅支持 .xlsx 文件');
+			return;
+		}
+		var data = new FormData();
+		data.append('learner_excel', file);
+		setLearnerImportProgress(5);
+		$('#learner_import_result').hide().html('');
+		var loading = layer.load(2);
+		var htmlobj = $.ajax({
+			type: 'POST',
+			url: '?action=importLearners&page=panel&module=learner&csrf=' + csrf_token,
+			data: data,
+			processData: false,
+			contentType: false,
+			xhr: function() {
+				var xhr = $.ajaxSettings.xhr();
+				if (xhr.upload) {
+					xhr.upload.addEventListener('progress', function(evt) {
+						if (!evt.lengthComputable) {
+							return;
+						}
+						var percent = Math.round((evt.loaded / evt.total) * 60) + 10;
+						setLearnerImportProgress(Math.min(70, percent));
+					}, false);
+				}
+				return xhr;
+			},
+			success: function(resp) {
+				layer.close(loading);
+				setLearnerImportProgress(100);
+				showLearnerImportResult(resp);
+				layer.alert(escapeHtml(resp).replace(/\n/g, '<br>'), {title: '导入结果'}, function(index) {
+					layer.close(index);
+					location.reload();
+				});
+			},
+			error: function() {
+				layer.close(loading);
+				setLearnerImportProgress(0);
+				showLearnerImportResult('错误：' + htmlobj.responseText, true);
+				notifyError('错误：' + htmlobj.responseText);
+			}
+		});
+	};
+
+	function setLearnerImportProgress(percent) {
+		percent = Math.max(0, Math.min(100, parseInt(percent || 0, 10)));
+		if (element && element.progress) {
+			element.progress('learnerImportProgress', percent + '%');
+		}
+	}
+
+	function showLearnerImportResult(message, isError) {
+		$('#learner_import_result')
+			.css({
+				background: isError ? '#fff2f0' : '#f6ffed',
+				color: isError ? '#a8071a' : '#135200'
+			})
+			.html(escapeHtml(message).replace(/\n/g, '<br>'))
+			.show();
+	}
+
+	function escapeHtml(value) {
+		return String(value || '').replace(/[&<>"']/g, function(ch) {
+			return ({
+				'&': '&amp;',
+				'<': '&lt;',
+				'>': '&gt;',
+				'"': '&quot;',
+				"'": '&#39;'
+			})[ch];
+		});
+	}
 
 	function todayDateInput() {
 		var now = new Date();

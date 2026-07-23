@@ -360,6 +360,40 @@ class PostHandler {
 					Header("HTTP/1.1 500 Internal Error");
 					exit("学员资料保存失败：".$result);
 				break;
+				case "importLearners":
+					$this->requireAdminUser();
+					require_once(ROOT . "/Core/SimpleXlsxReader.php");
+					if (!isset($_FILES['learner_excel']) || !is_array($_FILES['learner_excel'])) {
+						Header("HTTP/1.1 400 Bad Request");
+						exit("请选择要导入的Excel文件");
+					}
+					$file = $_FILES['learner_excel'];
+					if (intval($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+						Header("HTTP/1.1 400 Bad Request");
+						exit("Excel上传失败：".$this->uploadErrorText(intval($file['error'] ?? UPLOAD_ERR_NO_FILE)));
+					}
+					$filename = (string)($file['name'] ?? '');
+					if (strtolower(pathinfo($filename, PATHINFO_EXTENSION)) !== 'xlsx') {
+						Header("HTTP/1.1 400 Bad Request");
+						exit("仅支持导入 .xlsx 格式Excel文件");
+					}
+					if (intval($file['size'] ?? 0) <= 0 || intval($file['size'] ?? 0) > 5 * 1024 * 1024) {
+						Header("HTTP/1.1 400 Bad Request");
+						exit("Excel文件大小必须在5MB以内");
+					}
+					try {
+						$rows = SimpleXlsxReader::readFirstSheet($file['tmp_name']);
+						$result = $this->importLearnersFromRows($rows);
+						$message = "学员导入完成：新增 {$result['created']} 人，跳过 {$result['skipped']} 人";
+						if (!empty($result['skipped_messages'])) {
+							$message .= "\n" . implode("\n", $result['skipped_messages']);
+						}
+						exit($message);
+					} catch (\Throwable $e) {
+						Header("HTTP/1.1 400 Bad Request");
+						exit("学员导入失败：".$e->getMessage());
+					}
+				break;
 				case "setLearnerStatus":
 					$this->requireAdminUser();
 					$id = intval($_POST['id'] ?? 0);
@@ -1470,6 +1504,217 @@ class PostHandler {
 			exit($label."不能为空");
 		}
 		return $start + 86399;
+	}
+
+	private function learnerImportPrompt()
+	{
+		return '填写说明：第三行开始填写数据；不得修改本提示内容和第二行表头；学号、姓名、花名必填；手机号、班级、培养中心、入学时间、备注可留空；入学时间格式为YYYY-MM-DD；学号已存在时本条会跳过，请在系统中编辑已有学员。';
+	}
+
+	private function learnerImportHeaders()
+	{
+		return ['学号', '姓名', '花名', '手机号', '班级', '培养中心', '入学时间', '备注'];
+	}
+
+	private function importLearnersFromRows($rows)
+	{
+		if (!is_array($rows) || count($rows) < 2) {
+			throw new \RuntimeException('Excel内容为空或缺少表头');
+		}
+		$prompt = trim((string)($rows[1][1] ?? ''));
+		if ($prompt !== $this->learnerImportPrompt()) {
+			throw new \RuntimeException('第一行填写说明已被修改，请重新下载模板填写');
+		}
+		$headers = $this->learnerImportHeaders();
+		foreach ($headers as $index => $header) {
+			$value = trim((string)($rows[2][$index + 1] ?? ''));
+			if ($value !== $header) {
+				throw new \RuntimeException('第二行表头不正确，'.self::columnName($index + 1).'2 应为“'.$header.'”');
+			}
+		}
+
+		$maxRow = max(array_keys($rows));
+		$records = [];
+		$studentNoRows = [];
+		for ($rowIndex = 3; $rowIndex <= $maxRow; $rowIndex++) {
+			$row = $rows[$rowIndex] ?? [];
+			if ($this->learnerImportRowEmpty($row, count($headers))) {
+				continue;
+			}
+			$raw = [];
+			foreach ($headers as $index => $header) {
+				$raw[$header] = trim((string)($row[$index + 1] ?? ''));
+			}
+			$record = $this->normalizeLearnerImportRow($raw, $rowIndex);
+			if (isset($studentNoRows[$record['student_no']])) {
+				throw new \RuntimeException('第'.$rowIndex.'行：学号与第'.$studentNoRows[$record['student_no']].'行重复');
+			}
+			$studentNoRows[$record['student_no']] = $rowIndex;
+			$records[] = $record;
+		}
+		if (count($records) === 0) {
+			throw new \RuntimeException('没有可导入的数据，第三行开始至少填写一名学员');
+		}
+
+		return $this->writeLearnerImportRecords($records);
+	}
+
+	private function normalizeLearnerImportRow($raw, $rowIndex)
+	{
+		$studentNo = $this->normalizeStudentNo($raw['学号'] ?? '');
+		$realname = trim((string)($raw['姓名'] ?? ''));
+		$name = trim((string)($raw['花名'] ?? ''));
+		$mobile = trim((string)($raw['手机号'] ?? ''));
+		$className = trim((string)($raw['班级'] ?? ''));
+		$trainingCenter = trim((string)($raw['培养中心'] ?? ''));
+		$enrolledRaw = trim((string)($raw['入学时间'] ?? ''));
+		$remark = trim((string)($raw['备注'] ?? ''));
+
+		if ($studentNo === '') {
+			throw new \RuntimeException('第'.$rowIndex.'行：学号必填，且只能包含字母、数字、下划线和中划线，长度1-64位');
+		}
+		if ($realname === '') {
+			throw new \RuntimeException('第'.$rowIndex.'行：姓名必填');
+		}
+		if ($name === '') {
+			throw new \RuntimeException('第'.$rowIndex.'行：花名必填');
+		}
+		if ($mobile !== '' && !preg_match('/^[0-9\+\-\s]{1,32}$/', $mobile)) {
+			throw new \RuntimeException('第'.$rowIndex.'行：手机号格式不合法');
+		}
+		if ($this->utf8Length($name) > 100 || $this->utf8Length($realname) > 100 || strlen($mobile) > 32 || $this->utf8Length($className) > 100 || $this->utf8Length($trainingCenter) > 100 || $this->utf8Length($remark) > 200) {
+			throw new \RuntimeException('第'.$rowIndex.'行：花名、姓名、手机号、班级、培养中心或备注过长');
+		}
+
+		return [
+			'row' => $rowIndex,
+			'student_no' => $studentNo,
+			'realname' => $realname,
+			'name' => $name,
+			'mobile' => $mobile,
+			'class_name' => $className,
+			'training_center' => $trainingCenter,
+			'has_enrolled_at' => $enrolledRaw !== '',
+			'enrolled_at' => $this->parseLearnerImportDate($enrolledRaw, '入学时间', $rowIndex, false),
+			'remark' => $remark
+		];
+	}
+
+	private function writeLearnerImportRecords($records)
+	{
+		global $conn;
+		if (!$conn) {
+			throw new \RuntimeException('数据库未连接');
+		}
+		$created = 0;
+		$skipped = 0;
+		$skippedMessages = [];
+		$now = time();
+		mysqli_begin_transaction($conn);
+		try {
+			foreach ($records as $record) {
+				$existing = Database::querySingleLine('learner', ['student_no' => $record['student_no']]);
+				if ($existing) {
+					$skipped++;
+					$skippedMessages[] = '学号'.$record['student_no'].' '.$record['name'].'（'.$record['realname'].'） 已存在，本条跳过，如果需要编辑该学员信息，请直接在系统中编辑';
+					continue;
+				}
+				$data = [
+					'student_no' => $record['student_no'],
+					'name' => $record['name'],
+					'realname' => $record['realname'],
+					'mobile' => $record['mobile'],
+					'class_name' => $record['class_name'],
+					'training_center' => $record['training_center'],
+					'remark' => $record['remark'],
+					'enrolled_at' => intval($record['enrolled_at']) > 0 ? intval($record['enrolled_at']) : strtotime(date('Y-m-d')),
+					'card_id' => '',
+					'status' => 'true',
+					'updated_at' => $now,
+					'id' => null,
+					'created_at' => $now
+				];
+				$result = Database::insert('learner', $data);
+				$created++;
+				if ($result !== true) {
+					throw new \RuntimeException('第'.$record['row'].'行：数据库写入失败：'.$result);
+				}
+			}
+			mysqli_commit($conn);
+		} catch (\Throwable $e) {
+			mysqli_rollback($conn);
+			throw $e;
+		}
+
+		return [
+			'created' => $created,
+			'skipped' => $skipped,
+			'skipped_messages' => $skippedMessages
+		];
+	}
+
+	private function parseLearnerImportDate($value, $label, $rowIndex, $allowTime)
+	{
+		$value = trim((string)$value);
+		if ($value === '') {
+			return 0;
+		}
+		if (is_numeric($value) && floatval($value) > 20000 && floatval($value) < 60000) {
+			$seconds = intval(round((floatval($value) - 25569) * 86400));
+			return strtotime(gmdate($allowTime ? 'Y-m-d H:i:s' : 'Y-m-d', $seconds));
+		}
+		$value = str_replace(['年', '月', '日', '/', '.'], ['-', '-', '', '-', '-'], $value);
+		if (!preg_match('/^(\d{4})-(\d{1,2})-(\d{1,2})(?:\s+(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?$/', $value, $matches)) {
+			throw new \RuntimeException('第'.$rowIndex.'行：'.$label.'格式必须是YYYY-MM-DD'.($allowTime ? '或YYYY-MM-DD HH:MM:SS' : ''));
+		}
+		$year = intval($matches[1]);
+		$month = intval($matches[2]);
+		$day = intval($matches[3]);
+		$hour = intval($matches[4] ?? 0);
+		$minute = intval($matches[5] ?? 0);
+		$second = intval($matches[6] ?? 0);
+		if (!$allowTime && isset($matches[4]) && $matches[4] !== '') {
+			throw new \RuntimeException('第'.$rowIndex.'行：'.$label.'只需要填写日期');
+		}
+		if (!checkdate($month, $day, $year) || $hour > 23 || $minute > 59 || $second > 59) {
+			throw new \RuntimeException('第'.$rowIndex.'行：'.$label.'不是有效日期');
+		}
+		return strtotime(sprintf('%04d-%02d-%02d %02d:%02d:%02d', $year, $month, $day, $hour, $minute, $second));
+	}
+
+	private function learnerImportRowEmpty($row, $columnCount)
+	{
+		for ($i = 1; $i <= $columnCount; $i++) {
+			if (trim((string)($row[$i] ?? '')) !== '') {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	private static function columnName($index)
+	{
+		$name = '';
+		while ($index > 0) {
+			$index--;
+			$name = chr(65 + ($index % 26)) . $name;
+			$index = intval($index / 26);
+		}
+		return $name;
+	}
+
+	private function uploadErrorText($code)
+	{
+		$map = [
+			UPLOAD_ERR_INI_SIZE => '文件超过服务器限制',
+			UPLOAD_ERR_FORM_SIZE => '文件超过表单限制',
+			UPLOAD_ERR_PARTIAL => '文件只上传了一部分',
+			UPLOAD_ERR_NO_FILE => '未选择文件',
+			UPLOAD_ERR_NO_TMP_DIR => '服务器缺少临时目录',
+			UPLOAD_ERR_CANT_WRITE => '服务器无法写入临时文件',
+			UPLOAD_ERR_EXTENSION => '上传被服务器扩展阻止'
+		];
+		return $map[$code] ?? '未知错误';
 	}
 
 	private function feishuReadableUsername($employee, $openId, $currentUserId = 0)

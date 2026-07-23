@@ -156,6 +156,7 @@ class OperationLog {
             'deleteuser' => '删除本地管理员',
             'createguest' => '创建访客',
             'saveLearner' => '保存学员',
+            'importLearners' => '导入学员Excel',
             'setLearnerStatus' => '切换学员状态',
             'deleteLearner' => '删除学员',
             'submitcard' => '发卡',
@@ -225,6 +226,14 @@ class OperationLog {
                 $name = (string)(($_POST['name'] ?? '') ?: ($learner['name'] ?? ''));
                 $descriptor = self::withTarget($descriptor, 'learner', ($_POST['student_no'] ?? ($_POST['id'] ?? '')), $name);
                 $descriptor['detail'] = (intval($_POST['id'] ?? 0) > 0 ? '编辑学员 ' : '创建学员 ') . self::limit($name, 80);
+                break;
+            case 'importLearners':
+                $filename = '';
+                if (isset($_FILES['learner_excel']) && is_array($_FILES['learner_excel'])) {
+                    $filename = (string)($_FILES['learner_excel']['name'] ?? '');
+                }
+                $descriptor = self::withTarget($descriptor, 'learner_import', $filename, $filename);
+                $descriptor['detail'] = '导入学员Excel' . ($filename !== '' ? '：' . self::limit($filename, 120) : '');
                 break;
             case 'setLearnerStatus':
             case 'deleteLearner':
