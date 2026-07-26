@@ -116,6 +116,38 @@ $mainSQL = 'SELECT * FROM `devices`';
 $countSQL = 'SELECT count(*) FROM `devices`';
 $deviceData = Database::query("devices", $mainSQL, true);
 $countData = Database::query("devices", $countSQL, true);
+$deviceRows = [];
+$deviceAdvancedData = [];
+if ($deviceData instanceof \mysqli_result) {
+	while ($row = mysqli_fetch_assoc($deviceData)) {
+		$summary = class_exists(__NAMESPACE__ . '\\DeviceCardSync') ? DeviceCardSync::pendingSummary($row['id']) : ['pending' => 0, 'failed' => 0, 'running' => 0];
+		$row['local_card_pending'] = intval($summary['pending'] ?? 0);
+		$row['local_card_failed'] = intval($summary['failed'] ?? 0);
+		$row['local_card_running'] = intval($summary['running'] ?? 0);
+		$deviceRows[] = $row;
+		$deviceAdvancedData[intval($row['id'])] = [
+			'id' => intval($row['id']),
+			'name' => $row['name'] ?? '',
+			'did' => $row['did'] ?? '',
+			'serial' => $row['serial'] ?? '',
+			'model' => $row['model'] ?? '',
+			'controller_type' => $row['controller_type'] ?? '',
+			'controller_type_text' => deviceoptControllerTypeLabel($row['controller_type'] ?? ''),
+			'oemcode' => $row['oemcode'] ?? '',
+			'ip' => $row['ip'] ?? '',
+			'mac' => $row['mac'] ?? '',
+			'hbtime' => $row['hbtime'] ?? '',
+			'apikey' => $row['apikey'] ?? '',
+			'local_card_enabled' => intval($row['local_card_enabled'] ?? 0),
+			'local_card_last_full_at' => intval($row['local_card_last_full_at'] ?? 0),
+			'local_card_last_sync_at' => intval($row['local_card_last_sync_at'] ?? 0),
+			'local_card_sync_message' => $row['local_card_sync_message'] ?? '',
+			'local_card_pending' => intval($summary['pending'] ?? 0),
+			'local_card_failed' => intval($summary['failed'] ?? 0),
+			'local_card_running' => intval($summary['running'] ?? 0)
+		];
+	}
+}
 
 ?>
 <div class="page-title">
@@ -139,8 +171,6 @@ $countData = Database::query("devices", $countSQL, true);
 								<th>Serial（序列号）</th>
 								<th>Model（型号）</th>
 								<th>控制器类型</th>
-								<th>端侧卡库</th>
-								<th>卡库同步</th>
 								<th>OEM代码</th>
 								<th>IP</th>
 								<th>MAC</th>
@@ -151,8 +181,7 @@ $countData = Database::query("devices", $countSQL, true);
                         </thead>
 						<tbody>
 							<?php
-                                foreach ($deviceData as $dData) {
-									$localCardEnabled = intval($dData['local_card_enabled'] ?? 0) === 1;
+                                foreach ($deviceRows as $dData) {
                                     echo "<tr>
                                     <td>".deviceoptH($dData['id'])."</td>
                                     <td>".deviceoptH($dData['name'])."</td>
@@ -160,14 +189,12 @@ $countData = Database::query("devices", $countSQL, true);
 									<td>".deviceoptH($dData['serial'] ?? '')."</td>
 									<td>".deviceoptH($dData['model'] ?? '')."</td>
 									<td>".deviceoptH(deviceoptControllerTypeLabel($dData['controller_type'] ?? ''))."</td>
-									<td><input type=\"checkbox\" lay-skin=\"switch\" lay-text=\"启用|关闭\" lay-filter=\"localCardSwitch\" data-device-id=\"".intval($dData['id'])."\" ".($localCardEnabled ? 'checked' : '')."></td>
-									<td style=\"min-width:220px;\">".deviceoptLocalCardSummary($dData)."</td>
 									<td>".deviceoptH($dData['oemcode'])."</td>
 									<td>".deviceoptH($dData['ip'])."</td>
 									<td>".deviceoptH($dData['mac'])."</td>
 									<td>".deviceoptH($dData['hbtime'])."</td>
 									<td>".deviceoptH($dData['apikey'])."</td>
-                                    <td><button class=\"btn btn-default\" onclick=\"syncDeviceCards(".intval($dData['id']).")\">同步卡库</button>&nbsp;<button class=\"btn btn-default\" onclick=\"deleteDevice(".intval($dData['id']).")\">删除</button></td>
+                                    <td><button class=\"btn btn-default\" onclick=\"openDeviceAdvanced(".intval($dData['id']).")\">高级</button>&nbsp;<button class=\"btn btn-default\" onclick=\"deleteDevice(".intval($dData['id']).")\">删除</button></td>
                                     </tr>";
                                 }
                             ?>
@@ -212,18 +239,113 @@ $countData = Database::query("devices", $countSQL, true);
 </script>
 <script type="text/javascript" src="/asset/js/md5.js"></script>
 <script src="asset/layui/layui.js"></script>
+<style>
+	.device-advanced-wrap {
+		padding: 20px;
+	}
+	.device-advanced-grid {
+		display: grid;
+		grid-template-columns: 110px minmax(0, 1fr);
+		gap: 10px 14px;
+		margin-bottom: 18px;
+		color: #3f4a56;
+	}
+	.device-advanced-grid dt {
+		color: #6b7785;
+		font-weight: 400;
+	}
+	.device-advanced-grid dd {
+		margin: 0;
+		min-width: 0;
+		word-break: break-word;
+	}
+	.device-advanced-section {
+		border-top: 1px solid #edf0f2;
+		padding-top: 16px;
+		margin-top: 14px;
+	}
+	.device-advanced-actions {
+		display: flex;
+		gap: 10px;
+		justify-content: flex-end;
+		margin-top: 18px;
+	}
+</style>
 <script>
   var deviceid;
   var devicename;
+  var deviceAdvancedData = <?php echo json_encode($deviceAdvancedData, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
   layui.use(['layer', 'form'], function() {
     var layer = layui.layer;
     var form = layui.form;
 	form.render();
 
-	form.on('switch(localCardSwitch)', function(data) {
+	form.on('switch(advancedLocalCardSwitch)', function(data) {
 		var deviceId = $(data.elem).data('device-id');
 		setDeviceLocalCard(deviceId, data.elem.checked ? 1 : 0, data.elem);
 	});
+
+	function escapeHtml(text) {
+		return String(text || '').replace(/[&<>"']/g, function(s) {
+			return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[s];
+		});
+	}
+
+	function formatDeviceTimestamp(value) {
+		value = parseInt(value || 0, 10);
+		if (!value) {
+			return '暂无';
+		}
+		var date = new Date(value * 1000);
+		var pad = function(num) {
+			return String(num).length === 1 ? '0' + num : String(num);
+		};
+		return date.getFullYear() + '-' + pad(date.getMonth() + 1) + '-' + pad(date.getDate()) + ' ' + pad(date.getHours()) + ':' + pad(date.getMinutes()) + ':' + pad(date.getSeconds());
+	}
+
+	function openDeviceAdvanced(id) {
+		var device = deviceAdvancedData[id];
+		if (!device) {
+			layer.msg('设备数据不存在，请刷新页面后重试');
+			return;
+		}
+		var enabled = parseInt(device.local_card_enabled || 0, 10) === 1;
+		var html = '<div class="layui-form layui-form-pane device-advanced-wrap">'
+			+ '<dl class="device-advanced-grid">'
+			+ '<dt>设备名</dt><dd>' + escapeHtml(device.name) + '</dd>'
+			+ '<dt>控制器类型</dt><dd>' + escapeHtml(device.controller_type_text || '待心跳识别') + '</dd>'
+			+ '<dt>Serial</dt><dd>' + escapeHtml(device.serial || device.did || '--') + '</dd>'
+			+ '<dt>Model</dt><dd>' + escapeHtml(device.model || '--') + '</dd>'
+			+ '<dt>IP</dt><dd>' + escapeHtml(device.ip || '--') + '</dd>'
+			+ '<dt>最后心跳</dt><dd>' + escapeHtml(device.hbtime || '--') + '</dd>'
+			+ '</dl>'
+			+ '<div class="device-advanced-section">'
+			+ '<div class="layui-form-item">'
+			+ '<label class="layui-form-label">端侧卡库</label>'
+			+ '<div class="layui-input-block"><input type="checkbox" lay-skin="switch" lay-text="启用|关闭" lay-filter="advancedLocalCardSwitch" data-device-id="' + parseInt(device.id, 10) + '" ' + (enabled ? 'checked' : '') + '></div>'
+			+ '</div>'
+			+ '<dl class="device-advanced-grid">'
+			+ '<dt>最近全量</dt><dd>' + escapeHtml(formatDeviceTimestamp(device.local_card_last_full_at)) + '</dd>'
+			+ '<dt>最近下发</dt><dd>' + escapeHtml(formatDeviceTimestamp(device.local_card_last_sync_at)) + '</dd>'
+			+ '<dt>队列状态</dt><dd>待下发 ' + parseInt(device.local_card_pending || 0, 10) + '，失败 ' + parseInt(device.local_card_failed || 0, 10) + '，执行中 ' + parseInt(device.local_card_running || 0, 10) + '</dd>'
+			+ '<dt>最近消息</dt><dd>' + escapeHtml(device.local_card_sync_message || '暂无') + '</dd>'
+			+ '</dl>'
+			+ '</div>'
+			+ '<div class="device-advanced-actions">'
+			+ '<button type="button" class="layui-btn layui-btn-normal" onclick="syncDeviceCards(' + parseInt(device.id, 10) + ')">同步卡库</button>'
+			+ '<button type="button" class="layui-btn layui-btn-primary" onclick="layui.layer.closeAll()">关闭</button>'
+			+ '</div>'
+			+ '</div>';
+		layer.open({
+			type: 1,
+			title: '高级设置 - ' + escapeHtml(device.name || id),
+			content: html,
+			area: ['560px', '520px'],
+			success: function() {
+				form.render('checkbox');
+			}
+		});
+	}
 
 	function deleteDevice(id) {
 		var htmlobj = $.ajax({
@@ -366,6 +488,7 @@ $countData = Database::query("devices", $countSQL, true);
 	// global
 	window.deleteDevice = deleteDevice;
 	window.addNewDevice = addNewDevice;
+	window.openDeviceAdvanced = openDeviceAdvanced;
 	window.closeDialog = closeDialog;
 	window.addDevice = addDevice;
 	window.syncDeviceCards = syncDeviceCards;
