@@ -380,7 +380,7 @@ class DeviceCardSync {
 
     private static function displayName($kind, $subject)
     {
-        $prefix = $kind === 'employee' ? '员' : ($kind === 'learner' ? '学' : '访');
+        $prefix = $kind === 'employee' ? '员工-' : ($kind === 'learner' ? '学员-' : '访客-');
         $name = trim((string)($subject['name'] ?? ''));
         if ($name === '' && $kind === 'learner') {
             $name = trim((string)($subject['realname'] ?? ''));
