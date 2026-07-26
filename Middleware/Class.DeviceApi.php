@@ -42,6 +42,7 @@ class deviceApi {
                     $key = $this->heartbeatKey($devicePayload, $requestContext);
                     $oem = $this->payloadValue($devicePayload, ['OEM', 'oem']);
                     $model = $this->payloadValue($devicePayload, ['Model', 'model']);
+                    $controllerType = $this->detectControllerType($requestContext, $devicePayload);
                     if ($serial !== '' && $ip !== '' && $mac !== '' && $now !== '') {
                         if (empty($_SERVER['REMOTE_ADDR'])) {
                             http_response_code(403);
@@ -64,6 +65,9 @@ class deviceApi {
                         $this->addDeviceUpdateField($updatedata, 'serial', $serial);
                         if ($model !== '') {
                             $this->addDeviceUpdateField($updatedata, 'model', $model);
+                        }
+                        if ($controllerType !== '') {
+                            $this->addDeviceUpdateField($updatedata, 'controller_type', $controllerType);
                         }
                         if ($key !== '') {
                             $updatedata["apikey"] = $key;
@@ -285,20 +289,26 @@ class deviceApi {
     {
         global $_config;
 
-        $historyResponse = $this->historyCardResponse($payload, $requestContext);
-        if ($historyResponse !== null) {
-            return $historyResponse;
+        $eventAck = $this->cardEventAckFields($payload, $requestContext);
+        if ($this->isHistoryOnlyCardEvent($payload, $requestContext, $eventAck)) {
+            return $eventAck;
         }
 
-        return [
-            'ActIndex' => '0',
+        $response = [
+            'ActIndex' => $this->cardActionIndex($payload, $requestContext),
             'AcsRes' => (string)$acsRes,
             'Time' => (string)$_config['doorOpenTime'],
             'OEM' => (string)($deviceInfo['oemcode'] ?? '')
         ];
+
+        if ($eventAck !== null) {
+            $response = array_merge($response, $eventAck);
+        }
+
+        return $response;
     }
 
-    private function historyCardResponse($payload, $requestContext)
+    private function cardEventAckFields($payload, $requestContext)
     {
         $type = $this->payloadValue($payload, ['type', 'Type']);
         $indexAlarm = $this->payloadValue($payload, ['IndexAlarm', 'indexAlarm', 'index_alarm']);
@@ -325,9 +335,62 @@ class deviceApi {
         return null;
     }
 
+    private function isHistoryOnlyCardEvent($payload, $requestContext, $eventAck)
+    {
+        if ($eventAck === null) {
+            return false;
+        }
+
+        $type = $this->payloadValue($payload, ['type', 'Type']);
+        if ($type === '100' || $type === '101') {
+            return true;
+        }
+
+        if (empty($requestContext['wrapped']) || strtolower((string)($requestContext['method'] ?? '')) !== 'cardevent') {
+            return false;
+        }
+
+        $eventCount = $this->payloadValue($payload, ['Count', 'count', 'EventCnt', 'eventCnt', 'event_cnt']);
+        if ($eventCount !== '' && ctype_digit($eventCount) && intval($eventCount) > 1) {
+            return true;
+        }
+
+        $eventTime = $this->payloadValue($payload, ['Time', 'time', 'Now', 'now']);
+        if ($eventTime !== '') {
+            return abs(time() - $this->deviceEventTimestamp($eventTime)) > 180;
+        }
+
+        return false;
+    }
+
+    private function cardActionIndex($payload, $requestContext)
+    {
+        if (!empty($requestContext['wrapped']) && strtolower((string)($requestContext['method'] ?? '')) === 'cardevent') {
+            $door = $this->payloadValue($payload, ['Door', 'door']);
+            if ($door !== '' && ctype_digit($door)) {
+                return (string)max(0, intval($door) - 1);
+            }
+        }
+        return '0';
+    }
+
     private function isValidEventIndex($index)
     {
         return $index !== '' && preg_match('/^[0-9]{1,10}$/', (string)$index);
+    }
+
+    private function detectControllerType($requestContext, $payload)
+    {
+        if (!empty($requestContext['wrapped'])) {
+            return 'single_door';
+        }
+
+        $model = strtolower($this->payloadValue($payload, ['Model', 'model']));
+        if ($model !== '' && (strpos($model, 'g-1000') !== false || strpos($model, 'single') !== false || strpos($model, 'd110') !== false)) {
+            return 'single_door';
+        }
+
+        return 'cloud_plus';
     }
 
     private function addDeviceUpdateField(&$updatedata, $column, $value)

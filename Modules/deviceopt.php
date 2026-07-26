@@ -21,6 +21,18 @@ function deviceoptH($value)
 	return htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8');
 }
 
+function deviceoptControllerTypeLabel($value)
+{
+	switch ((string)$value) {
+		case 'cloud_plus':
+			return '云+控制器';
+		case 'single_door':
+			return '单门控制器';
+		default:
+			return '待心跳识别';
+	}
+}
+
 if(!$rs) {
 	exit("<script>location='/?page=login';</script>");
 }
@@ -97,6 +109,7 @@ $countData = Database::query("devices", $countSQL, true);
                                 <th>DID</th>
 								<th>Serial（序列号）</th>
 								<th>Model（型号）</th>
+								<th>控制器类型</th>
 								<th>OEM代码</th>
 								<th>IP</th>
 								<th>MAC</th>
@@ -114,6 +127,7 @@ $countData = Database::query("devices", $countSQL, true);
 									<td>".deviceoptH($dData['did'])."</td>
 									<td>".deviceoptH($dData['serial'] ?? '')."</td>
 									<td>".deviceoptH($dData['model'] ?? '')."</td>
+									<td>".deviceoptH(deviceoptControllerTypeLabel($dData['controller_type'] ?? ''))."</td>
 									<td>".deviceoptH($dData['oemcode'])."</td>
 									<td>".deviceoptH($dData['ip'])."</td>
 									<td>".deviceoptH($dData['mac'])."</td>
