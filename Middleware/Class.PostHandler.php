@@ -744,16 +744,17 @@ class PostHandler {
 				case "syncDeviceCards":
 					$this->requireAdminUser();
 					$deviceId = intval($_POST['device_id'] ?? 0);
-					$result = $this->enqueueDeviceCardFullSync($deviceId, 'manual');
+					Header("Content-Type: application/json; charset=utf-8");
+					$result = class_exists(__NAMESPACE__ . '\\DeviceCardSync') ? DeviceCardSync::enqueueForceFullSync($deviceId, 'manual_force') : null;
 					if (!$result) {
 						Header("HTTP/1.1 500 Internal Error");
-						exit("端侧卡库同步模块未加载");
+						exit(json_encode(['ok' => false, 'message' => '端侧卡库同步模块未加载'], JSON_UNESCAPED_UNICODE));
 					}
 					if ($result['ok']) {
-						exit($result['message']);
+						exit(json_encode($result, JSON_UNESCAPED_UNICODE));
 					}
 					Header("HTTP/1.1 400 Bad Request");
-					exit($result['message']);
+					exit(json_encode($result, JSON_UNESCAPED_UNICODE));
 				break;
 				case "syncFeishuMember":
 					$um = new anim210System\UserCheck();

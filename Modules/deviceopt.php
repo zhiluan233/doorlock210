@@ -66,6 +66,27 @@ if(!$rs) {
 	exit("<script>location='/?page=login';</script>");
 }
 
+if(isset($_GET['localCardProgress'])) {
+	anim210System\Utils::checkCsrf();
+	if (!in_array($rs['type'] ?? '', ['admin', 'readonly'], true)) {
+		ob_clean();
+		Header("HTTP/1.1 403 Forbidden");
+		Header("Content-Type: application/json; charset=utf-8");
+		exit(json_encode(['ok' => false, 'message' => '你没有足够的权限这么做'], JSON_UNESCAPED_UNICODE));
+	}
+	ob_clean();
+	Header("Content-Type: application/json; charset=utf-8");
+	if (!class_exists(__NAMESPACE__ . '\\DeviceCardSync')) {
+		Header("HTTP/1.1 500 Internal Error");
+		exit(json_encode(['ok' => false, 'message' => '端侧卡库同步模块未加载'], JSON_UNESCAPED_UNICODE));
+	}
+	$result = DeviceCardSync::manualSyncProgress(intval($_GET['device_id'] ?? 0), intval($_GET['job_id'] ?? 0));
+	if (empty($result['ok'])) {
+		Header("HTTP/1.1 404 Not Found");
+	}
+	exit(json_encode($result, JSON_UNESCAPED_UNICODE));
+}
+
 if(isset($_GET['getdevice']) && preg_match("/^[0-9]{1,10}$/", $_GET['getdevice'])) {
 	anim210System\Utils::checkCsrf();
 	$deviceinfo = Database::querySingleLine("devices", Array("id" => $_GET['getdevice']));
@@ -270,14 +291,42 @@ if ($deviceData instanceof \mysqli_result) {
 		justify-content: flex-end;
 		margin-top: 18px;
 	}
+	.device-sync-progress {
+		display: none;
+		border: 1px solid #edf0f2;
+		background: #f8fafb;
+		border-radius: 4px;
+		padding: 14px;
+		margin-top: 16px;
+	}
+	.device-sync-progress-head {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
+		margin-bottom: 10px;
+		color: #3f4a56;
+	}
+	.device-sync-progress-head strong {
+		color: #16a085;
+		font-weight: 600;
+	}
+	.device-sync-progress-meta {
+		margin-top: 10px;
+		color: #6b7785;
+		line-height: 1.8;
+		word-break: break-word;
+	}
 </style>
 <script>
   var deviceid;
   var devicename;
   var deviceAdvancedData = <?php echo json_encode($deviceAdvancedData, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
-  layui.use(['layer', 'form'], function() {
+  layui.use(['layer', 'form', 'element'], function() {
     var layer = layui.layer;
     var form = layui.form;
+	var element = layui.element;
+	var activeSyncTimers = {};
 	form.render();
 
 	form.on('switch(advancedLocalCardSwitch)', function(data) {
@@ -330,9 +379,14 @@ if ($deviceData instanceof \mysqli_result) {
 			+ '<dt>队列状态</dt><dd>待下发 ' + parseInt(device.local_card_pending || 0, 10) + '，失败 ' + parseInt(device.local_card_failed || 0, 10) + '，执行中 ' + parseInt(device.local_card_running || 0, 10) + '</dd>'
 			+ '<dt>最近消息</dt><dd>' + escapeHtml(device.local_card_sync_message || '暂无') + '</dd>'
 			+ '</dl>'
+			+ '<div class="device-sync-progress" id="deviceSyncProgressWrap' + parseInt(device.id, 10) + '">'
+			+ '<div class="device-sync-progress-head"><span id="deviceSyncProgressTitle' + parseInt(device.id, 10) + '">等待同步任务开始</span><strong id="deviceSyncProgressPercent' + parseInt(device.id, 10) + '">0%</strong></div>'
+			+ '<div class="layui-progress layui-progress-big" lay-filter="deviceSyncProgress' + parseInt(device.id, 10) + '" lay-showPercent="true"><div class="layui-progress-bar" lay-percent="0%"></div></div>'
+			+ '<div class="device-sync-progress-meta" id="deviceSyncProgressMeta' + parseInt(device.id, 10) + '">已提交后会显示实时进度。</div>'
+			+ '</div>'
 			+ '</div>'
 			+ '<div class="device-advanced-actions">'
-			+ '<button type="button" class="layui-btn layui-btn-normal" onclick="syncDeviceCards(' + parseInt(device.id, 10) + ')">同步卡库</button>'
+			+ '<button type="button" class="layui-btn layui-btn-normal" onclick="syncDeviceCards(' + parseInt(device.id, 10) + ')">手动全量同步</button>'
 			+ '<button type="button" class="layui-btn layui-btn-primary" onclick="layui.layer.closeAll()">关闭</button>'
 			+ '</div>'
 			+ '</div>';
@@ -340,9 +394,13 @@ if ($deviceData instanceof \mysqli_result) {
 			type: 1,
 			title: '高级设置 - ' + escapeHtml(device.name || id),
 			content: html,
-			area: ['560px', '520px'],
+			area: ['560px', '600px'],
 			success: function() {
 				form.render('checkbox');
+				element.render('progress');
+			},
+			end: function() {
+				clearDeviceSyncTimer(id);
 			}
 		});
 	}
@@ -466,20 +524,126 @@ if ($deviceData instanceof \mysqli_result) {
 		});
 	}
 
+	function deviceSyncStageText(data) {
+		switch (data.stage) {
+			case 'queued':
+				return '等待计划任务执行';
+			case 'calculating':
+				return '正在计算本次下发列表';
+			case 'syncing':
+				return '正在分批下发到设备';
+			case 'retrying':
+				return '部分失败，等待自动重试';
+			case 'done':
+				return '同步完成';
+			case 'failed':
+				return '同步任务失败';
+			default:
+				return '同步状态更新中';
+		}
+	}
+
+	function renderDeviceSyncProgress(id, data) {
+		var percent = Math.max(0, Math.min(100, parseInt(data.percent || 0, 10)));
+		var total = parseInt(data.total || 0, 10);
+		var completed = parseInt(data.completed || 0, 10);
+		var eligibleTotal = parseInt(data.eligible_total || 0, 10);
+		var pending = parseInt(data.pending || 0, 10);
+		var running = parseInt(data.running || 0, 10);
+		var failed = parseInt(data.failed || 0, 10);
+		var success = parseInt(data.success || 0, 10);
+		var cancelled = parseInt(data.cancelled || 0, 10);
+		var stageText = deviceSyncStageText(data);
+		$('#deviceSyncProgressWrap' + id).show();
+		$('#deviceSyncProgressTitle' + id).text(stageText);
+		$('#deviceSyncProgressPercent' + id).text(percent + '%');
+		if (element && element.progress) {
+			element.progress('deviceSyncProgress' + id, percent + '%');
+		}
+		$('#deviceSyncProgressMeta' + id).html(
+			'当前按策略可下发人数：' + eligibleTotal + '<br>' +
+			'本次下发操作：' + completed + ' / ' + total +
+			'，成功 ' + success +
+			'，待下发 ' + pending +
+			'，执行中 ' + running +
+			'，失败待重试 ' + failed +
+			(cancelled > 0 ? '，已取消 ' + cancelled : '') +
+			(data.message ? '<br>最近消息：' + escapeHtml(data.message) : '')
+		);
+	}
+
+	function clearDeviceSyncTimer(id) {
+		if (activeSyncTimers[id]) {
+			clearInterval(activeSyncTimers[id]);
+			delete activeSyncTimers[id];
+		}
+	}
+
+	function pollDeviceSyncProgress(id, jobId) {
+		$.ajax({
+			type: 'GET',
+			url: "?page=panel&module=deviceopt&localCardProgress=1&device_id=" + encodeURIComponent(id) + "&job_id=" + encodeURIComponent(jobId) + "&csrf=<?php echo $_SESSION['token']; ?>",
+			dataType: 'json',
+			async: true,
+			error: function(xhr) {
+				clearDeviceSyncTimer(id);
+				vt.error("进度查询失败：" + (xhr.responseText || '请刷新页面后重试'), {position: "top-center"});
+			},
+			success: function(data) {
+				if (!data || !data.ok) {
+					clearDeviceSyncTimer(id);
+					vt.error((data && data.message) ? data.message : '进度查询失败', {position: "top-center"});
+					return;
+				}
+				renderDeviceSyncProgress(id, data);
+				if (data.done) {
+					clearDeviceSyncTimer(id);
+					vt.success('端侧卡库手动全量同步完成', {position: "top-center"});
+				}
+			}
+		});
+	}
+
+	function startDeviceSyncProgress(id, jobId) {
+		clearDeviceSyncTimer(id);
+		renderDeviceSyncProgress(id, {
+			stage: 'queued',
+			percent: 0,
+			eligible_total: 0,
+			total: 0,
+			completed: 0,
+			pending: 0,
+			running: 0,
+			failed: 0,
+			success: 0,
+			cancelled: 0,
+			message: '任务已提交，等待计划任务执行'
+		});
+		pollDeviceSyncProgress(id, jobId);
+		activeSyncTimers[id] = setInterval(function() {
+			pollDeviceSyncProgress(id, jobId);
+		}, 3000);
+	}
+
 	function syncDeviceCards(id) {
-		layer.confirm('确认提交该设备端侧卡库全量同步任务？', {icon: 3, title: '同步卡库'}, function(index) {
+		layer.confirm('确认提交该设备端侧卡库手动全量同步任务？本次会重新下发所有当前有权限的工牌。', {icon: 3, title: '手动全量同步'}, function(index) {
 			var htmlobj = $.ajax({
 				type: 'POST',
 				url: "?action=syncDeviceCards&page=panel&module=deviceopt&csrf=<?php echo $_SESSION['token']; ?>",
+				dataType: 'json',
 				async:true,
 				data: {device_id: id},
 				error: function() {
 					vt.error("错误：" + htmlobj.responseText, {position: "top-center"});
 				},
-				success: function() {
-					vt.success(htmlobj.responseText, {position: "top-center"});
+				success: function(data) {
+					if (!data || !data.ok) {
+						vt.error((data && data.message) ? data.message : '端侧卡库同步任务提交失败', {position: "top-center"});
+						return;
+					}
+					vt.success(data.message + '，开始跟踪进度', {position: "top-center"});
 					layer.close(index);
-					location.reload();
+					startDeviceSyncProgress(id, data.job_id);
 				}
 			});
 		});
