@@ -155,6 +155,7 @@ class deviceApi {
                                 $resp = $this->cardResponse($deviceInfo, $devicePayload, '1', $requestContext);
 
                                 AttendanceService::writeAccessLog($guestInfo['name'], '访客', $deviceInfo['name'], $card, '开门成功', $eventTime);
+                                $this->scheduleSingleDoorOpenFallback($deviceInfo, $devicePayload, $requestContext, $guestInfo['name'], '访客', $card, $eventTime);
                                 $this->exitDeviceJson($resp, $requestContext);
                         }
 
@@ -171,6 +172,7 @@ class deviceApi {
                                 $resp = $this->cardResponse($deviceInfo, $devicePayload, '1', $requestContext);
 
                                 AttendanceService::writeAccessLog($learnerInfo['name'], '学员', $deviceInfo['name'], $card, '开门成功', $eventTime);
+                                $this->scheduleSingleDoorOpenFallback($deviceInfo, $devicePayload, $requestContext, $learnerInfo['name'], '学员', $card, $eventTime);
                                 $this->exitDeviceJson($resp, $requestContext);
                         }
 
@@ -186,6 +188,7 @@ class deviceApi {
                                 http_response_code(200);
                                 $resp = $this->cardResponse($deviceInfo, $devicePayload, '1', $requestContext);
                                 AttendanceService::writeAccessLog($employeeInfo['name'], '员工', $deviceInfo['name'], $card, '开门成功', $eventTime);
+                                $this->scheduleSingleDoorOpenFallback($deviceInfo, $devicePayload, $requestContext, $employeeInfo['name'], '员工', $card, $eventTime);
                                 AttendanceService::enqueueSwipe($employeeInfo, $deviceInfo, $card, 'card', $eventTime);
                                 $this->exitDeviceJson($resp, $requestContext);
                         }
@@ -419,6 +422,192 @@ class deviceApi {
             }
         }
         return '0';
+    }
+
+    private function scheduleSingleDoorOpenFallback($deviceInfo, $payload, $requestContext, $username, $userType, $card, $eventTime)
+    {
+        if (!$this->needsSingleDoorOpenFallback($deviceInfo, $payload, $requestContext)) {
+            return;
+        }
+
+        register_shutdown_function(function () use ($deviceInfo, $username, $userType, $card, $eventTime) {
+            if (function_exists('fastcgi_finish_request')) {
+                @fastcgi_finish_request();
+            }
+            $result = $this->singleDoorRemoteOpen($deviceInfo);
+            $action = $result['ok'] ? '单门控制器远程开门兜底成功' : '单门控制器远程开门兜底失败：'.$result['message'];
+            AttendanceService::writeAccessLog($username, $userType, $deviceInfo['name'] ?? '', $card, $action, $eventTime);
+        });
+    }
+
+    private function needsSingleDoorOpenFallback($deviceInfo, $payload, $requestContext)
+    {
+        if (empty($requestContext['wrapped']) || strtolower((string)($requestContext['method'] ?? '')) !== 'cardevent') {
+            return false;
+        }
+
+        $controllerType = trim((string)($deviceInfo['controller_type'] ?? ''));
+        if ($controllerType !== '' && $controllerType !== 'single_door') {
+            return false;
+        }
+
+        $eventAck = $this->cardEventAckFields($payload, $requestContext);
+        if ($this->isHistoryOnlyCardEvent($payload, $requestContext, $eventAck)) {
+            return false;
+        }
+
+        $pass = $this->payloadValue($payload, ['Pass', 'pass']);
+        $exist = $this->payloadValue($payload, ['Exist', 'exist']);
+        return $pass === '0' || $exist === '0';
+    }
+
+    private function singleDoorRemoteOpen($deviceInfo)
+    {
+        if (!Settings::getBool('remote_open_enabled')) {
+            return ['ok' => false, 'message' => '远程开门未启用'];
+        }
+        if (empty($deviceInfo['ip'])) {
+            return ['ok' => false, 'message' => '设备IP为空'];
+        }
+
+        $method = strtoupper(Settings::get('remote_open_method', 'GET'));
+        if (!in_array($method, ['GET', 'POST'], true)) {
+            $method = 'GET';
+        }
+        $path = $this->renderRemoteOpenTemplate(Settings::get('remote_open_path', '/cdor.cgi?open=1&door=0?'), $deviceInfo);
+        $url = $this->remoteOpenUrl($deviceInfo['ip'], $path);
+        $body = $this->renderRemoteOpenTemplate(Settings::get('remote_open_body', ''), $deviceInfo);
+        $timeout = min(2, max(1, Settings::getInt('remote_open_timeout', 2)));
+        $username = Settings::get('remote_open_username', 'admin');
+        $password = Settings::get('remote_open_password', '888888');
+
+        $ch = curl_init();
+        curl_setopt($ch, CURLOPT_URL, $url);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_TIMEOUT, $timeout);
+        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, $timeout);
+        curl_setopt($ch, CURLOPT_NOSIGNAL, true);
+        curl_setopt($ch, CURLOPT_CUSTOMREQUEST, $method);
+        if ($username !== '' || $password !== '') {
+            curl_setopt($ch, CURLOPT_HTTPAUTH, defined('CURLAUTH_ANY') ? CURLAUTH_ANY : CURLAUTH_BASIC);
+            curl_setopt($ch, CURLOPT_USERPWD, $username . ':' . $password);
+        }
+        if ($method === 'POST') {
+            $headers = [];
+            if ($body !== '') {
+                $firstChar = substr(ltrim($body), 0, 1);
+                $headers[] = in_array($firstChar, ['{', '['], true) ? 'Content-Type: application/json; charset=utf-8' : 'Content-Type: application/x-www-form-urlencoded; charset=utf-8';
+            }
+            if (count($headers) > 0) {
+                curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+            }
+            curl_setopt($ch, CURLOPT_POSTFIELDS, $body);
+        }
+
+        $responseBody = curl_exec($ch);
+        $error = curl_errno($ch) ? curl_error($ch) : '';
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+
+        if ($error !== '') {
+            return ['ok' => false, 'message' => $error];
+        }
+        if ($httpCode >= 200 && $httpCode < 400 && $this->remoteOpenResponseOk($responseBody)) {
+            return ['ok' => true, 'message' => 'HTTP '.$httpCode];
+        }
+        $message = '设备返回HTTP ' . $httpCode;
+        if ($httpCode >= 200 && $httpCode < 400) {
+            $message = '设备返回内容未匹配成功规则';
+        }
+        $summary = $this->remoteOpenResponseSummary($responseBody);
+        if ($summary !== '') {
+            $message .= '：' . $summary;
+        }
+        return ['ok' => false, 'message' => $message];
+    }
+
+    private function renderRemoteOpenTemplate($value, $device)
+    {
+        global $_config;
+
+        $openTime = $_config['doorOpenTime'] ?? 5;
+        $replacements = [
+            '{ip}' => $device['ip'] ?? '',
+            '{device_id}' => $device['id'] ?? '',
+            '{id}' => $device['id'] ?? '',
+            '{device_name}' => $device['name'] ?? '',
+            '{name}' => $device['name'] ?? '',
+            '{did}' => $device['did'] ?? '',
+            '{serial}' => $device['did'] ?? ($device['device_sn'] ?? ''),
+            '{device_sn}' => $device['device_sn'] ?? '',
+            '{mac}' => $device['mac'] ?? '',
+            '{oemcode}' => $device['oemcode'] ?? '',
+            '{open_time}' => $openTime,
+            '{door_open_time}' => $openTime,
+            '{timestamp}' => time()
+        ];
+        return strtr((string)$value, $replacements);
+    }
+
+    private function remoteOpenUrl($deviceIp, $path)
+    {
+        $path = trim((string)$path);
+        if (preg_match('/^https?:\/\//i', $path)) {
+            return $path;
+        }
+        $base = trim((string)$deviceIp);
+        if (!preg_match('/^https?:\/\//i', $base)) {
+            $base = 'http://' . $base;
+        }
+        return rtrim($base, '/') . (strpos($path, '/') === 0 ? $path : '/' . $path);
+    }
+
+    private function remoteOpenResponseOk($responseBody)
+    {
+        $body = trim((string)$responseBody);
+        $successText = trim(Settings::get('remote_open_success_text', ''));
+        if ($successText !== '') {
+            return strpos($body, $successText) !== false;
+        }
+        if ($body === '') {
+            return true;
+        }
+
+        $json = json_decode($body, true);
+        if (json_last_error() === JSON_ERROR_NONE && is_array($json)) {
+            if (isset($json['AcsRes'])) {
+                return (string)$json['AcsRes'] === '1';
+            }
+            if (isset($json['success'])) {
+                return $json['success'] === true || $json['success'] === 1 || $json['success'] === '1' || $json['success'] === 'true';
+            }
+            if (isset($json['ok'])) {
+                return $json['ok'] === true || $json['ok'] === 1 || $json['ok'] === '1' || $json['ok'] === 'true';
+            }
+            if (isset($json['code'])) {
+                return intval($json['code']) === 0 || intval($json['code']) === 200;
+            }
+        }
+
+        foreach (['invalid', 'error', 'fail', 'denied', 'unauthorized', 'forbidden', '失败', '错误', '无效', '拒绝'] as $keyword) {
+            if (stripos($body, $keyword) !== false) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private function remoteOpenResponseSummary($responseBody)
+    {
+        $body = trim((string)$responseBody);
+        if ($body === '') {
+            return '';
+        }
+        $body = preg_replace('/\s+/', ' ', $body);
+        if (function_exists('mb_substr')) {
+            return mb_substr($body, 0, 180, 'UTF-8');
+        }
+        return substr($body, 0, 180);
     }
 
     private function isValidEventIndex($index)
