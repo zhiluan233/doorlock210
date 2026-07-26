@@ -94,7 +94,7 @@ class deviceApi {
                     $ip = $this->payloadValue($devicePayload, ['IP', 'ip']);
                     $mac = $this->payloadValue($devicePayload, ['MAC', 'mac']);
                     $rawCard = $this->payloadValue($devicePayload, ['Card', 'card', 'CardNo', 'cardNo', 'CardID', 'cardId', 'card_id']);
-                    if ($serial !== '' && $mac !== '' && $rawCard !== '') {
+                    if ($serial !== '' && $rawCard !== '') {
                         if (empty($_SERVER['REMOTE_ADDR'])) {
                             http_response_code(403);
 			                exit("Unauthorized device!");
@@ -109,7 +109,7 @@ class deviceApi {
 			                exit("Unauthorized device!");
                         }
 
-                        $eventTime = time();
+                        $eventTime = $this->deviceEventTimestamp($this->payloadValue($devicePayload, ['Time', 'time', 'Now', 'now']));
                         $card = (string)$rawCard;
                         if (!ctype_digit($card) && $this->is_base64($card)) {
                             $card = base64_decode($card);
@@ -255,7 +255,7 @@ class deviceApi {
         if (in_array($method, ['heartbeat', 'heart_beat', 'status'], true)) {
             return 'heartBeat';
         }
-        if (in_array($method, ['verifycard', 'verify_card', 'cardverify', 'card_verify', 'verify', 'card'], true)) {
+        if (in_array($method, ['verifycard', 'verify_card', 'cardverify', 'card_verify', 'verify', 'card', 'cardevent', 'card_event'], true)) {
             return 'verifyCard';
         }
         return '';
@@ -306,6 +306,16 @@ class deviceApi {
         return $value;
     }
 
+    private function deviceEventTimestamp($value)
+    {
+        $timeText = $this->normalizeHeartbeatTime($value);
+        if ($timeText === '') {
+            return time();
+        }
+        $timestamp = strtotime($timeText);
+        return $timestamp !== false && $timestamp > 0 ? $timestamp : time();
+    }
+
     private function addDeviceUpdateField(&$updatedata, $column, $value)
     {
         if ($value !== '' && $this->deviceColumnExists($column)) {
@@ -334,6 +344,9 @@ class deviceApi {
         $deviceInfo = null;
         if ($serial !== '') {
             $deviceInfo = Database::querySingleLine("devices", Array("did" => $serial));
+        }
+        if ($deviceInfo == null && $serial !== '' && $this->deviceColumnExists('serial')) {
+            $deviceInfo = Database::querySingleLine("devices", Array("serial" => $serial));
         }
         if ($deviceInfo == null && $ip !== '') {
             $deviceInfo = Database::querySingleLine("devices", Array("ip" => $ip));
