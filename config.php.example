@@ -6,6 +6,8 @@ $_config = [
 
 	'appPath' => '/home/210official/doorlock', //App目录
 	'timezone' => 'Asia/Shanghai',
+	// PHP CLI 命令路径；端侧卡库异步 worker 使用。留空时自动探测，open_basedir 环境推荐配置为 /www/server/php/80/bin/php 或 php
+	'phpCliBinary' => '',
 
 	// 数据库相关配置
 	/* 地址 */ 'db_host'           => '127.0.0.1',

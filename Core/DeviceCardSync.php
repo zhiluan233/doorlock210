@@ -1490,15 +1490,50 @@ class DeviceCardSync {
 
     private static function phpBinary()
     {
+        global $_config;
+
+        $configured = trim((string)($_config['phpCliBinary'] ?? ($_config['workerPhpBinary'] ?? '')));
+        if ($configured !== '') {
+            return $configured;
+        }
         $binary = defined('PHP_BINARY') && PHP_BINARY ? PHP_BINARY : 'php';
         $base = strtolower(basename($binary));
-        if (strpos($base, 'php-fpm') !== false && defined('PHP_BINDIR')) {
+        if ((strpos($base, 'php-fpm') !== false || strpos($base, 'php-cgi') !== false) && defined('PHP_BINDIR')) {
             $candidate = rtrim(PHP_BINDIR, '/\\') . '/php';
-            if (is_executable($candidate)) {
+            if (self::pathAllowedByOpenBasedir($candidate) && @is_executable($candidate)) {
                 return $candidate;
             }
+            return 'php';
         }
         return $binary;
+    }
+
+    private static function pathAllowedByOpenBasedir($path)
+    {
+        $openBasedir = trim((string)ini_get('open_basedir'));
+        if ($openBasedir === '') {
+            return true;
+        }
+
+        $path = str_replace('\\', '/', (string)$path);
+        foreach (explode(PATH_SEPARATOR, $openBasedir) as $base) {
+            $base = trim((string)$base);
+            if ($base === '') {
+                continue;
+            }
+            if ($base === '.') {
+                $base = getcwd();
+            }
+            $base = str_replace('\\', '/', $base);
+            if ($base === '/') {
+                return true;
+            }
+            $base = rtrim($base, '/');
+            if ($base !== '' && ($path === $base || strpos($path, $base . '/') === 0)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static function deviceFormFields($fields)
