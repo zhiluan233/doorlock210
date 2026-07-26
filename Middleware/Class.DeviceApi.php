@@ -98,6 +98,24 @@ class deviceApi {
                     $ip = $this->payloadValue($devicePayload, ['IP', 'ip']);
                     $mac = $this->payloadValue($devicePayload, ['MAC', 'mac']);
                     $rawCard = $this->payloadValue($devicePayload, ['Card', 'card', 'CardNo', 'cardNo', 'CardID', 'cardId', 'card_id']);
+                    $eventOnlyResponse = $this->eventOnlyResponse($devicePayload, $requestContext);
+                    if ($serial !== '' && $rawCard === '' && $eventOnlyResponse !== null) {
+                        if (empty($_SERVER['REMOTE_ADDR'])) {
+                            http_response_code(403);
+			                exit("Unauthorized device!");
+                        }
+                        $deviceInfo = $this->findVerifyDevice($serial, $ip, $mac);
+                        if ($deviceInfo == null) {
+                            http_response_code(403);
+			                exit("Unauthorized device!");
+                        }
+                        if ($_SERVER['REMOTE_ADDR'] !== $deviceInfo['ip']) {
+                            http_response_code(403);
+			                exit("Unauthorized device!");
+                        }
+                        http_response_code(200);
+                        $this->exitDeviceJson($eventOnlyResponse, $requestContext);
+                    }
                     if ($serial !== '' && $rawCard !== '') {
                         if (empty($_SERVER['REMOTE_ADDR'])) {
                             http_response_code(403);
@@ -224,7 +242,7 @@ class deviceApi {
         if (in_array($method, ['heartbeat', 'heart_beat', 'status'], true)) {
             return 'heartBeat';
         }
-        if (in_array($method, ['verifycard', 'verify_card', 'cardverify', 'card_verify', 'verify', 'card', 'cardevent', 'card_event'], true)) {
+        if (in_array($method, ['verifycard', 'verify_card', 'cardverify', 'card_verify', 'verify', 'card', 'cardevent', 'card_event', 'alarmevent', 'alarm_event'], true)) {
             return 'verifyCard';
         }
         return '';
@@ -281,6 +299,14 @@ class deviceApi {
         if ($timeText === '') {
             return time();
         }
+        try {
+            $dateTime = \DateTimeImmutable::createFromFormat('!Y-m-d H:i:s', $timeText, new \DateTimeZone($this->systemTimezone()));
+            if ($dateTime instanceof \DateTimeImmutable) {
+                return $dateTime->getTimestamp();
+            }
+        } catch (\Exception $e) {
+            // Fall back to strtotime below.
+        }
         $timestamp = strtotime($timeText);
         return $timestamp !== false && $timestamp > 0 ? $timestamp : time();
     }
@@ -325,11 +351,33 @@ class deviceApi {
         $index = $this->payloadValue($payload, ['Index', 'index']);
         $eventType = $this->payloadValue($payload, ['EventType', 'eventType', 'event_type']);
         $eventCount = $this->payloadValue($payload, ['Count', 'count', 'EventCnt', 'eventCnt', 'event_cnt']);
+        if (!empty($requestContext['wrapped']) && $method === 'alarmevent' && $eventType !== '' && $eventCount !== '' && $this->isValidEventIndex($index)) {
+            return [
+                'Index' => $index,
+                'IndexAlarm' => $index
+            ];
+        }
         if (!empty($requestContext['wrapped']) && $method === 'cardevent' && $eventType !== '' && $eventCount !== '' && $this->isValidEventIndex($index)) {
             return [
                 'Index' => $index,
                 'IndexEvent' => $index
             ];
+        }
+
+        return null;
+    }
+
+    private function eventOnlyResponse($payload, $requestContext)
+    {
+        $eventAck = $this->cardEventAckFields($payload, $requestContext);
+        if ($eventAck === null) {
+            return null;
+        }
+
+        $method = strtolower((string)($requestContext['method'] ?? ''));
+        $type = $this->payloadValue($payload, ['type', 'Type']);
+        if ($method === 'alarmevent' || $type === '101') {
+            return $eventAck;
         }
 
         return null;
@@ -355,17 +403,16 @@ class deviceApi {
             return true;
         }
 
-        $eventTime = $this->payloadValue($payload, ['Time', 'time', 'Now', 'now']);
-        if ($eventTime !== '') {
-            return abs(time() - $this->deviceEventTimestamp($eventTime)) > 180;
-        }
-
         return false;
     }
 
     private function cardActionIndex($payload, $requestContext)
     {
         if (!empty($requestContext['wrapped']) && strtolower((string)($requestContext['method'] ?? '')) === 'cardevent') {
+            $reader = $this->payloadValue($payload, ['Reader', 'reader']);
+            if ($reader !== '' && ctype_digit($reader)) {
+                return (string)(intval($reader) & 1);
+            }
             $door = $this->payloadValue($payload, ['Door', 'door']);
             if ($door !== '' && ctype_digit($door)) {
                 return (string)max(0, intval($door) - 1);
@@ -391,6 +438,22 @@ class deviceApi {
         }
 
         return 'cloud_plus';
+    }
+
+    private function systemTimezone()
+    {
+        global $_config;
+
+        $timezone = trim((string)($_config['timezone'] ?? 'Asia/Shanghai'));
+        if ($timezone === '') {
+            return 'Asia/Shanghai';
+        }
+        try {
+            new \DateTimeZone($timezone);
+        } catch (\Exception $e) {
+            return 'Asia/Shanghai';
+        }
+        return $timezone;
     }
 
     private function addDeviceUpdateField(&$updatedata, $column, $value)

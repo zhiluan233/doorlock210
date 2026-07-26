@@ -5,6 +5,7 @@ $_config = [
 	'appVersion' => '1.0.0 Dev',
 
 	'appPath' => '/home/210official/doorlock', //App目录
+	'timezone' => 'Asia/Shanghai',
 
 	// 数据库相关配置
 	/* 地址 */ 'db_host'           => '127.0.0.1',
