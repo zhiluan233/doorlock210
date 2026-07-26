@@ -125,22 +125,12 @@ class deviceApi {
                             $allowPass = AttendanceService::canGuestPass($guestInfo, $deviceInfo, $reason);
                             if ($allowPass === false) {
                                 http_response_code(200);
-                                $resp = [
-                                    'ActIndex' => '0',
-                                    'AcsRes' => '0',
-                                    'Time' => (string)$_config['doorOpenTime'],
-                                    'OEM' => (string)$deviceInfo['oemcode']
-                                ];
+                                $resp = $this->cardResponse($deviceInfo, $devicePayload, '0', $requestContext);
                                 AttendanceService::writeAccessLog($guestInfo['name'], '访客', $deviceInfo['name'], $card, '开门失败：'.$reason, $eventTime);
                                 $this->exitDeviceJson($resp, $requestContext);
                             }
                                 http_response_code(200);
-                                $resp = [
-                                    'ActIndex' => '0',
-                                    'AcsRes' => '1',
-                                    'Time' => (string)$_config['doorOpenTime'],
-                                    'OEM' => (string)$deviceInfo['oemcode']
-                                ];
+                                $resp = $this->cardResponse($deviceInfo, $devicePayload, '1', $requestContext);
 
                                 AttendanceService::writeAccessLog($guestInfo['name'], '访客', $deviceInfo['name'], $card, '开门成功', $eventTime);
                                 $this->exitDeviceJson($resp, $requestContext);
@@ -151,22 +141,12 @@ class deviceApi {
                             $allowPass = AttendanceService::canLearnerPass($learnerInfo, $deviceInfo, $reason);
                             if ($allowPass === false) {
                                 http_response_code(200);
-                                $resp = [
-                                    'ActIndex' => '0',
-                                    'AcsRes' => '0',
-                                    'Time' => (string)$_config['doorOpenTime'],
-                                    'OEM' => (string)$deviceInfo['oemcode']
-                                ];
+                                $resp = $this->cardResponse($deviceInfo, $devicePayload, '0', $requestContext);
                                 AttendanceService::writeAccessLog($learnerInfo['name'], '学员', $deviceInfo['name'], $card, '开门失败：'.$reason, $eventTime);
                                 $this->exitDeviceJson($resp, $requestContext);
                             }
                                 http_response_code(200);
-                                $resp = [
-                                    'ActIndex' => '0',
-                                    'AcsRes' => '1',
-                                    'Time' => (string)$_config['doorOpenTime'],
-                                    'OEM' => (string)$deviceInfo['oemcode']
-                                ];
+                                $resp = $this->cardResponse($deviceInfo, $devicePayload, '1', $requestContext);
 
                                 AttendanceService::writeAccessLog($learnerInfo['name'], '学员', $deviceInfo['name'], $card, '开门成功', $eventTime);
                                 $this->exitDeviceJson($resp, $requestContext);
@@ -177,34 +157,19 @@ class deviceApi {
                             $allowPass = AttendanceService::canEmployeePass($employeeInfo, $deviceInfo, $reason);
                             if ($allowPass === false) {
                                 http_response_code(200);
-                                $resp = [
-                                    'ActIndex' => '0',
-                                    'AcsRes' => '0',
-                                    'Time' => (string)$_config['doorOpenTime'],
-                                    'OEM' => (string)$deviceInfo['oemcode']
-                                ];
+                                $resp = $this->cardResponse($deviceInfo, $devicePayload, '0', $requestContext);
                                 AttendanceService::writeAccessLog($employeeInfo['name'], '员工', $deviceInfo['name'], $card, '开门失败：'.$reason, $eventTime);
                                 $this->exitDeviceJson($resp, $requestContext);
                             }
                                 http_response_code(200);
-                                $resp = [
-                                    'ActIndex' => '0',
-                                    'AcsRes' => '1',
-                                    'Time' => (string)$_config['doorOpenTime'],
-                                    'OEM' => (string)$deviceInfo['oemcode']
-                                ];
+                                $resp = $this->cardResponse($deviceInfo, $devicePayload, '1', $requestContext);
                                 AttendanceService::writeAccessLog($employeeInfo['name'], '员工', $deviceInfo['name'], $card, '开门成功', $eventTime);
                                 AttendanceService::enqueueSwipe($employeeInfo, $deviceInfo, $card, 'card', $eventTime);
                                 $this->exitDeviceJson($resp, $requestContext);
                         }
 
                         http_response_code(200);
-                        $resp = [
-                            'ActIndex' => '0',
-                            'AcsRes' => '0',
-                            'Time' => (string)$_config['doorOpenTime'],
-                            'OEM' => (string)$deviceInfo['oemcode']
-                        ];
+                        $resp = $this->cardResponse($deviceInfo, $devicePayload, '0', $requestContext);
 			            $this->exitDeviceJson($resp, $requestContext);
                     } else {
                         http_response_code(400);
@@ -314,6 +279,55 @@ class deviceApi {
         }
         $timestamp = strtotime($timeText);
         return $timestamp !== false && $timestamp > 0 ? $timestamp : time();
+    }
+
+    private function cardResponse($deviceInfo, $payload, $acsRes, $requestContext)
+    {
+        global $_config;
+
+        $historyResponse = $this->historyCardResponse($payload, $requestContext);
+        if ($historyResponse !== null) {
+            return $historyResponse;
+        }
+
+        return [
+            'ActIndex' => '0',
+            'AcsRes' => (string)$acsRes,
+            'Time' => (string)$_config['doorOpenTime'],
+            'OEM' => (string)($deviceInfo['oemcode'] ?? '')
+        ];
+    }
+
+    private function historyCardResponse($payload, $requestContext)
+    {
+        $type = $this->payloadValue($payload, ['type', 'Type']);
+        $indexAlarm = $this->payloadValue($payload, ['IndexAlarm', 'indexAlarm', 'index_alarm']);
+        if ($type === '101' && $this->isValidEventIndex($indexAlarm)) {
+            return ['IndexAlarm' => $indexAlarm];
+        }
+
+        $indexEvent = $this->payloadValue($payload, ['IndexEvent', 'indexEvent', 'index_event']);
+        if ($type === '100' && $this->isValidEventIndex($indexEvent)) {
+            return ['IndexEvent' => $indexEvent];
+        }
+
+        $method = strtolower((string)($requestContext['method'] ?? ''));
+        $index = $this->payloadValue($payload, ['Index', 'index']);
+        $eventType = $this->payloadValue($payload, ['EventType', 'eventType', 'event_type']);
+        $eventCount = $this->payloadValue($payload, ['Count', 'count', 'EventCnt', 'eventCnt', 'event_cnt']);
+        if (!empty($requestContext['wrapped']) && $method === 'cardevent' && $eventType !== '' && $eventCount !== '' && $this->isValidEventIndex($index)) {
+            return [
+                'Index' => $index,
+                'IndexEvent' => $index
+            ];
+        }
+
+        return null;
+    }
+
+    private function isValidEventIndex($index)
+    {
+        return $index !== '' && preg_match('/^[0-9]{1,10}$/', (string)$index);
     }
 
     private function addDeviceUpdateField(&$updatedata, $column, $value)
