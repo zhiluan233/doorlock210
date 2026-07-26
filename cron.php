@@ -51,7 +51,7 @@ $db = new Database();
 $migration = Migrator::ensure();
 $maintenance = RuntimeMaintenance::runScheduledCleanup();
 $queue = AttendanceService::processAllQueues();
-$deviceCardSync = DeviceCardSync::processQueue();
+$deviceCardSync = DeviceCardSync::ensureWorkerRunning();
 $contactSyncSchedule = FeishuContactSync::scheduleDailyIfDue();
 $contactSync = FeishuContactSync::processNextJob(1);
 

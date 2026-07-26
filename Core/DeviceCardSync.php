@@ -14,9 +14,11 @@ class DeviceCardSync {
     const MAX_SLOT_INDEX = 61200;
     const MANUAL_STAGE_UPSERTING = 'upserting';
 
-    public static function enqueueFullSync($deviceId, $source = 'manual')
+    private static $workerScheduled = false;
+
+    public static function enqueueFullSync($deviceId, $source = 'manual', $startWorker = true)
     {
-        return self::enqueueFullSyncJob($deviceId, $source, false);
+        return self::enqueueFullSyncJob($deviceId, $source, false, $startWorker);
     }
 
     public static function enqueueForceFullSync($deviceId, $source = 'manual_force')
@@ -24,7 +26,7 @@ class DeviceCardSync {
         return self::enqueueFullSyncJob($deviceId, $source, true);
     }
 
-    private static function enqueueFullSyncJob($deviceId, $source, $forcePush)
+    private static function enqueueFullSyncJob($deviceId, $source, $forcePush, $startWorker = true)
     {
         $device = self::device($deviceId);
         if (!$device || !self::localCardEnabled($device)) {
@@ -45,6 +47,9 @@ class DeviceCardSync {
         if ($existing) {
             $message = ($existing['status'] ?? '') === 'running' ? '已有端侧卡库全量同步任务正在执行' : '已有端侧卡库全量同步任务等待执行';
             self::updateDeviceSyncState($device['id'], $message);
+            if ($startWorker) {
+                self::ensureWorkerRunning();
+            }
             return ['ok' => true, 'job_id' => intval($existing['id']), 'message' => $message];
         }
         if ($forcePush) {
@@ -62,6 +67,9 @@ class DeviceCardSync {
         ]);
         $message = $forcePush ? '已提交端侧卡库手动全量下发任务' : '已提交端侧卡库全量同步任务';
         self::updateDeviceSyncState($device['id'], $message);
+        if ($startWorker) {
+            self::ensureWorkerRunning();
+        }
         return ['ok' => true, 'job_id' => $jobId, 'message' => $message];
     }
 
@@ -71,12 +79,15 @@ class DeviceCardSync {
         $count = 0;
         $skipped = 0;
         foreach ($devices as $device) {
-            $result = self::enqueueFullSync($device['id'], $source);
+            $result = self::enqueueFullSync($device['id'], $source, false);
             if (!empty($result['queued']) || !empty($result['job_id'])) {
                 $count++;
             } elseif (!empty($result['skipped'])) {
                 $skipped++;
             }
+        }
+        if ($count > 0) {
+            self::ensureWorkerRunning();
         }
         return ['ok' => true, 'count' => $count, 'skipped' => $skipped, 'message' => '已提交 '.$count.' 台设备端侧卡库全量同步任务，跳过 '.$skipped.' 台未完成首次手动全量同步的设备'];
     }
@@ -100,6 +111,9 @@ class DeviceCardSync {
                 $updated++;
             }
         }
+        if ($updated > 0) {
+            self::ensureWorkerRunning();
+        }
         return ['ok' => true, 'count' => $updated, 'message' => '已提交 '.$updated.' 条端侧卡库增量任务'];
     }
 
@@ -121,7 +135,107 @@ class DeviceCardSync {
             self::enqueueDeleteForBinding($binding, $source);
             $count++;
         }
+        if ($count > 0) {
+            self::ensureWorkerRunning();
+        }
         return ['ok' => true, 'count' => $count, 'message' => '已提交 '.$count.' 条端侧卡库删除任务'];
+    }
+
+    public static function ensureWorkerRunning()
+    {
+        if (self::workerLocked()) {
+            return array_merge(['ok' => true, 'started' => false, 'message' => '端侧卡库下发任务正在执行'], self::workerStatus());
+        }
+        if (!self::hasDueJobs()) {
+            return array_merge(['ok' => true, 'started' => false, 'message' => '暂无到期的端侧卡库下发任务'], self::workerStatus());
+        }
+
+        $script = rtrim(defined('ROOT') ? ROOT : dirname(__DIR__), '/\\') . '/device_card_worker.php';
+        $php = self::phpBinary();
+        if (is_file($script) && self::functionAvailable('exec')) {
+            $cmd = escapeshellarg($php) . ' ' . escapeshellarg($script) . ' > /dev/null 2>&1 &';
+            @exec($cmd);
+            return array_merge(['ok' => true, 'started' => true, 'message' => '端侧卡库下发 worker 已启动'], self::workerStatus());
+        }
+
+        if (self::$workerScheduled) {
+            return array_merge(['ok' => true, 'started' => false, 'message' => '端侧卡库下发 worker 已安排在请求结束后执行'], self::workerStatus());
+        }
+        self::$workerScheduled = true;
+        register_shutdown_function(function() {
+            if (function_exists('fastcgi_finish_request')) {
+                @fastcgi_finish_request();
+            }
+            DeviceCardSync::runWorker(25);
+        });
+        return array_merge(['ok' => true, 'started' => true, 'message' => '端侧卡库下发 worker 将在请求结束后执行'], self::workerStatus());
+    }
+
+    public static function workerStatus()
+    {
+        global $conn;
+
+        $summary = [
+            'worker_running' => self::workerLocked(),
+            'pending' => 0,
+            'failed' => 0,
+            'running' => 0
+        ];
+        $rs = Database::query('device_card_sync_jobs', "SELECT `status`, COUNT(*) AS `total` FROM `device_card_sync_jobs` WHERE `status` IN ('pending','failed','running') GROUP BY `status`", '', true);
+        if ($rs instanceof \mysqli_result) {
+            while ($row = mysqli_fetch_assoc($rs)) {
+                $status = (string)$row['status'];
+                if (isset($summary[$status])) {
+                    $summary[$status] = intval($row['total'] ?? 0);
+                }
+            }
+            mysqli_free_result($rs);
+        }
+        return $summary;
+    }
+
+    public static function runWorker($maxSeconds = 0)
+    {
+        $lock = self::acquireWorkerLock();
+        if (!$lock['ok']) {
+            return array_merge(['ok' => true, 'message' => '端侧卡库下发 worker 已在运行'], self::workerStatus());
+        }
+
+        ignore_user_abort(true);
+        if (function_exists('set_time_limit')) {
+            @set_time_limit(0);
+        }
+
+        $startedAt = time();
+        $totalRuns = 0;
+        $success = 0;
+        $failed = 0;
+        $generated = 0;
+        $last = null;
+        try {
+            do {
+                $last = self::processQueue();
+                if (intval($last['total'] ?? 0) <= 0) {
+                    break;
+                }
+                $totalRuns++;
+                $success += intval($last['success'] ?? 0);
+                $failed += intval($last['failed'] ?? 0);
+                $generated += intval($last['generated'] ?? 0);
+            } while ($maxSeconds <= 0 || (time() - $startedAt) < intval($maxSeconds));
+        } finally {
+            self::releaseWorkerLock($lock);
+        }
+
+        return [
+            'ok' => true,
+            'message' => '端侧卡库下发 worker 已结束',
+            'runs' => $totalRuns,
+            'success' => $success,
+            'failed' => $failed,
+            'generated' => $generated,
+            'last' => $last
+        ];
     }
 
     public static function processQueue($limit = null)
@@ -148,7 +262,7 @@ class DeviceCardSync {
             }
             $result['generated'] += intval($item['generated'] ?? 0);
             $result['items'][] = $item;
-            if ($intervalMs > 0 && $index < count($jobs) - 1) {
+            if ($intervalMs > 0) {
                 usleep($intervalMs * 1000);
             }
             if ($isManualFull) {
@@ -391,7 +505,7 @@ class DeviceCardSync {
         $jobId = intval($job['id']);
         $limit = $operationLimit === null ? Settings::getInt('device_card_sync_batch_size', 20) : intval($operationLimit);
         $limit = max(1, min(1000, $limit));
-        $intervalMs = max(0, min(2000, Settings::getInt('device_card_sync_interval_ms', 50)));
+        $intervalMs = max(0, min(2000, Settings::getInt('device_card_sync_interval_ms', 100)));
         $processed = 0;
         $progress = intval($job['slot_index'] ?? 0);
 
@@ -413,7 +527,7 @@ class DeviceCardSync {
             self::finishManualApplyJob(array_merge($binding, ['job_type' => $jobType]));
             $progress = intval($binding['slot_index']);
             $processed++;
-            if ($intervalMs > 0 && $processed < $limit) {
+            if ($intervalMs > 0) {
                 usleep($intervalMs * 1000);
             }
         }
@@ -764,6 +878,13 @@ class DeviceCardSync {
         return $jobs;
     }
 
+    private static function hasDueJobs()
+    {
+        $now = time();
+        $row = Database::querySingleLine('device_card_sync_jobs', "SELECT `id` FROM `device_card_sync_jobs` WHERE `status` IN ('pending','failed') AND `next_retry`<={$now} LIMIT 1", true);
+        return is_array($row) && !empty($row['id']);
+    }
+
     private static function applyCardJob($device, $job)
     {
         $enabled = ($job['job_type'] ?? '') === 'upsert';
@@ -905,11 +1026,11 @@ class DeviceCardSync {
 
     private static function deviceResponseOk($body)
     {
-        $body = trim((string)$body);
+        $body = trim(self::normalizeDeviceResponse($body));
         if ($body === '') {
             return true;
         }
-        foreach (['invalid', 'error', 'fail', 'denied', 'unauthorized', 'forbidden', '失败', '错误', '无效', '拒绝'] as $keyword) {
+        foreach (['invalid', 'error', 'fail', 'denied', 'unauthorized', 'forbidden', '失败', '错误', '无效', '拒绝', '设置发生错误', '请重新检查数据'] as $keyword) {
             if (stripos($body, $keyword) !== false) {
                 return false;
             }
@@ -1296,6 +1417,90 @@ class DeviceCardSync {
         return strtotime('yesterday 23:59:59') ?: (time() - 86400);
     }
 
+    private static function workerLocked()
+    {
+        $fp = @fopen(self::workerLockPath(), 'c');
+        if (!$fp) {
+            return false;
+        }
+        if (!flock($fp, LOCK_EX | LOCK_NB)) {
+            fclose($fp);
+            return true;
+        }
+        flock($fp, LOCK_UN);
+        fclose($fp);
+        return false;
+    }
+
+    private static function acquireWorkerLock()
+    {
+        $path = self::workerLockPath();
+        $dir = dirname($path);
+        if (!is_dir($dir)) {
+            @mkdir($dir, 0755, true);
+        }
+        $fp = @fopen($path, 'c');
+        if (!$fp) {
+            return ['ok' => false, 'path' => $path];
+        }
+        if (!flock($fp, LOCK_EX | LOCK_NB)) {
+            fclose($fp);
+            return ['ok' => false, 'path' => $path];
+        }
+        ftruncate($fp, 0);
+        fwrite($fp, json_encode([
+            'pid' => getmypid(),
+            'started_at' => date('Y-m-d H:i:s')
+        ], JSON_UNESCAPED_UNICODE));
+        fflush($fp);
+        return ['ok' => true, 'path' => $path, 'handle' => $fp];
+    }
+
+    private static function releaseWorkerLock($lock)
+    {
+        if (!is_array($lock) || empty($lock['handle'])) {
+            return;
+        }
+        flock($lock['handle'], LOCK_UN);
+        fclose($lock['handle']);
+    }
+
+    private static function workerLockPath()
+    {
+        $root = rtrim(defined('ROOT') ? ROOT : dirname(__DIR__), '/\\');
+        $dir = $root . '/tmp';
+        if (!is_dir($dir) || !is_writable($dir)) {
+            $dir = sys_get_temp_dir();
+        }
+        return rtrim($dir, '/\\') . '/doorlock_device_card_worker.lock';
+    }
+
+    private static function functionAvailable($name)
+    {
+        if (!function_exists($name)) {
+            return false;
+        }
+        $disabled = ini_get('disable_functions');
+        if (!$disabled) {
+            return true;
+        }
+        $disabledList = array_map('trim', explode(',', $disabled));
+        return !in_array($name, $disabledList, true);
+    }
+
+    private static function phpBinary()
+    {
+        $binary = defined('PHP_BINARY') && PHP_BINARY ? PHP_BINARY : 'php';
+        $base = strtolower(basename($binary));
+        if (strpos($base, 'php-fpm') !== false && defined('PHP_BINDIR')) {
+            $candidate = rtrim(PHP_BINDIR, '/\\') . '/php';
+            if (is_executable($candidate)) {
+                return $candidate;
+            }
+        }
+        return $binary;
+    }
+
     private static function deviceFormFields($fields)
     {
         if (isset($fields['Name'])) {
@@ -1378,11 +1583,60 @@ class DeviceCardSync {
 
     private static function responseSummary($body)
     {
-        $body = trim(preg_replace('/\s+/', ' ', (string)$body));
+        $body = trim(preg_replace('/\s+/', ' ', self::normalizeDeviceResponse($body)));
         if ($body === '') {
             return '';
         }
         return self::limitText($body, 120);
+    }
+
+    private static function normalizeDeviceResponse($body)
+    {
+        $body = (string)$body;
+        if ($body === '') {
+            return '';
+        }
+        $charset = '';
+        if (preg_match('/charset=["\']?([a-z0-9_\-]+)/i', $body, $matches)) {
+            $charset = strtoupper($matches[1]);
+        }
+        if ($charset !== '' && $charset !== 'UTF-8') {
+            $converted = self::convertResponseEncoding($body, $charset);
+            if ($converted !== '') {
+                return $converted;
+            }
+        }
+        if (function_exists('mb_check_encoding') && @mb_check_encoding($body, 'UTF-8')) {
+            return $body;
+        }
+        foreach (['GBK', 'GB2312', 'BIG5'] as $encoding) {
+            $converted = self::convertResponseEncoding($body, $encoding);
+            if ($converted !== '') {
+                return $converted;
+            }
+        }
+        return $body;
+    }
+
+    private static function convertResponseEncoding($body, $fromEncoding)
+    {
+        $fromEncoding = strtoupper((string)$fromEncoding);
+        if ($fromEncoding === 'GB2312') {
+            $fromEncoding = 'GBK';
+        }
+        if (function_exists('iconv')) {
+            $converted = @iconv($fromEncoding, 'UTF-8//IGNORE', $body);
+            if (is_string($converted) && $converted !== '') {
+                return $converted;
+            }
+        }
+        if (function_exists('mb_convert_encoding')) {
+            $converted = @mb_convert_encoding($body, 'UTF-8', $fromEncoding);
+            if (is_string($converted) && $converted !== '') {
+                return $converted;
+            }
+        }
+        return '';
     }
 
     private static function limitText($text, $limit)
