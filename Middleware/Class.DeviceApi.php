@@ -28,51 +28,65 @@ class deviceApi {
                 http_response_code(400);
 			    exit("invalid post data");
             }
-			switch($params['method']) {
+            $requestContext = $this->normalizeDeviceRequest($data);
+            $devicePayload = $requestContext['payload'];
+            $method = $this->resolveDeviceMethod($params['method'], $requestContext);
+			switch($method) {
                 case "heartBeat": 
-                    if (isset($data['Serial'],$data['IP'],$data['MAC'],$data['Now'],$data['Key'])) {
+                    $serial = $this->payloadValue($devicePayload, ['Serial', 'serial', 'ID']);
+                    $ip = $this->payloadValue($devicePayload, ['IP', 'ip']);
+                    $mac = $this->payloadValue($devicePayload, ['MAC', 'mac']);
+                    $now = $this->payloadValue($devicePayload, ['Now', 'now', 'Time', 'time']);
+                    $key = $this->payloadValue($devicePayload, ['Key', 'key']);
+                    if ($serial !== '' && $ip !== '' && $mac !== '' && $now !== '') {
                         if (empty($_SERVER['REMOTE_ADDR'])) {
                             http_response_code(403);
 			                exit("Unauthorized device!");
                         }
-                        if ($_SERVER['REMOTE_ADDR'] !== $data['IP']) {
+                        if ($_SERVER['REMOTE_ADDR'] !== $ip) {
                             http_response_code(403);
 			                exit("Unauthorized device!");
                         }
-                        $deviceInfo = Database::querySingleLine("devices", Array("ip" => $data['IP']));
+                        $deviceInfo = Database::querySingleLine("devices", Array("ip" => $ip));
                         if ($deviceInfo == null) {
                             http_response_code(403);
 			                exit("Unauthorized device!");
                         }
                         $updatedata = Array(
-                            "did"      => $data['Serial'],
-                            "mac"      => $data['MAC'],
-                            "hbtime"   => $data['Now'],
-                            "apikey"   => $data['Key']
+                            "did"      => $serial,
+                            "mac"      => $mac,
+                            "hbtime"   => $now
                         );
+                        if ($key !== '') {
+                            $updatedata["apikey"] = $key;
+                        }
                         $update = Database::update("devices", $updatedata, Array("id" => $deviceInfo['id']));
                         if($update !== true) {
                             Header("HTTP/1.1 500 Internal Error");
                             exit("[U]更新数据库时遇到错误，请联系管理员");
                         }
                         $resp = [
-                            'Key' => $data['Key'],
+                            'Key' => $key !== '' ? $key : (string)($deviceInfo['apikey'] ?? ''),
                             'OEM' => (string)$deviceInfo['oemcode']
                         ];
                         http_response_code(200);
-			            exit(json_encode($resp));
+			            $this->exitDeviceJson($resp, $requestContext);
                     } else {
                         http_response_code(400);
 			            exit("uncomplete params");
                     }
                 break;
                 case "verifyCard": 
-                    if (isset($data['Serial'],$data['MAC'],$data['Card'])) {
+                    $serial = $this->payloadValue($devicePayload, ['Serial', 'serial', 'ID']);
+                    $ip = $this->payloadValue($devicePayload, ['IP', 'ip']);
+                    $mac = $this->payloadValue($devicePayload, ['MAC', 'mac']);
+                    $rawCard = $this->payloadValue($devicePayload, ['Card', 'card', 'CardNo', 'cardNo', 'CardID', 'cardId', 'card_id']);
+                    if ($serial !== '' && $mac !== '' && $rawCard !== '') {
                         if (empty($_SERVER['REMOTE_ADDR'])) {
                             http_response_code(403);
 			                exit("Unauthorized device!");
                         }
-                        $deviceInfo = Database::querySingleLine("devices", Array("did" => $data['Serial']));
+                        $deviceInfo = $this->findVerifyDevice($serial, $ip, $mac);
                         if ($deviceInfo == null) {
                             http_response_code(403);
 			                exit("Unauthorized device!");
@@ -83,9 +97,9 @@ class deviceApi {
                         }
 
                         $eventTime = time();
-                        $card = $data['Card'];
-                        if ($this->is_base64($data['Card'])) {
-                            $card = base64_decode($data['Card']);
+                        $card = (string)$rawCard;
+                        if (!ctype_digit($card) && $this->is_base64($card)) {
+                            $card = base64_decode($card);
                         }
                         $card = AttendanceService::normalizeCardNumber($card);
 
@@ -105,7 +119,7 @@ class deviceApi {
                                     'OEM' => (string)$deviceInfo['oemcode']
                                 ];
                                 AttendanceService::writeAccessLog($guestInfo['name'], '访客', $deviceInfo['name'], $card, '开门失败：'.$reason, $eventTime);
-                                exit(json_encode($resp));
+                                $this->exitDeviceJson($resp, $requestContext);
                             }
                                 http_response_code(200);
                                 $resp = [
@@ -116,7 +130,7 @@ class deviceApi {
                                 ];
 
                                 AttendanceService::writeAccessLog($guestInfo['name'], '访客', $deviceInfo['name'], $card, '开门成功', $eventTime);
-                                exit(json_encode($resp));
+                                $this->exitDeviceJson($resp, $requestContext);
                         }
 
                         if ($learnerInfo != null) {
@@ -131,7 +145,7 @@ class deviceApi {
                                     'OEM' => (string)$deviceInfo['oemcode']
                                 ];
                                 AttendanceService::writeAccessLog($learnerInfo['name'], '学员', $deviceInfo['name'], $card, '开门失败：'.$reason, $eventTime);
-                                exit(json_encode($resp));
+                                $this->exitDeviceJson($resp, $requestContext);
                             }
                                 http_response_code(200);
                                 $resp = [
@@ -142,7 +156,7 @@ class deviceApi {
                                 ];
 
                                 AttendanceService::writeAccessLog($learnerInfo['name'], '学员', $deviceInfo['name'], $card, '开门成功', $eventTime);
-                                exit(json_encode($resp));
+                                $this->exitDeviceJson($resp, $requestContext);
                         }
 
                         if ($employeeInfo != null) {
@@ -157,7 +171,7 @@ class deviceApi {
                                     'OEM' => (string)$deviceInfo['oemcode']
                                 ];
                                 AttendanceService::writeAccessLog($employeeInfo['name'], '员工', $deviceInfo['name'], $card, '开门失败：'.$reason, $eventTime);
-                                exit(json_encode($resp));
+                                $this->exitDeviceJson($resp, $requestContext);
                             }
                                 http_response_code(200);
                                 $resp = [
@@ -168,7 +182,7 @@ class deviceApi {
                                 ];
                                 AttendanceService::writeAccessLog($employeeInfo['name'], '员工', $deviceInfo['name'], $card, '开门成功', $eventTime);
                                 AttendanceService::enqueueSwipe($employeeInfo, $deviceInfo, $card, 'card', $eventTime);
-                                exit(json_encode($resp));
+                                $this->exitDeviceJson($resp, $requestContext);
                         }
 
                         http_response_code(200);
@@ -178,7 +192,7 @@ class deviceApi {
                             'Time' => (string)$_config['doorOpenTime'],
                             'OEM' => (string)$deviceInfo['oemcode']
                         ];
-			            exit(json_encode($resp));
+			            $this->exitDeviceJson($resp, $requestContext);
                     } else {
                         http_response_code(400);
 			            exit("uncomplete params");
@@ -192,6 +206,90 @@ class deviceApi {
             Header("HTTP/1.1 400 Bad Request");
 			exit("Illegal method.");
         }
+    }
+
+    private function normalizeDeviceRequest($data)
+    {
+        $payload = $data;
+        $wrapped = false;
+        if (isset($data['data']) && is_array($data['data'])) {
+            $payload = $data['data'];
+            $wrapped = isset($data['method']) || isset($data['taskNo']) || isset($data['version']);
+        }
+
+        return [
+            'payload' => is_array($payload) ? $payload : [],
+            'wrapped' => $wrapped,
+            'id' => $data['id'] ?? null,
+            'taskNo' => $data['taskNo'] ?? null,
+            'version' => (string)($data['version'] ?? ''),
+            'method' => (string)($data['method'] ?? '')
+        ];
+    }
+
+    private function resolveDeviceMethod($queryMethod, $requestContext)
+    {
+        $method = $this->normalizeDeviceMethodName((string)$queryMethod);
+        if ($method !== '') {
+            return $method;
+        }
+        return $this->normalizeDeviceMethodName((string)($requestContext['method'] ?? ''));
+    }
+
+    private function normalizeDeviceMethodName($method)
+    {
+        $method = strtolower(trim((string)$method));
+        if (in_array($method, ['heartbeat', 'heart_beat', 'status'], true)) {
+            return 'heartBeat';
+        }
+        if (in_array($method, ['verifycard', 'verify_card', 'cardverify', 'card_verify', 'verify', 'card'], true)) {
+            return 'verifyCard';
+        }
+        return '';
+    }
+
+    private function payloadValue($payload, $keys)
+    {
+        foreach ($keys as $key) {
+            if (array_key_exists($key, $payload) && $payload[$key] !== null) {
+                $value = $payload[$key];
+                if (is_array($value) || is_object($value)) {
+                    continue;
+                }
+                return trim((string)$value);
+            }
+        }
+        return '';
+    }
+
+    private function findVerifyDevice($serial, $ip, $mac)
+    {
+        $deviceInfo = null;
+        if ($serial !== '') {
+            $deviceInfo = Database::querySingleLine("devices", Array("did" => $serial));
+        }
+        if ($deviceInfo == null && $ip !== '') {
+            $deviceInfo = Database::querySingleLine("devices", Array("ip" => $ip));
+        }
+        if ($deviceInfo == null && $mac !== '') {
+            $deviceInfo = Database::querySingleLine("devices", Array("mac" => $mac));
+        }
+        return $deviceInfo;
+    }
+
+    private function exitDeviceJson($payload, $requestContext)
+    {
+        if (!empty($requestContext['wrapped'])) {
+            $response = [
+                'id' => $requestContext['id'],
+                'taskNo' => $requestContext['taskNo'],
+                'version' => $requestContext['version'] !== '' ? $requestContext['version'] : '1.0',
+                'method' => $requestContext['method'] !== '' ? $requestContext['method'] : '',
+                'data' => $payload
+            ];
+            exit(json_encode($response, JSON_UNESCAPED_UNICODE));
+        }
+        exit(json_encode($payload, JSON_UNESCAPED_UNICODE));
     }
 
     private function is_base64($string) {
