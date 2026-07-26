@@ -125,7 +125,7 @@ function settingValue($key) {
 								<hr>
 								<h5>端侧卡库同步</h5>
 								<div class="layui-form-item"><label class="layui-form-label">卡库路径</label><div class="layui-input-block"><input class="layui-input" name="device_card_edit_path" value="<?php echo settingValue('device_card_edit_path'); ?>" placeholder="/EditCard.shtm"></div></div>
-								<div class="layui-form-item"><label class="layui-form-label">单轮条数</label><div class="layui-input-block"><input class="layui-input" name="device_card_sync_batch_size" value="<?php echo settingValue('device_card_sync_batch_size'); ?>" placeholder="1-200"></div></div>
+								<div class="layui-form-item"><label class="layui-form-label">单轮条数</label><div class="layui-input-block"><input class="layui-input" name="device_card_sync_batch_size" value="<?php echo settingValue('device_card_sync_batch_size'); ?>" placeholder="1-1000"></div></div>
 								<div class="layui-form-item"><label class="layui-form-label">间隔ms</label><div class="layui-input-block"><input class="layui-input" name="device_card_sync_interval_ms" value="<?php echo settingValue('device_card_sync_interval_ms'); ?>" placeholder="例如 100"></div></div>
 								<div class="layui-form-item"><label class="layui-form-label">超时秒数</label><div class="layui-input-block"><input class="layui-input" name="device_card_sync_timeout" value="<?php echo settingValue('device_card_sync_timeout'); ?>" placeholder="1-30"></div></div>
 								<p>端侧卡库凭证复用 config.php 的 remoteOpen.username / remoteOpen.password；是否启用由设备管理中的设备开关控制。</p>

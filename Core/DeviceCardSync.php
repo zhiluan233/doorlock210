@@ -12,6 +12,7 @@ namespace anim210System;
 class DeviceCardSync {
 
     const MAX_SLOT_INDEX = 61200;
+    const MANUAL_STAGE_UPSERTING = 'upserting';
 
     public static function enqueueFullSync($deviceId, $source = 'manual')
     {
@@ -29,6 +30,12 @@ class DeviceCardSync {
         if (!$device || !self::localCardEnabled($device)) {
             return ['ok' => false, 'message' => '设备未启用端侧卡库'];
         }
+        if (!$forcePush && !self::initialFullCompleted($device)) {
+            $message = '等待管理员手动完成首次端侧卡库全量同步，自动同步已跳过';
+            self::cancelAutoQueue($device['id'], $message);
+            self::updateDeviceSyncState($device['id'], $message);
+            return ['ok' => true, 'queued' => false, 'skipped' => true, 'job_id' => 0, 'message' => $message];
+        }
 
         $existing = self::activeFullJob($device['id']);
         if ($existing && $forcePush && ($existing['status'] ?? '') !== 'running') {
@@ -42,6 +49,10 @@ class DeviceCardSync {
         }
         if ($forcePush) {
             self::cancelDeviceQueue($device['id'], '手动全量同步已替换未执行任务');
+            Database::update('devices', [
+                'local_card_initial_full_done' => 0,
+                'local_card_sync_message' => '手动全量同步准备中'
+            ], ['id' => $device['id']]);
         }
 
         $jobId = self::enqueueJob([
@@ -58,11 +69,16 @@ class DeviceCardSync {
     {
         $devices = self::localCardDevices();
         $count = 0;
+        $skipped = 0;
         foreach ($devices as $device) {
-            self::enqueueFullSync($device['id'], $source);
-            $count++;
+            $result = self::enqueueFullSync($device['id'], $source);
+            if (!empty($result['queued']) || !empty($result['job_id'])) {
+                $count++;
+            } elseif (!empty($result['skipped'])) {
+                $skipped++;
+            }
         }
-        return ['ok' => true, 'count' => $count, 'message' => '已提交 '.$count.' 台设备端侧卡库全量同步任务'];
+        return ['ok' => true, 'count' => $count, 'skipped' => $skipped, 'message' => '已提交 '.$count.' 台设备端侧卡库全量同步任务，跳过 '.$skipped.' 台未完成首次手动全量同步的设备'];
     }
 
     public static function enqueueSubjectChange($subjectKind, $subjectId, $source = 'subject_change')
@@ -76,6 +92,10 @@ class DeviceCardSync {
         $devices = self::localCardDevices();
         $updated = 0;
         foreach ($devices as $device) {
+            if (!self::initialFullCompleted($device)) {
+                self::cancelAutoQueue($device['id'], '等待管理员手动完成首次端侧卡库全量同步，自动增量已跳过');
+                continue;
+            }
             if (self::reconcileSubjectForDevice($device, $subjectKind, $subjectId, $source)) {
                 $updated++;
             }
@@ -94,6 +114,10 @@ class DeviceCardSync {
         $bindings = self::bindingsBySubject($subjectKind, $subjectId);
         $count = 0;
         foreach ($bindings as $binding) {
+            $device = self::device($binding['device_id'] ?? 0);
+            if (!$device || !self::initialFullCompleted($device)) {
+                continue;
+            }
             self::enqueueDeleteForBinding($binding, $source);
             $count++;
         }
@@ -103,7 +127,7 @@ class DeviceCardSync {
     public static function processQueue($limit = null)
     {
         $limit = $limit === null ? Settings::getInt('device_card_sync_batch_size', 20) : intval($limit);
-        $limit = max(1, min(200, $limit));
+        $limit = max(1, min(1000, $limit));
         $intervalMs = max(0, min(2000, Settings::getInt('device_card_sync_interval_ms', 100)));
         $jobs = self::dueJobs($limit);
         $result = [
@@ -115,7 +139,8 @@ class DeviceCardSync {
         ];
 
         foreach ($jobs as $index => $job) {
-            $item = self::processJob($job);
+            $isManualFull = ($job['job_type'] ?? '') === 'full_force';
+            $item = self::processJob($job, $isManualFull ? $limit : null);
             if ($item['ok']) {
                 $result['success']++;
             } else {
@@ -125,6 +150,9 @@ class DeviceCardSync {
             $result['items'][] = $item;
             if ($intervalMs > 0 && $index < count($jobs) - 1) {
                 usleep($intervalMs * 1000);
+            }
+            if ($isManualFull) {
+                break;
             }
         }
 
@@ -164,8 +192,12 @@ class DeviceCardSync {
         }
 
         $device = self::device($deviceId);
+        if (($root['job_type'] ?? '') === 'full_force') {
+            return self::manualFullProgress($device, $root);
+        }
+
         $eligibleTotal = $device ? count(self::desiredSubjectsForDevice($device)) : 0;
-        $source = ($root['job_type'] ?? '') === 'full_force' ? self::manualBatchSource($jobId) : (string)($root['source'] ?? '');
+        $source = (string)($root['source'] ?? '');
         $sourceSql = mysqli_real_escape_string($conn, $source);
         $counts = [
             'pending' => 0,
@@ -230,6 +262,49 @@ class DeviceCardSync {
         ];
     }
 
+    private static function manualFullProgress($device, $root)
+    {
+        $jobId = intval($root['id'] ?? 0);
+        $rootStatus = (string)($root['status'] ?? '');
+        $eligibleTotal = $device ? count(self::desiredSubjectsForDevice($device)) : 0;
+        $bindingTotal = $device ? self::bindingTotalForDevice($device['id']) : 0;
+        $total = $bindingTotal > 0 ? $bindingTotal : $eligibleTotal;
+        $slotProgress = max(0, intval($root['slot_index'] ?? 0));
+
+        $completed = $device ? self::bindingCountUpToSlot($device['id'], $slotProgress) : 0;
+        if ($rootStatus === 'success') {
+            $completed = $total;
+            $stageText = 'done';
+        } elseif ($rootStatus === 'running') {
+            $stageText = 'syncing';
+        } elseif ($rootStatus === 'failed') {
+            $stageText = 'retrying';
+        } else {
+            $stageText = 'queued';
+        }
+
+        $percent = $total > 0 ? intval(floor(($completed / $total) * 100)) : 100;
+        $pending = max(0, $total - $completed);
+        return [
+            'ok' => true,
+            'job_id' => $jobId,
+            'device_id' => intval($root['device_id'] ?? 0),
+            'stage' => $stageText,
+            'root_status' => $rootStatus,
+            'eligible_total' => $eligibleTotal,
+            'total' => $total,
+            'completed' => $completed,
+            'pending' => $pending,
+            'running' => $rootStatus === 'running' ? 1 : 0,
+            'failed' => $rootStatus === 'failed' ? 1 : 0,
+            'success' => $completed,
+            'cancelled' => 0,
+            'percent' => max(0, min(100, $percent)),
+            'done' => $rootStatus === 'success',
+            'message' => (string)($root['message'] ?? '')
+        ];
+    }
+
     public static function cancelDeviceQueue($deviceId, $message = '端侧卡库已关闭')
     {
         global $conn;
@@ -246,32 +321,51 @@ class DeviceCardSync {
         return ['ok' => true, 'message' => '已取消该设备未执行的端侧卡库任务'];
     }
 
-    private static function processJob($job)
+    private static function processJob($job, $operationLimit = null)
     {
         $jobId = intval($job['id']);
         self::markJobRunning($jobId);
-        if (in_array(($job['job_type'] ?? ''), ['full', 'full_force'], true)) {
+        if (($job['job_type'] ?? '') === 'full_force') {
+            $device = self::device($job['device_id']);
+            if (!$device || !self::localCardEnabled($device)) {
+                self::markJobSuccess($jobId, '设备未启用端侧卡库，跳过');
+                return ['ok' => true, 'job_id' => $jobId, 'done' => true, 'message' => '设备未启用端侧卡库，跳过'];
+            }
+            return self::processManualFullJob($job, $device, $operationLimit);
+        }
+
+        if (($job['job_type'] ?? '') === 'full') {
             $device = self::device($job['device_id']);
             if (!$device || !self::localCardEnabled($device)) {
                 self::markJobSuccess($jobId, '设备未启用端侧卡库，跳过');
                 return ['ok' => true, 'job_id' => $jobId, 'message' => '设备未启用端侧卡库，跳过'];
             }
-            $forcePush = ($job['job_type'] ?? '') === 'full_force';
-            $source = $forcePush ? self::manualBatchSource($jobId) : ($job['source'] ?: 'full');
-            $generated = self::reconcileDevice($device, $source, $forcePush);
-            $message = $forcePush ? '手动全量下发计算完成，生成 '.$generated.' 条下发任务' : '全量差异计算完成，生成 '.$generated.' 条下发任务';
+            if (!self::initialFullCompleted($device)) {
+                $message = '等待管理员手动完成首次端侧卡库全量同步，自动全量任务已取消';
+                self::markJobCancelled($jobId, $message);
+                self::updateDeviceSyncState($device['id'], $message);
+                return ['ok' => true, 'job_id' => $jobId, 'message' => $message];
+            }
+            $generated = self::reconcileDevice($device, $job['source'] ?: 'full', false);
+            $message = '全量差异计算完成，生成 '.$generated.' 条下发任务';
             self::markJobSuccess($jobId, $message);
             Database::update('devices', [
                 'local_card_last_full_at' => time(),
                 'local_card_sync_message' => $message
             ], ['id' => $device['id']]);
-            return ['ok' => true, 'job_id' => $jobId, 'generated' => $generated, 'message' => $forcePush ? '手动全量下发计算完成' : '全量差异计算完成'];
+            return ['ok' => true, 'job_id' => $jobId, 'generated' => $generated, 'message' => '全量差异计算完成'];
         }
 
         $device = self::device($job['device_id']);
         if (!$device || !self::localCardEnabled($device)) {
             self::markJobSuccess($jobId, '设备未启用端侧卡库，跳过');
             return ['ok' => true, 'job_id' => $jobId, 'message' => '设备未启用端侧卡库，跳过'];
+        }
+        if (!self::initialFullCompleted($device)) {
+            $message = '等待管理员手动完成首次端侧卡库全量同步，自动下发任务已取消';
+            self::markJobCancelled($jobId, $message);
+            self::updateDeviceSyncState($device['id'], $message);
+            return ['ok' => true, 'job_id' => $jobId, 'message' => $message];
         }
 
         $response = self::applyCardJob($device, $job);
@@ -290,6 +384,60 @@ class DeviceCardSync {
             'local_card_sync_message' => '卡库下发失败：'.self::limitText($response['message'], 80)
         ], ['id' => $device['id']]);
         return ['ok' => false, 'job_id' => $jobId, 'message' => $response['message']];
+    }
+
+    private static function processManualFullJob($job, $device, $operationLimit)
+    {
+        $jobId = intval($job['id']);
+        $limit = $operationLimit === null ? Settings::getInt('device_card_sync_batch_size', 20) : intval($operationLimit);
+        $limit = max(1, min(1000, $limit));
+        $intervalMs = max(0, min(2000, Settings::getInt('device_card_sync_interval_ms', 50)));
+        $processed = 0;
+        $progress = intval($job['slot_index'] ?? 0);
+
+        if ($progress <= 0 && ($job['subject_kind'] ?? '') !== self::MANUAL_STAGE_UPSERTING) {
+            self::replaceManualBindings($device);
+        }
+
+        $bindings = self::manualBindingsAfterSlot($device['id'], $progress, $limit);
+        $totalBindings = self::bindingTotalForDevice($device['id']);
+        foreach ($bindings as $binding) {
+            $jobType = intval($binding['enabled'] ?? 0) === 1 ? 'upsert' : 'delete';
+            $response = self::applyCardJob($device, array_merge($binding, ['job_type' => $jobType]));
+            if (!$response['ok']) {
+                $message = '下发设备卡库 Index '.intval($binding['slot_index']).' 失败：'.self::limitText($response['message'], 120);
+                self::markManualJobFailed($jobId, intval($job['attempts'] ?? 0) + 1, $message, self::MANUAL_STAGE_UPSERTING, $progress);
+                self::updateDeviceSyncState($device['id'], $message);
+                return ['ok' => false, 'job_id' => $jobId, 'generated' => $processed, 'done' => false, 'message' => $message];
+            }
+            self::finishManualApplyJob(array_merge($binding, ['job_type' => $jobType]));
+            $progress = intval($binding['slot_index']);
+            $processed++;
+            if ($intervalMs > 0 && $processed < $limit) {
+                usleep($intervalMs * 1000);
+            }
+        }
+
+        if (self::hasBindingAfterSlot($device['id'], $progress)) {
+            $doneRows = self::bindingCountUpToSlot($device['id'], $progress);
+            $message = '正在下发设备卡库：'.$doneRows.'/'.$totalBindings;
+            self::markManualJobPending($jobId, self::MANUAL_STAGE_UPSERTING, $progress, $message);
+            self::updateDeviceSyncState($device['id'], $message);
+            return ['ok' => true, 'job_id' => $jobId, 'generated' => $processed, 'done' => false, 'message' => $message];
+        }
+
+        self::cleanupManualClearBindings($device['id']);
+        $followupGenerated = self::reconcileDevice($device, 'manual_force_followup', false);
+        $message = '手动全量下发完成：处理 '.$totalBindings.' 条设备映射'.($followupGenerated > 0 ? '，补充差异 '.$followupGenerated.' 条' : '');
+        self::markJobSuccess($jobId, $message);
+        $now = time();
+        Database::update('devices', [
+            'local_card_initial_full_done' => 1,
+            'local_card_last_full_at' => $now,
+            'local_card_last_sync_at' => $now,
+            'local_card_sync_message' => $message
+        ], ['id' => $device['id']]);
+        return ['ok' => true, 'job_id' => $jobId, 'generated' => $processed + $followupGenerated, 'done' => true, 'message' => $message];
     }
 
     private static function reconcileDevice($device, $source = 'full', $forcePush = false)
@@ -399,6 +547,7 @@ class DeviceCardSync {
                 }
             }
         }
+        uksort($items, [self::class, 'compareSubjectKeys']);
         return $items;
     }
 
@@ -420,7 +569,8 @@ class DeviceCardSync {
             $now = time();
             $where .= " AND (`expires_at`=0 OR `expires_at`>{$now})";
         }
-        $rs = Database::query($table, "SELECT * FROM `{$table}` WHERE {$where}", '', true);
+        $order = $kind === 'employee' ? "`employee_id` ASC, `open_id` ASC" : ($kind === 'learner' ? "`student_no` ASC" : "`name` ASC, `open_id` ASC");
+        $rs = Database::query($table, "SELECT * FROM `{$table}` WHERE {$where} ORDER BY {$order}", '', true);
         $items = [];
         if ($rs instanceof \mysqli_result) {
             while ($row = mysqli_fetch_assoc($rs)) {
@@ -484,12 +634,13 @@ class DeviceCardSync {
 
     private static function displayName($kind, $subject)
     {
-        $prefix = $kind === 'employee' ? '员工-' : ($kind === 'learner' ? '学员-' : '访客-');
+        $prefix = $kind === 'employee' ? '员-' : ($kind === 'learner' ? '学-' : '访-');
         $name = trim((string)($subject['name'] ?? ''));
         if ($name === '' && $kind === 'learner') {
             $name = trim((string)($subject['realname'] ?? ''));
         }
-        return self::safeDeviceName($prefix . $name);
+        $shortName = function_exists('mb_substr') ? mb_substr($name, 0, 2, 'UTF-8') : substr($name, 0, 2);
+        return self::safeDeviceName($prefix . $shortName);
     }
 
     private static function validTo($kind, $subject)
@@ -503,7 +654,6 @@ class DeviceCardSync {
     private static function bindingNeedsUpsert($binding, $subject)
     {
         return (string)($binding['card_id'] ?? '') !== (string)$subject['card_id']
-            || (string)($binding['display_name'] ?? '') !== (string)$subject['display_name']
             || intval($binding['valid_to'] ?? 0) !== intval($subject['valid_to'] ?? 0)
             || intval($binding['enabled'] ?? 0) !== 1
             || (string)($binding['status'] ?? '') !== 'synced';
@@ -561,7 +711,7 @@ class DeviceCardSync {
             'card_id' => '0',
             'slot_index' => intval($binding['slot_index']),
             'display_name' => '',
-            'valid_to' => 0,
+            'valid_to' => self::expiredCardTime(),
             'source' => $source
         ]);
     }
@@ -635,7 +785,7 @@ class DeviceCardSync {
             'Minute' => 0,
             'TZ1' => 1
         ];
-        $fields = array_merge($fields, self::endTimeFields($enabled ? intval($job['valid_to'] ?? 0) : 0));
+        $fields = array_merge($fields, self::endTimeFields($enabled ? intval($job['valid_to'] ?? 0) : self::expiredCardTime()));
         return self::postDeviceCard($device, $fields);
     }
 
@@ -677,6 +827,34 @@ class DeviceCardSync {
             'subject_id' => $job['subject_id'],
             'created_at' => $now
         ], $data));
+    }
+
+    private static function finishManualApplyJob($job)
+    {
+        if (($job['job_type'] ?? '') === 'delete') {
+            Database::update('device_card_bindings', [
+                'enabled' => 0,
+                'status' => 'cleared',
+                'last_sync_at' => time(),
+                'updated_at' => time()
+            ], [
+                'device_id' => $job['device_id'],
+                'slot_index' => $job['slot_index']
+            ]);
+            return;
+        }
+        self::finishApplyJob($job);
+    }
+
+    private static function cleanupManualClearBindings($deviceId)
+    {
+        global $conn;
+
+        $deviceId = intval($deviceId);
+        if ($deviceId <= 0) {
+            return;
+        }
+        mysqli_query($conn, "DELETE FROM `device_card_bindings` WHERE `device_id`={$deviceId} AND `subject_kind`='clear'");
     }
 
     private static function postDeviceCard($device, $fields)
@@ -917,9 +1095,205 @@ class DeviceCardSync {
         return is_array($job) ? $job : null;
     }
 
-    private static function manualBatchSource($jobId)
+    private static function initialFullCompleted($device)
     {
-        return 'manual_force:' . intval($jobId);
+        return intval($device['local_card_initial_full_done'] ?? 0) === 1;
+    }
+
+    private static function cancelAutoQueue($deviceId, $message)
+    {
+        global $conn;
+
+        $deviceId = intval($deviceId);
+        if ($deviceId <= 0) {
+            return;
+        }
+        $now = time();
+        $message = mysqli_real_escape_string($conn, self::limitText($message, 250));
+        mysqli_query($conn, "UPDATE `device_card_sync_jobs` SET `status`='cancelled', `message`='{$message}', `updated_at`={$now}, `finished_at`={$now}, `locked_at`=0 WHERE `device_id`={$deviceId} AND `job_type`<>'full_force' AND `status` IN ('pending','failed')");
+    }
+
+    private static function replaceManualBindings($device)
+    {
+        global $conn;
+
+        $deviceId = intval($device['id'] ?? 0);
+        if ($deviceId <= 0) {
+            return 0;
+        }
+
+        self::cancelAutoQueue($deviceId, '手动全量同步已重建设备映射');
+        $desired = self::desiredSubjectsForDevice($device);
+        $oldBindings = self::bindingsBySlot($deviceId);
+        $planned = [];
+        $usedSlots = [];
+        $now = time();
+
+        foreach ($oldBindings as $slot => $binding) {
+            $key = self::subjectKey($binding['subject_kind'] ?? '', $binding['subject_id'] ?? '');
+            if (isset($desired[$key])) {
+                $planned[intval($slot)] = $desired[$key];
+                $usedSlots[intval($slot)] = true;
+                unset($desired[$key]);
+            }
+        }
+
+        foreach ($desired as $subject) {
+            $slot = self::allocateSlot($usedSlots);
+            if ($slot <= 0) {
+                self::updateDeviceSyncState($deviceId, '端侧卡库槽位已满，无法继续下发');
+                break;
+            }
+            $planned[$slot] = $subject;
+            $usedSlots[$slot] = true;
+        }
+        ksort($planned);
+
+        mysqli_query($conn, "DELETE FROM `device_card_bindings` WHERE `device_id`={$deviceId}");
+        foreach ($planned as $slot => $subject) {
+            Database::insert('device_card_bindings', [
+                'id' => null,
+                'device_id' => $deviceId,
+                'slot_index' => intval($slot),
+                'subject_kind' => $subject['subject_kind'],
+                'subject_id' => $subject['subject_id'],
+                'card_id' => $subject['card_id'],
+                'display_name' => $subject['display_name'],
+                'valid_to' => intval($subject['valid_to'] ?? 0),
+                'enabled' => 1,
+                'status' => 'pending',
+                'created_at' => $now,
+                'updated_at' => $now
+            ]);
+        }
+
+        foreach ($oldBindings as $slot => $old) {
+            $slot = intval($slot);
+            if (isset($planned[$slot])) {
+                continue;
+            }
+            Database::insert('device_card_bindings', [
+                'id' => null,
+                'device_id' => $deviceId,
+                'slot_index' => $slot,
+                'subject_kind' => 'clear',
+                'subject_id' => 'slot:' . $slot,
+                'card_id' => '0',
+                'display_name' => '',
+                'valid_to' => self::expiredCardTime(),
+                'enabled' => 0,
+                'status' => 'deleting',
+                'created_at' => $now,
+                'updated_at' => $now
+            ]);
+        }
+
+        $count = self::bindingTotalForDevice($deviceId);
+        self::updateDeviceSyncState($deviceId, '手动全量同步映射已重建，待下发 '.$count.' 条');
+        return $count;
+    }
+
+    private static function bindingsBySlot($deviceId)
+    {
+        $deviceId = intval($deviceId);
+        $rs = Database::query('device_card_bindings', "SELECT * FROM `device_card_bindings` WHERE `device_id`={$deviceId} ORDER BY `slot_index` ASC", '', true);
+        $items = [];
+        if ($rs instanceof \mysqli_result) {
+            while ($row = mysqli_fetch_assoc($rs)) {
+                $items[intval($row['slot_index'])] = $row;
+            }
+            mysqli_free_result($rs);
+        }
+        return $items;
+    }
+
+    private static function manualBindingsAfterSlot($deviceId, $slotIndex, $limit)
+    {
+        $deviceId = intval($deviceId);
+        $slotIndex = intval($slotIndex);
+        $limit = max(1, intval($limit));
+        $rs = Database::query('device_card_bindings', "SELECT * FROM `device_card_bindings` WHERE `device_id`={$deviceId} AND `slot_index`>{$slotIndex} ORDER BY `slot_index` ASC LIMIT {$limit}", '', true);
+        $items = [];
+        if ($rs instanceof \mysqli_result) {
+            while ($row = mysqli_fetch_assoc($rs)) {
+                $items[] = $row;
+            }
+            mysqli_free_result($rs);
+        }
+        return $items;
+    }
+
+    private static function hasBindingAfterSlot($deviceId, $slotIndex)
+    {
+        $deviceId = intval($deviceId);
+        $slotIndex = intval($slotIndex);
+        $row = Database::querySingleLine('device_card_bindings', "SELECT `id` FROM `device_card_bindings` WHERE `device_id`={$deviceId} AND `slot_index`>{$slotIndex} ORDER BY `slot_index` ASC LIMIT 1", true);
+        return is_array($row) && !empty($row['id']);
+    }
+
+    private static function bindingTotalForDevice($deviceId)
+    {
+        $deviceId = intval($deviceId);
+        $row = Database::querySingleLine('device_card_bindings', "SELECT COUNT(*) AS `total` FROM `device_card_bindings` WHERE `device_id`={$deviceId}", true);
+        return intval($row['total'] ?? 0);
+    }
+
+    private static function bindingCountUpToSlot($deviceId, $slotIndex)
+    {
+        $deviceId = intval($deviceId);
+        $slotIndex = intval($slotIndex);
+        if ($deviceId <= 0 || $slotIndex <= 0) {
+            return 0;
+        }
+        $row = Database::querySingleLine('device_card_bindings', "SELECT COUNT(*) AS `total` FROM `device_card_bindings` WHERE `device_id`={$deviceId} AND `slot_index`<={$slotIndex}", true);
+        return intval($row['total'] ?? 0);
+    }
+
+
+    private static function markJobCancelled($jobId, $message)
+    {
+        Database::update('device_card_sync_jobs', [
+            'status' => 'cancelled',
+            'message' => $message,
+            'locked_at' => 0,
+            'updated_at' => time(),
+            'finished_at' => time()
+        ], ['id' => $jobId]);
+    }
+
+    private static function markManualJobPending($jobId, $stage, $slotIndex, $message)
+    {
+        Database::update('device_card_sync_jobs', [
+            'status' => 'pending',
+            'subject_kind' => $stage,
+            'slot_index' => intval($slotIndex),
+            'message' => $message,
+            'locked_at' => 0,
+            'next_retry' => 0,
+            'updated_at' => time()
+        ], ['id' => $jobId]);
+    }
+
+    private static function markManualJobFailed($jobId, $attempts, $message, $stage, $slotIndex)
+    {
+        $base = max(30, Settings::getInt('queue_retry_base_seconds', 60));
+        $max = max($base, Settings::getInt('queue_retry_max_seconds', 3600));
+        $delay = min($max, $base * max(1, min(20, $attempts)));
+        Database::update('device_card_sync_jobs', [
+            'status' => 'failed',
+            'subject_kind' => $stage,
+            'slot_index' => intval($slotIndex),
+            'attempts' => $attempts,
+            'next_retry' => time() + $delay,
+            'message' => $message,
+            'locked_at' => 0,
+            'updated_at' => time()
+        ], ['id' => $jobId]);
+    }
+
+    private static function expiredCardTime()
+    {
+        return strtotime('yesterday 23:59:59') ?: (time() - 86400);
     }
 
     private static function deviceFormFields($fields)
@@ -961,6 +1335,32 @@ class DeviceCardSync {
         return $kind . ':' . $subjectId;
     }
 
+    private static function compareSubjectKeys($left, $right)
+    {
+        [$leftKind, $leftId] = array_pad(explode(':', (string)$left, 2), 2, '');
+        [$rightKind, $rightId] = array_pad(explode(':', (string)$right, 2), 2, '');
+        $leftOrder = self::subjectKindOrder($leftKind);
+        $rightOrder = self::subjectKindOrder($rightKind);
+        if ($leftOrder !== $rightOrder) {
+            return $leftOrder <=> $rightOrder;
+        }
+        return strcmp($leftId, $rightId);
+    }
+
+    private static function subjectKindOrder($kind)
+    {
+        if ($kind === 'employee') {
+            return 1;
+        }
+        if ($kind === 'learner') {
+            return 2;
+        }
+        if ($kind === 'guest') {
+            return 3;
+        }
+        return 99;
+    }
+
     private static function normalizeSubjectKind($kind)
     {
         $kind = trim((string)$kind);
@@ -973,7 +1373,7 @@ class DeviceCardSync {
         if ($name === '') {
             return 'user';
         }
-        return function_exists('mb_substr') ? mb_substr($name, 0, 20, 'UTF-8') : substr($name, 0, 20);
+        return function_exists('mb_substr') ? mb_substr($name, 0, 4, 'UTF-8') : substr($name, 0, 4);
     }
 
     private static function responseSummary($body)

@@ -723,7 +723,8 @@ class PostHandler {
 					}
 					$result = Database::update('devices', [
 						'local_card_enabled' => $enabled,
-						'local_card_sync_message' => $enabled ? '端侧卡库已启用，等待全量同步' : '端侧卡库已关闭',
+						'local_card_initial_full_done' => 0,
+						'local_card_sync_message' => $enabled ? '端侧卡库已启用，等待手动全量同步' : '端侧卡库已关闭',
 					], ['id' => $deviceId]);
 					if ($result !== true) {
 						Header("HTTP/1.1 500 Internal Error");
@@ -731,10 +732,13 @@ class PostHandler {
 					}
 					if ($enabled === 1) {
 						$syncResult = $this->enqueueDeviceCardFullSync($deviceId, 'device_toggle');
-						if ($syncResult && !empty($syncResult['ok'])) {
-							exit("端侧卡库已启用，并已提交首次全量同步任务");
+						if ($syncResult && !empty($syncResult['skipped'])) {
+							exit("端侧卡库已启用，请在设备高级设置中手动执行首次全量同步");
 						}
-						exit("端侧卡库已启用，但首次全量同步任务提交失败，请手动点击同步卡库");
+						if ($syncResult && !empty($syncResult['ok']) && (!empty($syncResult['queued']) || !empty($syncResult['job_id']))) {
+							exit("端侧卡库已启用，并已提交全量同步任务");
+						}
+						exit("端侧卡库已启用，请手动点击全量同步");
 					}
 					if (class_exists(__NAMESPACE__ . '\\DeviceCardSync')) {
 						DeviceCardSync::cancelDeviceQueue($deviceId, '端侧卡库已关闭');
@@ -919,7 +923,7 @@ class PostHandler {
 							'feishu_attendance_cron_max_batches' => [1, 100, '飞书考勤每轮批次应为 1-100'],
 							'feishu_attendance_batch_interval_ms' => [0, 2000, '飞书考勤批次间隔应为 0-2000 毫秒'],
 							'remote_open_timeout' => [1, 30, '远程开门超时秒数应为 1-30'],
-							'device_card_sync_batch_size' => [1, 200, '端侧卡库单轮下发条数应为 1-200'],
+							'device_card_sync_batch_size' => [1, 1000, '端侧卡库单轮下发条数应为 1-1000'],
 							'device_card_sync_interval_ms' => [0, 2000, '端侧卡库下发间隔应为 0-2000 毫秒'],
 							'device_card_sync_timeout' => [1, 30, '端侧卡库请求超时应为 1-30 秒']
 						];

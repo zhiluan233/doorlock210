@@ -320,6 +320,7 @@ class Migrator {
         self::addColumn('devices', 'model', "varchar(128) NOT NULL DEFAULT ''", $errors);
         self::addColumn('devices', 'controller_type', "varchar(32) NOT NULL DEFAULT ''", $errors);
         self::addColumn('devices', 'local_card_enabled', "tinyint(1) NOT NULL DEFAULT 0", $errors);
+        self::addColumn('devices', 'local_card_initial_full_done', "tinyint(1) NOT NULL DEFAULT 0", $errors);
         self::addColumn('devices', 'local_card_last_full_at', "int unsigned NOT NULL DEFAULT 0", $errors);
         self::addColumn('devices', 'local_card_last_sync_at', "int unsigned NOT NULL DEFAULT 0", $errors);
         self::addColumn('devices', 'local_card_sync_message', "varchar(255) NOT NULL DEFAULT ''", $errors);

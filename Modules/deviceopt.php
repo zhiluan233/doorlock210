@@ -160,6 +160,7 @@ if ($deviceData instanceof \mysqli_result) {
 			'hbtime' => $row['hbtime'] ?? '',
 			'apikey' => $row['apikey'] ?? '',
 			'local_card_enabled' => intval($row['local_card_enabled'] ?? 0),
+			'local_card_initial_full_done' => intval($row['local_card_initial_full_done'] ?? 0),
 			'local_card_last_full_at' => intval($row['local_card_last_full_at'] ?? 0),
 			'local_card_last_sync_at' => intval($row['local_card_last_sync_at'] ?? 0),
 			'local_card_sync_message' => $row['local_card_sync_message'] ?? '',
@@ -375,6 +376,7 @@ if ($deviceData instanceof \mysqli_result) {
 			+ '</div>'
 			+ '<dl class="device-advanced-grid">'
 			+ '<dt>最近全量</dt><dd>' + escapeHtml(formatDeviceTimestamp(device.local_card_last_full_at)) + '</dd>'
+			+ '<dt>首次全量</dt><dd>' + (parseInt(device.local_card_initial_full_done || 0, 10) === 1 ? '已完成' : '未完成，自动同步暂停') + '</dd>'
 			+ '<dt>最近下发</dt><dd>' + escapeHtml(formatDeviceTimestamp(device.local_card_last_sync_at)) + '</dd>'
 			+ '<dt>队列状态</dt><dd>待下发 ' + parseInt(device.local_card_pending || 0, 10) + '，失败 ' + parseInt(device.local_card_failed || 0, 10) + '，执行中 ' + parseInt(device.local_card_running || 0, 10) + '</dd>'
 			+ '<dt>最近消息</dt><dd>' + escapeHtml(device.local_card_sync_message || '暂无') + '</dd>'
