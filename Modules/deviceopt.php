@@ -16,6 +16,11 @@ global $_config;
 $page_title = "门禁设备管理";
 $rs = Database::querySingleLine("user", Array("username" => $_SESSION['user']));
 
+function deviceoptH($value)
+{
+	return htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8');
+}
+
 if(!$rs) {
 	exit("<script>location='/?page=login';</script>");
 }
@@ -90,6 +95,8 @@ $countData = Database::query("devices", $countSQL, true);
                                 <th>ID</th>
                                 <th>设备名</th>
                                 <th>DID</th>
+								<th>Serial（序列号）</th>
+								<th>Model（型号）</th>
 								<th>OEM代码</th>
 								<th>IP</th>
 								<th>MAC</th>
@@ -102,15 +109,17 @@ $countData = Database::query("devices", $countSQL, true);
 							<?php
                                 foreach ($deviceData as $dData) {
                                     echo "<tr>
-                                    <td>{$dData['id']}</td>
-                                    <td>{$dData['name']}</td>
-									<td>{$dData['did']}</td>
-									<td>{$dData['oemcode']}</td>
-									<td>{$dData['ip']}</td>
-									<td>{$dData['mac']}</td>
-									<td>{$dData['hbtime']}</td>
-									<td>{$dData['apikey']}</td>
-                                    <td><button class=\"btn btn-default\" onclick=\"deleteDevice({$dData['id']})\">删除</button></td>
+                                    <td>".deviceoptH($dData['id'])."</td>
+                                    <td>".deviceoptH($dData['name'])."</td>
+									<td>".deviceoptH($dData['did'])."</td>
+									<td>".deviceoptH($dData['serial'] ?? '')."</td>
+									<td>".deviceoptH($dData['model'] ?? '')."</td>
+									<td>".deviceoptH($dData['oemcode'])."</td>
+									<td>".deviceoptH($dData['ip'])."</td>
+									<td>".deviceoptH($dData['mac'])."</td>
+									<td>".deviceoptH($dData['hbtime'])."</td>
+									<td>".deviceoptH($dData['apikey'])."</td>
+                                    <td><button class=\"btn btn-default\" onclick=\"deleteDevice(".intval($dData['id']).")\">删除</button></td>
                                     </tr>";
                                 }
                             ?>

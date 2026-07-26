@@ -268,6 +268,8 @@ class Migrator {
         self::addColumn('devices', 'allowedGuest', "longtext", $errors);
         self::addColumn('devices', 'dtype', "varchar(32) NOT NULL DEFAULT 'card_http'", $errors);
         self::addColumn('devices', 'device_sn', "varchar(128) NOT NULL DEFAULT ''", $errors);
+        self::addColumn('devices', 'serial', "varchar(128) NOT NULL DEFAULT ''", $errors);
+        self::addColumn('devices', 'model', "varchar(128) NOT NULL DEFAULT ''", $errors);
         self::addColumn('devices', 'status', "varchar(32) NOT NULL DEFAULT ''", $errors);
         self::addColumn('devices', 'mqtt_host', "varchar(255) NOT NULL DEFAULT ''", $errors);
         self::addColumn('devices', 'mqtt_port', "int unsigned NOT NULL DEFAULT 0", $errors);
@@ -344,6 +346,7 @@ class Migrator {
         self::exec("UPDATE `learner` SET `realname`=`name` WHERE `realname`=''", $errors);
         self::exec("UPDATE `learner` SET `enrolled_at`=`created_at` WHERE `enrolled_at`=0 AND `created_at`>0", $errors);
         self::exec("UPDATE `logs` SET `cardid`=LPAD(`cardid`, 10, '0') WHERE `cardid`<>'' AND `cardid` REGEXP '^[0-9]+$' AND CHAR_LENGTH(`cardid`)<10", $errors);
+        self::exec("UPDATE `devices` SET `serial`=`did` WHERE `serial`='' AND `did`<>''", $errors);
         self::exec("UPDATE `access_roles` SET `subject_kind`='employee' WHERE `subject_kind`=''", $errors);
         self::exec("UPDATE `access_role_members` SET `member_kind`='employee' WHERE `member_kind`=''", $errors);
         $lastIncrementalEvent = strtolower(Settings::get('feishu_contact_incremental_last_event', ''));

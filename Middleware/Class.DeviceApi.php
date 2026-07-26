@@ -14,6 +14,8 @@ use anim210System;
 
 class deviceApi {
 
+    private static $deviceColumns = null;
+
     public function deviceMethod($params) 
     {
         Header("Content-Type: application/json");
@@ -36,8 +38,10 @@ class deviceApi {
                     $serial = $this->payloadValue($devicePayload, ['Serial', 'serial', 'ID']);
                     $ip = $this->payloadValue($devicePayload, ['IP', 'ip']);
                     $mac = $this->payloadValue($devicePayload, ['MAC', 'mac']);
-                    $now = $this->payloadValue($devicePayload, ['Now', 'now', 'Time', 'time']);
-                    $key = $this->payloadValue($devicePayload, ['Key', 'key']);
+                    $now = $this->normalizeHeartbeatTime($this->payloadValue($devicePayload, ['Now', 'now', 'Time', 'time']));
+                    $key = $this->heartbeatKey($devicePayload, $requestContext);
+                    $oem = $this->payloadValue($devicePayload, ['OEM', 'oem']);
+                    $model = $this->payloadValue($devicePayload, ['Model', 'model']);
                     if ($serial !== '' && $ip !== '' && $mac !== '' && $now !== '') {
                         if (empty($_SERVER['REMOTE_ADDR'])) {
                             http_response_code(403);
@@ -57,8 +61,17 @@ class deviceApi {
                             "mac"      => $mac,
                             "hbtime"   => $now
                         );
+                        $this->addDeviceUpdateField($updatedata, 'serial', $serial);
+                        if ($model !== '') {
+                            $this->addDeviceUpdateField($updatedata, 'model', $model);
+                        }
                         if ($key !== '') {
                             $updatedata["apikey"] = $key;
+                        }
+                        $responseOem = trim((string)($deviceInfo['oemcode'] ?? ''));
+                        if ($responseOem === '' && $oem !== '') {
+                            $updatedata["oemcode"] = $oem;
+                            $responseOem = $oem;
                         }
                         $update = Database::update("devices", $updatedata, Array("id" => $deviceInfo['id']));
                         if($update !== true) {
@@ -67,7 +80,7 @@ class deviceApi {
                         }
                         $resp = [
                             'Key' => $key !== '' ? $key : (string)($deviceInfo['apikey'] ?? ''),
-                            'OEM' => (string)$deviceInfo['oemcode']
+                            'OEM' => $responseOem
                         ];
                         http_response_code(200);
 			            $this->exitDeviceJson($resp, $requestContext);
@@ -260,6 +273,60 @@ class deviceApi {
             }
         }
         return '';
+    }
+
+    private function heartbeatKey($payload, $requestContext)
+    {
+        if (isset($requestContext['taskNo']) && $requestContext['taskNo'] !== null && $requestContext['taskNo'] !== '') {
+            return trim((string)$requestContext['taskNo']);
+        }
+        return $this->payloadValue($payload, ['Key', 'key']);
+    }
+
+    private function normalizeHeartbeatTime($value)
+    {
+        $value = trim((string)$value);
+        if ($value === '') {
+            return '';
+        }
+        if (preg_match('/^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2}):(\d{2})$/', $value)) {
+            return $value;
+        }
+        if (preg_match('/^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})\d*$/', $value, $matches)) {
+            return sprintf(
+                '%04d-%02d-%02d %02d:%02d:%02d',
+                intval($matches[1]),
+                intval($matches[2]),
+                intval($matches[3]),
+                intval($matches[4]),
+                intval($matches[5]),
+                intval($matches[6])
+            );
+        }
+        return $value;
+    }
+
+    private function addDeviceUpdateField(&$updatedata, $column, $value)
+    {
+        if ($value !== '' && $this->deviceColumnExists($column)) {
+            $updatedata[$column] = $value;
+        }
+    }
+
+    private function deviceColumnExists($column)
+    {
+        global $conn;
+        if (self::$deviceColumns === null) {
+            self::$deviceColumns = [];
+            $rs = mysqli_query($conn, "SHOW COLUMNS FROM `devices`");
+            if ($rs instanceof \mysqli_result) {
+                while ($row = mysqli_fetch_assoc($rs)) {
+                    self::$deviceColumns[$row['Field']] = true;
+                }
+                mysqli_free_result($rs);
+            }
+        }
+        return isset(self::$deviceColumns[$column]);
     }
 
     private function findVerifyDevice($serial, $ip, $mac)
