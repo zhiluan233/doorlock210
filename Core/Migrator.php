@@ -218,6 +218,52 @@ class Migrator {
             KEY `idx_operation_created_at` (`created_at`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4", $errors);
 
+        self::exec("CREATE TABLE IF NOT EXISTS `device_card_bindings` (
+            `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+            `device_id` bigint unsigned NOT NULL,
+            `slot_index` int unsigned NOT NULL,
+            `subject_kind` varchar(20) NOT NULL,
+            `subject_id` varchar(128) NOT NULL,
+            `card_id` varchar(64) NOT NULL DEFAULT '',
+            `display_name` varchar(100) NOT NULL DEFAULT '',
+            `valid_to` int unsigned NOT NULL DEFAULT 0,
+            `enabled` tinyint(1) NOT NULL DEFAULT 1,
+            `status` varchar(20) NOT NULL DEFAULT 'synced',
+            `last_sync_at` int unsigned NOT NULL DEFAULT 0,
+            `created_at` int unsigned NOT NULL DEFAULT 0,
+            `updated_at` int unsigned NOT NULL DEFAULT 0,
+            PRIMARY KEY (`id`),
+            UNIQUE KEY `uniq_device_card_slot` (`device_id`, `slot_index`),
+            UNIQUE KEY `uniq_device_card_subject` (`device_id`, `subject_kind`, `subject_id`),
+            KEY `idx_device_card` (`device_id`, `card_id`),
+            KEY `idx_device_card_status` (`device_id`, `status`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4", $errors);
+
+        self::exec("CREATE TABLE IF NOT EXISTS `device_card_sync_jobs` (
+            `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+            `device_id` bigint unsigned NOT NULL,
+            `job_type` varchar(20) NOT NULL DEFAULT 'upsert',
+            `subject_kind` varchar(20) NOT NULL DEFAULT '',
+            `subject_id` varchar(128) NOT NULL DEFAULT '',
+            `card_id` varchar(64) NOT NULL DEFAULT '',
+            `slot_index` int unsigned NOT NULL DEFAULT 0,
+            `display_name` varchar(100) NOT NULL DEFAULT '',
+            `valid_to` int unsigned NOT NULL DEFAULT 0,
+            `source` varchar(40) NOT NULL DEFAULT '',
+            `status` varchar(20) NOT NULL DEFAULT 'pending',
+            `attempts` int unsigned NOT NULL DEFAULT 0,
+            `next_retry` int unsigned NOT NULL DEFAULT 0,
+            `locked_at` int unsigned NOT NULL DEFAULT 0,
+            `message` text,
+            `created_at` int unsigned NOT NULL DEFAULT 0,
+            `updated_at` int unsigned NOT NULL DEFAULT 0,
+            `finished_at` int unsigned NOT NULL DEFAULT 0,
+            PRIMARY KEY (`id`),
+            KEY `idx_device_card_job_retry` (`status`, `next_retry`, `id`),
+            KEY `idx_device_card_job_device` (`device_id`, `status`),
+            KEY `idx_device_card_job_subject` (`subject_kind`, `subject_id`, `status`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4", $errors);
+
         self::addColumn('feishu_sync_jobs', 'delete_count', "int unsigned NOT NULL DEFAULT 0", $errors);
         self::addColumn('feishu_sync_jobs', 'job_title_count', "int unsigned NOT NULL DEFAULT 0", $errors);
         self::addColumn('feishu_sync_jobs', 'joined_at_count', "int unsigned NOT NULL DEFAULT 0", $errors);
@@ -263,6 +309,8 @@ class Migrator {
         self::addColumn('access_roles', 'builtin_key', "varchar(64) NOT NULL DEFAULT ''", $errors);
         self::addColumn('access_roles', 'expires_at', "int unsigned NOT NULL DEFAULT 0", $errors);
         self::addColumn('access_role_members', 'member_kind', "varchar(20) NOT NULL DEFAULT 'employee'", $errors);
+        self::addColumn('device_card_bindings', 'valid_to', "int unsigned NOT NULL DEFAULT 0", $errors);
+        self::addColumn('device_card_sync_jobs', 'valid_to', "int unsigned NOT NULL DEFAULT 0", $errors);
 
         self::addColumn('devices', 'allowedEmployee', "longtext", $errors);
         self::addColumn('devices', 'allowedGuest', "longtext", $errors);
@@ -271,6 +319,10 @@ class Migrator {
         self::addColumn('devices', 'serial', "varchar(128) NOT NULL DEFAULT ''", $errors);
         self::addColumn('devices', 'model', "varchar(128) NOT NULL DEFAULT ''", $errors);
         self::addColumn('devices', 'controller_type', "varchar(32) NOT NULL DEFAULT ''", $errors);
+        self::addColumn('devices', 'local_card_enabled', "tinyint(1) NOT NULL DEFAULT 0", $errors);
+        self::addColumn('devices', 'local_card_last_full_at', "int unsigned NOT NULL DEFAULT 0", $errors);
+        self::addColumn('devices', 'local_card_last_sync_at', "int unsigned NOT NULL DEFAULT 0", $errors);
+        self::addColumn('devices', 'local_card_sync_message', "varchar(255) NOT NULL DEFAULT ''", $errors);
         self::addColumn('devices', 'status', "varchar(32) NOT NULL DEFAULT ''", $errors);
         self::addColumn('devices', 'mqtt_host', "varchar(255) NOT NULL DEFAULT ''", $errors);
         self::addColumn('devices', 'mqtt_port', "int unsigned NOT NULL DEFAULT 0", $errors);

@@ -90,6 +90,9 @@ class RuntimeMaintenance {
             }
             mysqli_free_result($rs);
         }
+        if ($disabled > 0) {
+            self::enqueueDeviceCardFullSyncAll('role_expired');
+        }
         return [
             'disabled' => $disabled,
             'failed' => $failed,
@@ -120,6 +123,7 @@ class RuntimeMaintenance {
         if ($delete !== true) {
             return $delete;
         }
+        self::enqueueDeviceCardSubjectRemoval('guest', $openId, 'guest_expired');
 
         if ($reason === 'expired') {
             $name = (string)($guest['name'] ?? '');
@@ -136,6 +140,23 @@ class RuntimeMaintenance {
             );
         }
         return true;
+    }
+
+    private static function enqueueDeviceCardSubjectRemoval($kind, $subjectId, $source)
+    {
+        $subjectId = trim((string)$subjectId);
+        if ($subjectId === '' || !class_exists(__NAMESPACE__ . '\\DeviceCardSync')) {
+            return null;
+        }
+        return DeviceCardSync::enqueueSubjectRemoval($kind, $subjectId, $source);
+    }
+
+    private static function enqueueDeviceCardFullSyncAll($source)
+    {
+        if (!class_exists(__NAMESPACE__ . '\\DeviceCardSync')) {
+            return null;
+        }
+        return DeviceCardSync::enqueueFullSyncAll($source);
     }
 
     private static function removeGuestFromLegacyDeviceLists($openId)

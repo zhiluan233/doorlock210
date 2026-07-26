@@ -149,6 +149,7 @@ class ApiCenter {
         }
 
         $learner = Database::querySingleLine('learner', ['id' => $id]);
+        $this->enqueueDeviceCardSubjectChange('learner', $learner['student_no'] ?? $studentNo, 'api_learner_save');
         $this->respond($action === 'created' ? 201 : 200, [
             'ok' => true,
             'message' => $action === 'created' ? '学员已创建' : '学员已更新',
@@ -229,6 +230,7 @@ class ApiCenter {
         if ($result !== true) {
             $this->respond(500, ['ok' => false, 'message' => '学员删除失败：'.$result]);
         }
+        $this->enqueueDeviceCardSubjectRemoval('learner', $studentNo, 'api_learner_delete');
         $this->respond(200, [
             'ok' => true,
             'message' => '学员已删除',
@@ -248,6 +250,24 @@ class ApiCenter {
             return null;
         }
         return Database::querySingleLine('learner', ['student_no' => $studentNo]);
+    }
+
+    private function enqueueDeviceCardSubjectChange($kind, $subjectId, $source)
+    {
+        $subjectId = trim((string)$subjectId);
+        if ($subjectId === '' || !class_exists(__NAMESPACE__ . '\\DeviceCardSync')) {
+            return null;
+        }
+        return DeviceCardSync::enqueueSubjectChange($kind, $subjectId, $source);
+    }
+
+    private function enqueueDeviceCardSubjectRemoval($kind, $subjectId, $source)
+    {
+        $subjectId = trim((string)$subjectId);
+        if ($subjectId === '' || !class_exists(__NAMESPACE__ . '\\DeviceCardSync')) {
+            return null;
+        }
+        return DeviceCardSync::enqueueSubjectRemoval($kind, $subjectId, $source);
     }
 
     private function learnerPayload($learner)

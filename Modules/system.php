@@ -122,6 +122,13 @@ function settingValue($key) {
 								<div class="layui-form-item"><label class="layui-form-label">成功关键字</label><div class="layui-input-block"><input class="layui-input" name="remote_open_success_text" value="<?php echo settingValue('remote_open_success_text'); ?>" placeholder="留空则按 HTTP 状态和常见失败字样判断"></div></div>
 								<div class="layui-form-item"><label class="layui-form-label">超时秒数</label><div class="layui-input-block"><input class="layui-input" name="remote_open_timeout" value="<?php echo settingValue('remote_open_timeout'); ?>"></div></div>
 								<p>远程开门路径和请求体支持变量：{ip} {device_id} {device_name} {did} {mac} {oemcode} {open_time} {timestamp}</p>
+								<hr>
+								<h5>端侧卡库同步</h5>
+								<div class="layui-form-item"><label class="layui-form-label">卡库路径</label><div class="layui-input-block"><input class="layui-input" name="device_card_edit_path" value="<?php echo settingValue('device_card_edit_path'); ?>" placeholder="/EditCard.shtm"></div></div>
+								<div class="layui-form-item"><label class="layui-form-label">单轮条数</label><div class="layui-input-block"><input class="layui-input" name="device_card_sync_batch_size" value="<?php echo settingValue('device_card_sync_batch_size'); ?>" placeholder="1-200"></div></div>
+								<div class="layui-form-item"><label class="layui-form-label">间隔ms</label><div class="layui-input-block"><input class="layui-input" name="device_card_sync_interval_ms" value="<?php echo settingValue('device_card_sync_interval_ms'); ?>" placeholder="例如 100"></div></div>
+								<div class="layui-form-item"><label class="layui-form-label">超时秒数</label><div class="layui-input-block"><input class="layui-input" name="device_card_sync_timeout" value="<?php echo settingValue('device_card_sync_timeout'); ?>" placeholder="1-30"></div></div>
+								<p>端侧卡库凭证复用 config.php 的 remoteOpen.username / remoteOpen.password；是否启用由设备管理中的设备开关控制。</p>
 								<div class="layui-form-item"><label class="layui-form-label">重试基准</label><div class="layui-input-block"><input class="layui-input" name="queue_retry_base_seconds" value="<?php echo settingValue('queue_retry_base_seconds'); ?>"></div></div>
 								<div class="layui-form-item"><label class="layui-form-label">重试上限</label><div class="layui-input-block"><input class="layui-input" name="queue_retry_max_seconds" value="<?php echo settingValue('queue_retry_max_seconds'); ?>"></div></div>
 								<p>远程开门凭证：<?php echo $remoteCredentialReady ? '已在 config.php 配置' : '未配置'; ?></p>

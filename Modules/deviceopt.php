@@ -33,6 +33,35 @@ function deviceoptControllerTypeLabel($value)
 	}
 }
 
+function deviceoptFormatTimestamp($value)
+{
+	$value = intval($value);
+	return $value > 0 ? date('Y-m-d H:i:s', $value) : '暂无';
+}
+
+function deviceoptLocalCardSummary($device)
+{
+	$summary = class_exists(__NAMESPACE__ . '\\DeviceCardSync') ? DeviceCardSync::pendingSummary($device['id']) : ['pending' => 0, 'failed' => 0, 'running' => 0];
+	$parts = [
+		'全量 ' . deviceoptFormatTimestamp($device['local_card_last_full_at'] ?? 0),
+		'下发 ' . deviceoptFormatTimestamp($device['local_card_last_sync_at'] ?? 0),
+		'待 ' . intval($summary['pending'] ?? 0),
+		'失败 ' . intval($summary['failed'] ?? 0)
+	];
+	if (intval($summary['running'] ?? 0) > 0) {
+		$parts[] = '执行中 ' . intval($summary['running']);
+	}
+	$message = trim((string)($device['local_card_sync_message'] ?? ''));
+	if ($message !== '') {
+		$parts[] = $message;
+	}
+	$escaped = [];
+	foreach ($parts as $part) {
+		$escaped[] = deviceoptH($part);
+	}
+	return implode('<br>', $escaped);
+}
+
 if(!$rs) {
 	exit("<script>location='/?page=login';</script>");
 }
@@ -110,6 +139,8 @@ $countData = Database::query("devices", $countSQL, true);
 								<th>Serial（序列号）</th>
 								<th>Model（型号）</th>
 								<th>控制器类型</th>
+								<th>端侧卡库</th>
+								<th>卡库同步</th>
 								<th>OEM代码</th>
 								<th>IP</th>
 								<th>MAC</th>
@@ -121,6 +152,7 @@ $countData = Database::query("devices", $countSQL, true);
 						<tbody>
 							<?php
                                 foreach ($deviceData as $dData) {
+									$localCardEnabled = intval($dData['local_card_enabled'] ?? 0) === 1;
                                     echo "<tr>
                                     <td>".deviceoptH($dData['id'])."</td>
                                     <td>".deviceoptH($dData['name'])."</td>
@@ -128,12 +160,14 @@ $countData = Database::query("devices", $countSQL, true);
 									<td>".deviceoptH($dData['serial'] ?? '')."</td>
 									<td>".deviceoptH($dData['model'] ?? '')."</td>
 									<td>".deviceoptH(deviceoptControllerTypeLabel($dData['controller_type'] ?? ''))."</td>
+									<td><input type=\"checkbox\" lay-skin=\"switch\" lay-text=\"启用|关闭\" lay-filter=\"localCardSwitch\" data-device-id=\"".intval($dData['id'])."\" ".($localCardEnabled ? 'checked' : '')."></td>
+									<td style=\"min-width:220px;\">".deviceoptLocalCardSummary($dData)."</td>
 									<td>".deviceoptH($dData['oemcode'])."</td>
 									<td>".deviceoptH($dData['ip'])."</td>
 									<td>".deviceoptH($dData['mac'])."</td>
 									<td>".deviceoptH($dData['hbtime'])."</td>
 									<td>".deviceoptH($dData['apikey'])."</td>
-                                    <td><button class=\"btn btn-default\" onclick=\"deleteDevice(".intval($dData['id']).")\">删除</button></td>
+                                    <td><button class=\"btn btn-default\" onclick=\"syncDeviceCards(".intval($dData['id']).")\">同步卡库</button>&nbsp;<button class=\"btn btn-default\" onclick=\"deleteDevice(".intval($dData['id']).")\">删除</button></td>
                                     </tr>";
                                 }
                             ?>
@@ -184,6 +218,12 @@ $countData = Database::query("devices", $countSQL, true);
   layui.use(['layer', 'form'], function() {
     var layer = layui.layer;
     var form = layui.form;
+	form.render();
+
+	form.on('switch(localCardSwitch)', function(data) {
+		var deviceId = $(data.elem).data('device-id');
+		setDeviceLocalCard(deviceId, data.elem.checked ? 1 : 0, data.elem);
+	});
 
 	function deleteDevice(id) {
 		var htmlobj = $.ajax({
@@ -284,10 +324,50 @@ $countData = Database::query("devices", $countSQL, true);
 	  });
     }
 
+	function setDeviceLocalCard(id, enabled, elem) {
+		var htmlobj = $.ajax({
+			type: 'POST',
+			url: "?action=setDeviceLocalCard&page=panel&module=deviceopt&csrf=<?php echo $_SESSION['token']; ?>",
+			async:true,
+			data: {device_id: id, enabled: enabled ? 'true' : 'false'},
+			error: function() {
+				if (elem) {
+					elem.checked = !enabled;
+					form.render('checkbox');
+				}
+				vt.error("错误：" + htmlobj.responseText, {position: "top-center"});
+			},
+			success: function() {
+				vt.success(htmlobj.responseText, {position: "top-center"});
+				location.reload();
+			}
+		});
+	}
+
+	function syncDeviceCards(id) {
+		layer.confirm('确认提交该设备端侧卡库全量同步任务？', {icon: 3, title: '同步卡库'}, function(index) {
+			var htmlobj = $.ajax({
+				type: 'POST',
+				url: "?action=syncDeviceCards&page=panel&module=deviceopt&csrf=<?php echo $_SESSION['token']; ?>",
+				async:true,
+				data: {device_id: id},
+				error: function() {
+					vt.error("错误：" + htmlobj.responseText, {position: "top-center"});
+				},
+				success: function() {
+					vt.success(htmlobj.responseText, {position: "top-center"});
+					layer.close(index);
+					location.reload();
+				}
+			});
+		});
+	}
+
 	// global
 	window.deleteDevice = deleteDevice;
 	window.addNewDevice = addNewDevice;
 	window.closeDialog = closeDialog;
 	window.addDevice = addDevice;
+	window.syncDeviceCards = syncDeviceCards;
   });
 </script>

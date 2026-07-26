@@ -159,6 +159,7 @@ class FeishuContactSync {
             unset($data['open_id']);
             Database::update('employee', $data, ['id' => $exists['id']]);
             self::markIncrementalSync($eventType);
+            self::enqueueDeviceCardSubjectChange('employee', $exists['open_id'] ?: $identity['open_id'], 'feishu_incremental');
             return $exists['open_id'] ?: $identity['open_id'];
         }
 
@@ -167,6 +168,7 @@ class FeishuContactSync {
         }
         Database::insert('employee', $data);
         self::markIncrementalSync($eventType);
+        self::enqueueDeviceCardSubjectChange('employee', $identity['open_id'], 'feishu_incremental');
         return $identity['open_id'];
     }
 
@@ -279,6 +281,7 @@ class FeishuContactSync {
         if (($job['source'] ?? '') === 'daily') {
             Settings::set('feishu_contact_sync_last_date', date('Y-m-d'));
         }
+        self::enqueueDeviceCardFullSyncAll('feishu_full');
 
         return ['job_id' => $jobId, 'status' => 'success', 'message' => $message];
     }
@@ -358,6 +361,10 @@ class FeishuContactSync {
             }
         }
 
+        if ($openId !== '' && !is_array($stats)) {
+            self::enqueueDeviceCardSubjectRemoval('employee', $openId, 'feishu_delete');
+        }
+
         if ($openId !== '') {
             Database::delete('access_policies', [
                 'subject_kind' => 'employee',
@@ -372,6 +379,32 @@ class FeishuContactSync {
         }
         self::deleteLinkedPanelUsers($openId, $employeeId);
         Database::delete('employee', ['id' => $employee['id']]);
+    }
+
+    private static function enqueueDeviceCardSubjectChange($kind, $subjectId, $source)
+    {
+        $subjectId = trim((string)$subjectId);
+        if ($subjectId === '' || !class_exists(__NAMESPACE__ . '\\DeviceCardSync')) {
+            return null;
+        }
+        return DeviceCardSync::enqueueSubjectChange($kind, $subjectId, $source);
+    }
+
+    private static function enqueueDeviceCardSubjectRemoval($kind, $subjectId, $source)
+    {
+        $subjectId = trim((string)$subjectId);
+        if ($subjectId === '' || !class_exists(__NAMESPACE__ . '\\DeviceCardSync')) {
+            return null;
+        }
+        return DeviceCardSync::enqueueSubjectRemoval($kind, $subjectId, $source);
+    }
+
+    private static function enqueueDeviceCardFullSyncAll($source)
+    {
+        if (!class_exists(__NAMESPACE__ . '\\DeviceCardSync')) {
+            return null;
+        }
+        return DeviceCardSync::enqueueFullSyncAll($source);
     }
 
     private static function deleteLinkedPanelUsers($openId, $employeeId)

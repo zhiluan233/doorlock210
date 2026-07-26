@@ -20,6 +20,22 @@ if(!$rs) {
 	exit("<script>location='/?page=login';</script>");
 }
 
+function submitcardDeviceSyncSubjectChange($kind, $subjectId, $source) {
+	$subjectId = trim((string)$subjectId);
+	if ($subjectId === '' || !class_exists(__NAMESPACE__ . '\\DeviceCardSync')) {
+		return null;
+	}
+	return DeviceCardSync::enqueueSubjectChange($kind, $subjectId, $source);
+}
+
+function submitcardDeviceSyncSubjectRemoval($kind, $subjectId, $source) {
+	$subjectId = trim((string)$subjectId);
+	if ($subjectId === '' || !class_exists(__NAMESPACE__ . '\\DeviceCardSync')) {
+		return null;
+	}
+	return DeviceCardSync::enqueueSubjectRemoval($kind, $subjectId, $source);
+}
+
 if(isset($_GET['getguest']) && preg_match("/^[0-9]{1,10}$/", $_GET['getguest'])) {
 	anim210System\Utils::checkCsrf();
 	$userinfo = Database::querySingleLine("guest", Array("id" => $_GET['getguest']));
@@ -71,6 +87,7 @@ if(isset($_GET['updateGuestId']) && isset($_GET['updateGuestAction']) && preg_ma
 			}
 			$update = Database::delete("guest", Array("id" => $_GET['updateGuestId']));
 			if($update == true) {
+				submitcardDeviceSyncSubjectRemoval('guest', $userInfo['open_id'] ?? '', 'guest_delete');
 				ob_clean();
 				exit("删除用户成功");
 			} else {
@@ -83,6 +100,7 @@ if(isset($_GET['updateGuestId']) && isset($_GET['updateGuestAction']) && preg_ma
 			anim210System\Utils::checkCsrf();
 			$update = Database::update("guest", Array("status" => 'false'), Array("id" => $_GET['updateGuestId']));
 			if($update == true) {
+				submitcardDeviceSyncSubjectChange('guest', $userInfo['open_id'] ?? '', 'guest_status');
 				ob_clean();
 				exit("访客权限禁用成功");
 			} else {
@@ -95,6 +113,7 @@ if(isset($_GET['updateGuestId']) && isset($_GET['updateGuestAction']) && preg_ma
 			anim210System\Utils::checkCsrf();
 			$update = Database::update("guest", Array("status" => 'true'), Array("id" => $_GET['updateGuestId']));
 			if($update == true) {
+				submitcardDeviceSyncSubjectChange('guest', $userInfo['open_id'] ?? '', 'guest_status');
 				ob_clean();
 				exit("访客权限启用成功");
 			} else {
@@ -126,6 +145,7 @@ if(isset($_GET['updateEmployeeId']) && isset($_GET['updateEmployeeAction']) && p
 			);
 			$update = Database::update("employee", $data, Array("id" => $_GET['updateEmployeeId']));
 			if($update == true) {
+				submitcardDeviceSyncSubjectChange('employee', $userInfo['open_id'] ?? '', 'employee_status');
 				ob_clean();
 				exit("用户权限禁用成功");
 			} else {
@@ -141,6 +161,7 @@ if(isset($_GET['updateEmployeeId']) && isset($_GET['updateEmployeeAction']) && p
 			);
 			$update = Database::update("employee", $data, Array("id" => $_GET['updateEmployeeId']));
 			if($update == true) {
+				submitcardDeviceSyncSubjectChange('employee', $userInfo['open_id'] ?? '', 'employee_status');
 				ob_clean();
 				exit("用户权限禁用成功");
 			} else {

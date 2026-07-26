@@ -165,6 +165,8 @@ class OperationLog {
             'searchBadgeLearners' => '搜索可发卡学员',
             'searchBadgeGuests' => '搜索可发卡访客',
             'addDevice' => '添加设备',
+            'setDeviceLocalCard' => '切换端侧卡库',
+            'syncDeviceCards' => '同步端侧卡库',
             'syncFeishuMember' => '同步飞书通讯录',
             'editPassPermission' => '修改通行权限',
             'saveSystemSettings' => '保存系统设置',
@@ -244,6 +246,17 @@ class OperationLog {
             case 'addDevice':
                 $descriptor = self::withTarget($descriptor, 'device', $_POST['ipaddr'] ?? '', $_POST['devicename'] ?? '');
                 $descriptor['detail'] = '添加设备 ' . self::limit((string)($_POST['devicename'] ?? ''), 80);
+                break;
+            case 'setDeviceLocalCard':
+                $device = self::findById('devices', intval($_POST['device_id'] ?? 0));
+                $enabled = ($_POST['enabled'] ?? '') === 'true' || ($_POST['enabled'] ?? '') === '1';
+                $descriptor = self::withTarget($descriptor, 'device', $_POST['device_id'] ?? '', $device['name'] ?? '');
+                $descriptor['detail'] = ($enabled ? '启用' : '关闭') . '端侧卡库：' . (($device['name'] ?? '') ?: ('设备#' . intval($_POST['device_id'] ?? 0)));
+                break;
+            case 'syncDeviceCards':
+                $device = self::findById('devices', intval($_POST['device_id'] ?? 0));
+                $descriptor = self::withTarget($descriptor, 'device', $_POST['device_id'] ?? '', $device['name'] ?? '');
+                $descriptor['detail'] = '提交端侧卡库同步：' . (($device['name'] ?? '') ?: ('设备#' . intval($_POST['device_id'] ?? 0)));
                 break;
             case 'syncFeishuMember':
                 $descriptor['detail'] = '手动同步飞书通讯录';

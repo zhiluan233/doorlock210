@@ -937,6 +937,11 @@ class AttendanceService {
         global $conn;
 
         $deviceId = intval($deviceId);
+        $cacheKey = $deviceId . ':' . $subjectKind;
+        static $cache = [];
+        if (isset($cache[$cacheKey])) {
+            return $cache[$cacheKey];
+        }
         $subjectKind = mysqli_real_escape_string($conn, $subjectKind);
         $sql = "SELECT * FROM `access_policies` WHERE `device_id`={$deviceId} AND `subject_kind`='{$subjectKind}' AND `enabled`=1";
         $rs = Database::query('access_policies', $sql, '', true);
@@ -946,6 +951,7 @@ class AttendanceService {
                 $policies[] = $row;
             }
         }
+        $cache[$cacheKey] = $policies;
         return $policies;
     }
 

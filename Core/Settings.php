@@ -57,6 +57,10 @@ class Settings {
             'remote_open_body' => '',
             'remote_open_success_text' => '',
             'remote_open_timeout' => '3',
+            'device_card_edit_path' => '/EditCard.shtm',
+            'device_card_sync_batch_size' => '20',
+            'device_card_sync_interval_ms' => '100',
+            'device_card_sync_timeout' => '3',
 
             'queue_retry_base_seconds' => '60',
             'queue_retry_max_seconds' => '3600'

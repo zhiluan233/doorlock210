@@ -283,6 +283,7 @@ class PostHandler {
 				case "saveLearner":
 					$this->requireAdminUser();
 					$id = intval($_POST['id'] ?? 0);
+					$oldStudentNo = '';
 					$name = trim((string)($_POST['name'] ?? ''));
 					$realname = trim((string)($_POST['realname'] ?? ''));
 					$mobile = trim((string)($_POST['mobile'] ?? ''));
@@ -335,6 +336,7 @@ class PostHandler {
 							Header("HTTP/1.1 404 Not Found");
 							exit("学员不存在");
 						}
+						$oldStudentNo = $learner['student_no'] ?? '';
 						$result = Database::update('learner', $data, ['id' => $id]);
 						if ($result === true && ($learner['student_no'] ?? '') !== $studentNo) {
 							Database::update('access_role_members', ['employee_open_id' => $studentNo], [
@@ -355,6 +357,10 @@ class PostHandler {
 						$result = Database::insert('learner', $data);
 					}
 					if ($result === true) {
+						if ($oldStudentNo !== '' && $oldStudentNo !== $studentNo) {
+							$this->enqueueDeviceCardSubjectRemoval('learner', $oldStudentNo, 'learner_rename');
+						}
+						$this->enqueueDeviceCardSubjectChange('learner', $studentNo, 'learner_save');
 						exit($id > 0 ? "学员资料已保存" : "创建学员 ".$name." 成功");
 					}
 					Header("HTTP/1.1 500 Internal Error");
@@ -405,6 +411,7 @@ class PostHandler {
 					}
 					$result = Database::update('learner', ['status' => $status, 'updated_at' => time()], ['id' => $id]);
 					if ($result === true) {
+						$this->enqueueDeviceCardSubjectChange('learner', $learner['student_no'] ?? '', 'learner_status');
 						exit($status === 'true' ? "学员通行权限已启用" : "学员通行权限已禁用");
 					}
 					Header("HTTP/1.1 500 Internal Error");
@@ -432,6 +439,7 @@ class PostHandler {
 					}
 					$result = Database::delete('learner', ['id' => $id]);
 					if ($result === true) {
+						$this->enqueueDeviceCardSubjectRemoval('learner', $studentNo, 'learner_delete');
 						exit("学员已删除");
 					}
 					Header("HTTP/1.1 500 Internal Error");
@@ -497,6 +505,7 @@ class PostHandler {
 						}
 						
 						if($update === true) {
+							$this->enqueueDeviceCardSubjectChange($type, $this->deviceCardSubjectId($type, $targetInfo), 'submitcard');
 							exit("发卡成功！");
 						} else {
 							Header("HTTP/1.1 404 Not Found");
@@ -529,6 +538,7 @@ class PostHandler {
 								exit("员工工牌回收失败：{$update}");
 							}
 							$released[] = "员工 ".$employeeInfo['name'];
+							$this->enqueueDeviceCardSubjectChange('employee', $employeeInfo['open_id'] ?? '', 'releasecard');
 						}
 						$guestInfo = Database::querySingleLine("guest", Array("card_id" => $cardId));
 						if ($guestInfo) {
@@ -538,6 +548,7 @@ class PostHandler {
 								exit("访客工牌回收失败：{$update}");
 							}
 							$released[] = "访客 ".$guestInfo['name'];
+							$this->enqueueDeviceCardSubjectChange('guest', $guestInfo['open_id'] ?? '', 'releasecard');
 						}
 						$learnerInfo = Database::querySingleLine("learner", Array("card_id" => $cardId));
 						if ($learnerInfo) {
@@ -547,6 +558,7 @@ class PostHandler {
 								exit("学员工牌回收失败：{$update}");
 							}
 							$released[] = "学员 ".$learnerInfo['name'];
+							$this->enqueueDeviceCardSubjectChange('learner', $learnerInfo['student_no'] ?? '', 'releasecard');
 						}
 						if (count($released) === 0) {
 							Header("HTTP/1.1 404 Not Found");
@@ -700,6 +712,49 @@ class PostHandler {
 						exit("登录会话已超时，请重新登录");
 					}
 				break;
+				case "setDeviceLocalCard":
+					$this->requireAdminUser();
+					$deviceId = intval($_POST['device_id'] ?? 0);
+					$enabled = $this->truthy($_POST['enabled'] ?? 'false') ? 1 : 0;
+					$device = Database::querySingleLine('devices', ['id' => $deviceId]);
+					if (!$device) {
+						Header("HTTP/1.1 404 Not Found");
+						exit("设备不存在");
+					}
+					$result = Database::update('devices', [
+						'local_card_enabled' => $enabled,
+						'local_card_sync_message' => $enabled ? '端侧卡库已启用，等待全量同步' : '端侧卡库已关闭',
+					], ['id' => $deviceId]);
+					if ($result !== true) {
+						Header("HTTP/1.1 500 Internal Error");
+						exit("端侧卡库开关保存失败：".$result);
+					}
+					if ($enabled === 1) {
+						$syncResult = $this->enqueueDeviceCardFullSync($deviceId, 'device_toggle');
+						if ($syncResult && !empty($syncResult['ok'])) {
+							exit("端侧卡库已启用，并已提交首次全量同步任务");
+						}
+						exit("端侧卡库已启用，但首次全量同步任务提交失败，请手动点击同步卡库");
+					}
+					if (class_exists(__NAMESPACE__ . '\\DeviceCardSync')) {
+						DeviceCardSync::cancelDeviceQueue($deviceId, '端侧卡库已关闭');
+					}
+					exit("端侧卡库已关闭");
+				break;
+				case "syncDeviceCards":
+					$this->requireAdminUser();
+					$deviceId = intval($_POST['device_id'] ?? 0);
+					$result = $this->enqueueDeviceCardFullSync($deviceId, 'manual');
+					if (!$result) {
+						Header("HTTP/1.1 500 Internal Error");
+						exit("端侧卡库同步模块未加载");
+					}
+					if ($result['ok']) {
+						exit($result['message']);
+					}
+					Header("HTTP/1.1 400 Bad Request");
+					exit($result['message']);
+				break;
 				case "syncFeishuMember":
 					$um = new anim210System\UserCheck();
 					if($um->isLogged()) {
@@ -799,6 +854,7 @@ class PostHandler {
 								Header("HTTP/1.1 500 Internel Server Error");
 								exit("修改失败，内部服务器错误");
 							}
+							$this->enqueueDeviceCardFullSync($dList['value'], 'legacy_permission');
 						}
 						exit("修改成功");
 					} else {
@@ -824,6 +880,7 @@ class PostHandler {
 							'feishu_contact_sync_enabled', 'feishu_contact_sync_daily_time', 'feishu_contact_sync_release_missing',
 							'feishu_oauth_enabled', 'feishu_oauth_redirect_uri', 'feishu_oauth_scope', 'feishu_oauth_prompt',
 							'remote_open_enabled', 'remote_open_method', 'remote_open_path', 'remote_open_body', 'remote_open_success_text', 'remote_open_timeout',
+							'device_card_edit_path', 'device_card_sync_batch_size', 'device_card_sync_interval_ms', 'device_card_sync_timeout',
 							'queue_retry_base_seconds', 'queue_retry_max_seconds'
 						];
 						$data = [];
@@ -860,7 +917,10 @@ class PostHandler {
 							'feishu_attendance_batch_size' => [1, 50, '飞书考勤单批条数应为 1-50'],
 							'feishu_attendance_cron_max_batches' => [1, 100, '飞书考勤每轮批次应为 1-100'],
 							'feishu_attendance_batch_interval_ms' => [0, 2000, '飞书考勤批次间隔应为 0-2000 毫秒'],
-							'remote_open_timeout' => [1, 30, '远程开门超时秒数应为 1-30']
+							'remote_open_timeout' => [1, 30, '远程开门超时秒数应为 1-30'],
+							'device_card_sync_batch_size' => [1, 200, '端侧卡库单轮下发条数应为 1-200'],
+							'device_card_sync_interval_ms' => [0, 2000, '端侧卡库下发间隔应为 0-2000 毫秒'],
+							'device_card_sync_timeout' => [1, 30, '端侧卡库请求超时应为 1-30 秒']
 						];
 						foreach ($intRanges as $intKey => $range) {
 							if (!isset($data[$intKey]) || $data[$intKey] === '') {
@@ -1029,6 +1089,7 @@ class PostHandler {
 							'updated_at' => $now
 						]);
 					}
+					$this->enqueueDeviceCardFullSyncAll('role_save');
 					exit("门禁角色已保存");
 				break;
 				case "saveAccessRoleDevices":
@@ -1074,6 +1135,7 @@ class PostHandler {
 							'updated_at' => $now
 						]);
 					}
+					$this->enqueueDeviceCardFullSyncAll('role_deploy');
 					exit("角色门禁下发已保存");
 				break;
 				case "deleteAccessRole":
@@ -1097,6 +1159,7 @@ class PostHandler {
 					Database::delete('access_policies', "DELETE FROM `access_policies` WHERE `subject_type`='role' AND `subject_value`='{$roleIdEsc}'", '', true);
 					$result = Database::delete('access_roles', ['id' => $roleId]);
 					if ($result === true) {
+						$this->enqueueDeviceCardFullSyncAll('role_delete');
 						exit("门禁角色已删除");
 					}
 					Header("HTTP/1.1 500 Internal Error");
@@ -1208,6 +1271,7 @@ class PostHandler {
 							'allowedEmployee' => json_encode($employeeLegacy, JSON_UNESCAPED_UNICODE),
 							'allowedGuest' => json_encode($guestLegacy, JSON_UNESCAPED_UNICODE)
 						], ['id' => $deviceId]);
+						$this->enqueueDeviceCardFullSync($deviceId, 'policy_save');
 						exit("通行策略已保存");
 					}
 					Header("HTTP/1.1 403 Forbidden");
@@ -1293,6 +1357,48 @@ class PostHandler {
 					exit("Undefined action {$params['action']}");
 			}
 		}
+	}
+
+	private function enqueueDeviceCardSubjectChange($kind, $subjectId, $source)
+	{
+		$subjectId = trim((string)$subjectId);
+		if ($subjectId === '' || !class_exists(__NAMESPACE__ . '\\DeviceCardSync')) {
+			return null;
+		}
+		return DeviceCardSync::enqueueSubjectChange($kind, $subjectId, $source);
+	}
+
+	private function enqueueDeviceCardSubjectRemoval($kind, $subjectId, $source)
+	{
+		$subjectId = trim((string)$subjectId);
+		if ($subjectId === '' || !class_exists(__NAMESPACE__ . '\\DeviceCardSync')) {
+			return null;
+		}
+		return DeviceCardSync::enqueueSubjectRemoval($kind, $subjectId, $source);
+	}
+
+	private function enqueueDeviceCardFullSync($deviceId, $source)
+	{
+		if (!class_exists(__NAMESPACE__ . '\\DeviceCardSync')) {
+			return null;
+		}
+		return DeviceCardSync::enqueueFullSync(intval($deviceId), $source);
+	}
+
+	private function enqueueDeviceCardFullSyncAll($source)
+	{
+		if (!class_exists(__NAMESPACE__ . '\\DeviceCardSync')) {
+			return null;
+		}
+		return DeviceCardSync::enqueueFullSyncAll($source);
+	}
+
+	private function deviceCardSubjectId($kind, $subject)
+	{
+		if ($kind === 'learner') {
+			return $subject['student_no'] ?? '';
+		}
+		return $subject['open_id'] ?? '';
 	}
 
     function getDateFormat() {
