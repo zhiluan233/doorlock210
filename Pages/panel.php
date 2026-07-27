@@ -101,6 +101,58 @@ OperationLog::logPanelView($module, $rs);
 				line-height: 1;
 				vertical-align: middle;
 			}
+			@media screen and (min-width: 992px) {
+				.page-header .navbar-default .container-fluid {
+					height: 56px !important;
+					display: flex;
+					align-items: center;
+					padding-left: 0;
+					padding-right: 0;
+				}
+				.page-header .navbar-header {
+					display: none;
+				}
+				.page-header .navbar-collapse {
+					height: 56px !important;
+					display: flex !important;
+					align-items: center;
+					justify-content: space-between;
+					width: 100%;
+					padding-left: 0;
+					padding-right: 0;
+				}
+				.page-header .navbar-nav {
+					height: 56px;
+					display: flex;
+					align-items: center;
+					margin: 0;
+					padding: 0;
+				}
+				.page-header .navbar-nav.navbar-right {
+					margin-left: auto;
+					margin-right: 0;
+				}
+				.page-header .navbar-nav>li {
+					height: 56px;
+					display: flex;
+					align-items: center;
+				}
+				.page-header .navbar-nav>li>a.panel-icon-button {
+					margin: 0 4px;
+				}
+				.page-header .navbar-nav>li.user-dropdown>a {
+					height: 56px;
+					display: flex;
+					align-items: center;
+					padding: 0 0 0 12px;
+				}
+				.page-header .navbar-nav>li.user-dropdown>a>img {
+					width: 36px;
+					height: 36px;
+					margin: 0;
+					display: block;
+				}
+			}
 			.page-sidebar-menu ul li a i.fa,
 			.page-sidebar-menu ul li a i.fa-solid {
 				width: 18px;

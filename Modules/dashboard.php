@@ -50,6 +50,8 @@ function dashboardActionType() {
 
 function dashboardGrainOptions() {
 	return [
+		60 => '1分钟',
+		300 => '5分钟',
 		600 => '10分钟',
 		900 => '15分钟',
 		1800 => '30分钟',
@@ -61,9 +63,9 @@ function dashboardGrainOptions() {
 }
 
 function dashboardTimeGrain() {
-	$value = intval($_GET['time_grain'] ?? 3600);
+	$value = intval($_GET['time_grain'] ?? 60);
 	$options = dashboardGrainOptions();
-	return isset($options[$value]) ? $value : 3600;
+	return isset($options[$value]) ? $value : 60;
 }
 
 function dashboardChartType() {
@@ -151,6 +153,47 @@ function dashboardActionTypeText($type) {
 	return '全部';
 }
 
+function dashboardBuildSeries($startTs, $endTs, $whereSql, $grain) {
+	$grain = intval($grain);
+	$bucketRows = dashboardFetchRows('logs', "SELECT FLOOR((`time` - {$startTs}) / {$grain}) AS `bucket_index`, COUNT(*) AS `total`, COUNT(DISTINCT CONCAT(IFNULL(`passusertype`, ''), '|', IFNULL(`passusername`, ''), '|', IFNULL(`cardid`, ''))) AS `people`, SUM(CASE WHEN `action` LIKE '%成功%' THEN 1 ELSE 0 END) AS `success_total`, SUM(CASE WHEN `action` LIKE '%失败%' THEN 1 ELSE 0 END) AS `failed_total` FROM `logs`{$whereSql} GROUP BY `bucket_index` ORDER BY `bucket_index` ASC");
+	$doorRows = dashboardFetchRows('logs', "SELECT FLOOR((`time` - {$startTs}) / {$grain}) AS `bucket_index`, IFNULL(NULLIF(`passdoor`, ''), '未知门禁') AS `door`, COUNT(*) AS `total` FROM `logs`{$whereSql} GROUP BY `bucket_index`, `door` ORDER BY `bucket_index` ASC, `total` DESC");
+	$doorMap = [];
+	foreach ($doorRows as $row) {
+		$bucketIndex = intval($row['bucket_index'] ?? 0);
+		if (!isset($doorMap[$bucketIndex])) {
+			$doorMap[$bucketIndex] = [];
+		}
+		if (count($doorMap[$bucketIndex]) < 3) {
+			$doorMap[$bucketIndex][] = [
+				'name' => (string)($row['door'] ?? ''),
+				'total' => intval($row['total'] ?? 0)
+			];
+		}
+	}
+	$points = [];
+	foreach ($bucketRows as $row) {
+		$bucketIndex = intval($row['bucket_index'] ?? 0);
+		$bucketStart = $startTs + ($bucketIndex * $grain);
+		$bucketEnd = min($bucketStart + $grain - 1, $endTs);
+		$points[] = [
+			'index' => $bucketIndex,
+			'start' => $bucketStart,
+			'end' => $bucketEnd,
+			'total' => intval($row['total'] ?? 0),
+			'people' => intval($row['people'] ?? 0),
+			'success_total' => intval($row['success_total'] ?? 0),
+			'failed_total' => intval($row['failed_total'] ?? 0),
+			'top_doors' => $doorMap[$bucketIndex] ?? []
+		];
+	}
+	return [
+		'grain' => $grain,
+		'label' => dashboardGrainText($grain),
+		'bucket_count' => max(1, intval(ceil(($endTs - $startTs + 1) / $grain))),
+		'points' => $points
+	];
+}
+
 $today = date('Y-m-d');
 $startDate = dashboardDateParam('start_date', $today);
 $endDate = dashboardDateParam('end_date', $today);
@@ -166,15 +209,6 @@ $actionType = dashboardActionType();
 $selectedGrain = dashboardTimeGrain();
 $chartType = dashboardChartType();
 $crossDay = $startDate !== $endDate;
-$effectiveGrain = $selectedGrain;
-$maxChartPoints = 360;
-foreach (dashboardGrainOptions() as $grainValue => $grainLabel) {
-	if ($grainValue >= $selectedGrain && ceil(($endTs - $startTs + 1) / $grainValue) <= $maxChartPoints) {
-		$effectiveGrain = $grainValue;
-		break;
-	}
-}
-$grainAdjusted = $effectiveGrain !== $selectedGrain;
 $whereSql = dashboardWhereSql($startTs, $endTs, $keyword, $actionType);
 
 $summary = dashboardFetchOne('logs', "SELECT
@@ -191,45 +225,15 @@ $activeEmployeeTotal = intval($activeEmployee['total'] ?? 0);
 
 $typeRows = dashboardFetchRows('logs', "SELECT IFNULL(NULLIF(`passusertype`, ''), '未知') AS `label`, COUNT(*) AS `total` FROM `logs`{$whereSql} GROUP BY `label` ORDER BY `total` DESC");
 $doorRows = dashboardFetchRows('logs', "SELECT IFNULL(NULLIF(`passdoor`, ''), '未知门禁') AS `label`, COUNT(*) AS `total` FROM `logs`{$whereSql} GROUP BY `label` ORDER BY `total` DESC LIMIT 8");
-$failedDoorRows = dashboardFetchRows('logs', "SELECT IFNULL(NULLIF(`passdoor`, ''), '未知门禁') AS `label`, COUNT(*) AS `total` FROM `logs`" . dashboardWhereSql($startTs, $endTs, $keyword, 'failed') . " GROUP BY `label` ORDER BY `total` DESC LIMIT 6");
 $personRows = dashboardFetchRows('logs', "SELECT IFNULL(NULLIF(`passusername`, ''), '未知人员') AS `name`, IFNULL(NULLIF(`passusertype`, ''), '未知') AS `kind`, IFNULL(NULLIF(`cardid`, ''), '-') AS `cardid`, COUNT(*) AS `total` FROM `logs`{$whereSql} GROUP BY `name`, `kind`, `cardid` ORDER BY `total` DESC LIMIT 8");
-$bucketRows = dashboardFetchRows('logs', "SELECT FLOOR((`time` - {$startTs}) / {$effectiveGrain}) AS `bucket_index`, COUNT(*) AS `total`, COUNT(DISTINCT CONCAT(IFNULL(`passusertype`, ''), '|', IFNULL(`passusername`, ''), '|', IFNULL(`cardid`, ''))) AS `people`, SUM(CASE WHEN `action` LIKE '%成功%' THEN 1 ELSE 0 END) AS `success_total`, SUM(CASE WHEN `action` LIKE '%失败%' THEN 1 ELSE 0 END) AS `failed_total` FROM `logs`{$whereSql} GROUP BY `bucket_index` ORDER BY `bucket_index` ASC");
 $dayRows = dashboardFetchRows('logs', "SELECT DATE(FROM_UNIXTIME(`time`)) AS `day`, COUNT(*) AS `total`, COUNT(DISTINCT CONCAT(IFNULL(`passusertype`, ''), '|', IFNULL(`passusername`, ''), '|', IFNULL(`cardid`, ''))) AS `people` FROM `logs`{$whereSql} GROUP BY `day` ORDER BY `day` ASC");
 $weekdayRows = dashboardFetchRows('logs', "SELECT CASE WHEN DAYOFWEEK(FROM_UNIXTIME(`time`)) IN (1,7) THEN '周末' ELSE '工作日' END AS `label`, COUNT(*) AS `total` FROM `logs`{$whereSql} GROUP BY `label` ORDER BY `total` DESC");
 $edgeTimes = dashboardFetchOne('logs', "SELECT MIN(CASE WHEN `action` LIKE '%成功%' THEN `time` ELSE NULL END) AS `first_success`, MAX(`time`) AS `last_record` FROM `logs`{$whereSql}");
 $latestRows = dashboardFetchRows('logs', "SELECT * FROM `logs`{$whereSql} ORDER BY `time` DESC LIMIT 12");
 
-$bucketMap = [];
-foreach ($bucketRows as $row) {
-	$bucketMap[intval($row['bucket_index'] ?? 0)] = $row;
-}
-$bucketCount = max(1, intval(ceil(($endTs - $startTs + 1) / $effectiveGrain)));
-$timeSeries = [];
-$peakIndex = 0;
-$peakTotal = 0;
-$maxSeriesTotal = 1;
-for ($i = 0; $i < $bucketCount; $i++) {
-	$row = $bucketMap[$i] ?? [];
-	$bucketStart = $startTs + ($i * $effectiveGrain);
-	$bucketEnd = min($bucketStart + $effectiveGrain - 1, $endTs);
-	$total = intval($row['total'] ?? 0);
-	$item = [
-		'index' => $i,
-		'start' => $bucketStart,
-		'end' => $bucketEnd,
-		'label' => dashboardBucketText($bucketStart, $effectiveGrain, $crossDay),
-		'title' => dashboardBucketText($bucketStart, $effectiveGrain, true) . ' - ' . dashboardBucketText($bucketEnd, $effectiveGrain, true),
-		'total' => $total,
-		'people' => intval($row['people'] ?? 0),
-		'success_total' => intval($row['success_total'] ?? 0),
-		'failed_total' => intval($row['failed_total'] ?? 0)
-	];
-	$timeSeries[] = $item;
-	$maxSeriesTotal = max($maxSeriesTotal, $total);
-	if ($total > $peakTotal) {
-		$peakIndex = $i;
-		$peakTotal = $total;
-	}
+$chartSeriesByGrain = [];
+foreach (dashboardGrainOptions() as $grainValue => $grainLabel) {
+	$chartSeriesByGrain[(string)$grainValue] = dashboardBuildSeries($startTs, $endTs, $whereSql, intval($grainValue));
 }
 
 $totalSwipes = intval($summary['total'] ?? 0);
@@ -246,40 +250,46 @@ $maxDoorTotal = 1;
 foreach ($doorRows as $row) {
 	$maxDoorTotal = max($maxDoorTotal, intval($row['total'] ?? 0));
 }
-$maxFailedDoorTotal = 1;
-foreach ($failedDoorRows as $row) {
-	$maxFailedDoorTotal = max($maxFailedDoorTotal, intval($row['total'] ?? 0));
-}
 $maxDayTotal = 1;
 foreach ($dayRows as $row) {
 	$maxDayTotal = max($maxDayTotal, intval($row['total'] ?? 0));
 }
-$peakText = $peakTotal > 0 ? ($timeSeries[$peakIndex]['label'] ?? '-') : '-';
 $firstSuccessAt = intval($edgeTimes['first_success'] ?? 0);
 $lastRecordAt = intval($edgeTimes['last_record'] ?? 0);
 $busiestDoor = $doorRows[0] ?? null;
 $busiestPerson = $personRows[0] ?? null;
-$mostFailedDoor = $failedDoorRows[0] ?? null;
-$linePoints = [];
-$lineCircles = [];
-$seriesCount = count($timeSeries);
-foreach ($timeSeries as $idx => $item) {
-	$x = $seriesCount > 1 ? ($idx * 1000 / ($seriesCount - 1)) : 500;
-	$y = 205 - (($item['total'] / $maxSeriesTotal) * 180);
-	$linePoints[] = number_format($x, 2, '.', '') . ',' . number_format($y, 2, '.', '');
-	$lineCircles[] = [
-		'x' => $x,
-		'y' => $y,
-		'title' => $item['title'] . '，' . $item['total'] . ' 次，' . $item['people'] . ' 人'
-	];
-}
-$axisEvery = max(1, intval(ceil($seriesCount / 10)));
-$chartMinWidth = max(760, min(2400, $seriesCount * 20));
 $rangeText = $startDate === $endDate ? $startDate : ($startDate . ' 至 ' . $endDate);
 ?>
 <style>
 	.dash-wrap {
-		color: #1f2937;
+		--dash-bg: #f5f7fb;
+		--dash-panel: #fff;
+		--dash-panel-soft: #fafbfc;
+		--dash-border: #e6e9ef;
+		--dash-text: #1f2937;
+		--dash-strong: #111827;
+		--dash-muted: #667085;
+		--dash-faint: #98a2b3;
+		--dash-grid-line: #edf0f5;
+		--dash-shadow: rgba(31, 41, 55, .05);
+		--dash-orange: #f67302;
+		--dash-green: #22a06b;
+		--dash-blue: #2f80ed;
+		--dash-red: #d92d20;
+		color: var(--dash-text);
+	}
+	.dash-wrap.dark {
+		--dash-bg: #0b1120;
+		--dash-panel: #111827;
+		--dash-panel-soft: #172033;
+		--dash-border: #263244;
+		--dash-text: #dbe4f0;
+		--dash-strong: #f8fafc;
+		--dash-muted: #a9b4c2;
+		--dash-faint: #7f8da3;
+		--dash-grid-line: #27364b;
+		--dash-shadow: rgba(0, 0, 0, .24);
+		background: var(--dash-bg);
 	}
 	.dash-header {
 		display: flex;
@@ -534,6 +544,184 @@ $rangeText = $startDate === $endDate ? $startDate : ($startDate . ' 至 ' . $end
 		padding: 20px 0;
 		text-align: center;
 	}
+	.dash-panel-titlebar {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
+		margin-bottom: 12px;
+	}
+	.dash-panel-titlebar h4 {
+		margin-bottom: 0;
+	}
+	.dash-chart-controls {
+		display: flex;
+		align-items: center;
+		justify-content: flex-end;
+		gap: 8px;
+		flex-wrap: wrap;
+	}
+	.dash-chart-select {
+		width: auto;
+		min-width: 96px;
+		height: 34px;
+		background: var(--dash-panel);
+		border-color: var(--dash-border);
+		color: var(--dash-text);
+	}
+	.dash-chart-switch {
+		display: inline-flex;
+		border: 1px solid var(--dash-border);
+		border-radius: 8px;
+		padding: 2px;
+		background: var(--dash-panel-soft);
+	}
+	.dash-chart-button {
+		height: 30px;
+		padding: 0 10px;
+		border: 0;
+		border-radius: 6px;
+		background: transparent;
+		color: var(--dash-muted);
+		outline: none;
+		white-space: nowrap;
+	}
+	.dash-chart-button.active {
+		background: var(--dash-orange);
+		color: #fff;
+	}
+	.dash-dark-button {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		border: 1px solid var(--dash-border);
+		background: var(--dash-panel-soft);
+	}
+	.dashboard-chart-stage {
+		position: relative;
+		min-height: 286px;
+		color: var(--dash-text);
+	}
+	.peak-svg-chart {
+		display: block;
+		height: 262px;
+		min-width: 760px;
+		overflow: visible;
+	}
+	.peak-svg-axis {
+		fill: var(--dash-faint);
+		font-size: 11px;
+	}
+	.peak-svg-grid {
+		stroke: var(--dash-grid-line);
+		stroke-width: 1;
+	}
+	.peak-svg-bar {
+		fill: var(--dash-orange);
+		rx: 4;
+		cursor: default;
+	}
+	.peak-svg-bar.peak {
+		fill: var(--dash-green);
+	}
+	.peak-svg-path {
+		fill: none;
+		stroke: var(--dash-orange);
+		stroke-width: 3.5;
+		stroke-linecap: round;
+		stroke-linejoin: round;
+	}
+	.peak-svg-dot {
+		fill: var(--dash-panel);
+		stroke: var(--dash-orange);
+		stroke-width: 2.5;
+		cursor: default;
+	}
+	.peak-svg-dot.peak {
+		fill: var(--dash-green);
+		stroke: var(--dash-green);
+	}
+	.peak-svg-hit {
+		fill: transparent;
+		cursor: default;
+	}
+	.peak-empty {
+		height: 240px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		color: var(--dash-faint);
+		border: 1px dashed var(--dash-border);
+		border-radius: 8px;
+	}
+	.dashboard-tooltip {
+		position: fixed;
+		z-index: 9999;
+		display: none;
+		max-width: 260px;
+		padding: 10px 12px;
+		border: 1px solid var(--dash-border);
+		border-radius: 8px;
+		background: var(--dash-panel);
+		color: var(--dash-text);
+		box-shadow: 0 16px 40px rgba(15, 23, 42, .18);
+		pointer-events: none;
+		font-size: 12px;
+		line-height: 1.55;
+	}
+	.dashboard-tooltip strong {
+		display: block;
+		margin-bottom: 4px;
+		color: var(--dash-strong);
+		font-size: 13px;
+	}
+	body.dashboard-dark-mode .page-content,
+	body.dashboard-dark-mode .page-inner {
+		background: #0b1120 !important;
+	}
+	body.dashboard-dark-mode .breadcrumb-header,
+	.dash-wrap.dark .dash-title,
+	.dash-wrap.dark .dash-panel h4 {
+		color: var(--dash-strong);
+	}
+	.dash-wrap.dark .dash-filter,
+	.dash-wrap.dark .dash-card,
+	.dash-wrap.dark .dash-panel,
+	.dash-wrap.dark .insight-card {
+		background: var(--dash-panel);
+		border-color: var(--dash-border);
+		box-shadow: 0 8px 24px var(--dash-shadow);
+	}
+	.dash-wrap.dark .dash-subtitle,
+	.dash-wrap.dark .dash-card span,
+	.dash-wrap.dark .insight-card span,
+	.dash-wrap.dark .latest-table th,
+	.dash-wrap.dark .type-pill span,
+	.dash-wrap.dark .empty-state {
+		color: var(--dash-muted);
+	}
+	.dash-wrap.dark .dash-card strong,
+	.dash-wrap.dark .insight-card strong,
+	.dash-wrap.dark .type-pill b {
+		color: var(--dash-strong);
+	}
+	.dash-wrap.dark .type-pill,
+	.dash-wrap.dark .dash-filter .form-control,
+	.dash-wrap.dark .latest-table,
+	.dash-wrap.dark .latest-table td,
+	.dash-wrap.dark .latest-table th {
+		background: var(--dash-panel-soft);
+		border-color: var(--dash-border);
+		color: var(--dash-text);
+	}
+	.dash-wrap.dark .rank-name,
+	.dash-wrap.dark .trend-name {
+		color: var(--dash-text);
+	}
+	.dash-wrap.dark .rank-line,
+	.dash-wrap.dark .trend-line {
+		background: var(--dash-grid-line);
+	}
 	@media screen and (max-width: 1100px) {
 		.dash-grid,
 		.dash-section-grid,
@@ -543,9 +731,18 @@ $rangeText = $startDate === $endDate ? $startDate : ($startDate . ' 至 ' . $end
 	}
 	@media screen and (max-width: 760px) {
 		.dash-header,
+		.dash-panel-titlebar,
 		.dash-chart-toolbar,
 		.dash-filter .form-inline {
 			display: block;
+		}
+		.dash-chart-controls {
+			justify-content: flex-start;
+			margin-top: 10px;
+		}
+		.dash-chart-select,
+		.dash-dark-button {
+			flex: 1 1 auto;
 		}
 		.dash-grid,
 		.dash-section-grid,
@@ -599,21 +796,6 @@ $rangeText = $startDate === $endDate ? $startDate : ($startDate . ' 至 ' . $end
 				</select>
 			</div>
 			<div class="form-group" style="margin-left: 8px;">
-				<label>时间颗粒度</label>
-				<select class="form-control" name="time_grain">
-					<?php foreach (dashboardGrainOptions() as $grainValue => $grainLabel) { ?>
-						<option value="<?php echo intval($grainValue); ?>" <?php echo $selectedGrain === intval($grainValue) ? 'selected' : ''; ?>><?php echo dashboardH($grainLabel); ?></option>
-					<?php } ?>
-				</select>
-			</div>
-			<div class="form-group" style="margin-left: 8px;">
-				<label>图表形式</label>
-				<select class="form-control" name="chart_type">
-					<option value="bar" <?php echo $chartType === 'bar' ? 'selected' : ''; ?>>柱状图</option>
-					<option value="line" <?php echo $chartType === 'line' ? 'selected' : ''; ?>>折线图</option>
-				</select>
-			</div>
-			<div class="form-group" style="margin-left: 8px;">
 				<label>关键词</label>
 				<input type="text" class="form-control" name="q" value="<?php echo dashboardH($keyword); ?>" placeholder="姓名、卡号、门禁、动作">
 			</div>
@@ -636,52 +818,33 @@ $rangeText = $startDate === $endDate ? $startDate : ($startDate . ' 至 ' . $end
 		<div class="insight-card"><span>首刷/末刷</span><strong><?php echo dashboardH(($firstSuccessAt > 0 ? date('H:i', $firstSuccessAt) : '-') . ' / ' . ($lastRecordAt > 0 ? date('H:i', $lastRecordAt) : '-')); ?></strong><small><?php echo dashboardH($crossDay ? '跨日范围按实际日期统计' : $rangeText); ?></small></div>
 		<div class="insight-card"><span>最忙门禁</span><strong><?php echo dashboardH($busiestDoor ? ($busiestDoor['label'] ?? '-') : '-'); ?></strong><small><?php echo dashboardNumber($busiestDoor['total'] ?? 0); ?> 次刷卡</small></div>
 		<div class="insight-card"><span>最高频人员</span><strong><?php echo dashboardH($busiestPerson ? (($busiestPerson['name'] ?? '-') . ' / ' . ($busiestPerson['kind'] ?? '-')) : '-'); ?></strong><small><?php echo dashboardNumber($busiestPerson['total'] ?? 0); ?> 次刷卡</small></div>
-		<div class="insight-card"><span>失败最多门禁</span><strong><?php echo dashboardH($mostFailedDoor ? ($mostFailedDoor['label'] ?? '-') : '-'); ?></strong><small><?php echo dashboardNumber($mostFailedDoor['total'] ?? 0); ?> 次失败</small></div>
 	</div>
 
 	<div class="dash-section-grid">
 		<div class="dash-panel">
-			<h4>高峰时段</h4>
+			<div class="dash-panel-titlebar">
+				<h4>高峰时段</h4>
+				<div class="dash-chart-controls">
+					<select class="form-control dash-chart-select" id="dashboardTimeGrain">
+						<?php foreach (dashboardGrainOptions() as $grainValue => $grainLabel) { ?>
+							<option value="<?php echo intval($grainValue); ?>" <?php echo $selectedGrain === intval($grainValue) ? 'selected' : ''; ?>><?php echo dashboardH($grainLabel); ?></option>
+						<?php } ?>
+					</select>
+					<div class="dash-chart-switch" role="group" aria-label="图表形式">
+						<button type="button" class="dash-chart-button" data-chart-type="bar">柱状图</button>
+						<button type="button" class="dash-chart-button" data-chart-type="line">折线图</button>
+					</div>
+					<button type="button" class="dash-chart-button dash-dark-button" id="dashboardDarkToggle"><i class="fa fa-moon"></i><span>深色模式</span></button>
+				</div>
+			</div>
 			<div class="dash-chart-toolbar">
-				<div class="dash-subtitle">峰值：<?php echo dashboardH($peakText); ?>，<?php echo dashboardNumber($peakTotal); ?> 次</div>
-				<div class="dash-subtitle">图表：<?php echo dashboardH(dashboardChartTypeText($chartType)); ?>，粒度：<?php echo dashboardH(dashboardGrainText($effectiveGrain)); ?><?php echo $grainAdjusted ? '（范围较长，已自动优化）' : ''; ?></div>
+				<div class="dash-subtitle" id="peakSummary">峰值：计算中</div>
+				<div class="dash-subtitle" id="peakStatus">图表加载中</div>
 			</div>
 			<div class="dash-chart-scroll">
-				<?php if ($chartType === 'line') { ?>
-					<div class="peak-line-chart" style="min-width: <?php echo intval($chartMinWidth); ?>px;">
-						<svg viewBox="0 0 1000 230" role="img" aria-label="高峰时段折线图">
-							<line class="peak-line-grid" x1="0" y1="205" x2="1000" y2="205"></line>
-							<line class="peak-line-grid" x1="0" y1="145" x2="1000" y2="145"></line>
-							<line class="peak-line-grid" x1="0" y1="85" x2="1000" y2="85"></line>
-							<line class="peak-line-grid" x1="0" y1="25" x2="1000" y2="25"></line>
-							<polyline class="peak-line-path" points="<?php echo dashboardH(implode(' ', $linePoints)); ?>"></polyline>
-							<?php foreach ($lineCircles as $idx => $point) { ?>
-								<?php if ($idx % max(1, intval(ceil($seriesCount / 48))) === 0 || $idx === $peakIndex || $idx === $seriesCount - 1) { ?>
-									<circle class="peak-line-dot <?php echo $idx === $peakIndex && $peakTotal > 0 ? 'peak' : ''; ?>" cx="<?php echo number_format($point['x'], 2, '.', ''); ?>" cy="<?php echo number_format($point['y'], 2, '.', ''); ?>" r="<?php echo $idx === $peakIndex && $peakTotal > 0 ? 6 : 4; ?>">
-										<title><?php echo dashboardH($point['title']); ?></title>
-									</circle>
-								<?php } ?>
-							<?php } ?>
-						</svg>
-						<div class="peak-axis">
-							<?php foreach ($timeSeries as $idx => $item) { ?>
-								<?php if ($idx % $axisEvery === 0 || $idx === $seriesCount - 1) { ?><span><?php echo dashboardH($item['label']); ?></span><?php } ?>
-							<?php } ?>
-						</div>
-					</div>
-				<?php } else { ?>
-					<div class="peak-bar-chart" style="grid-template-columns: repeat(<?php echo max(1, $seriesCount); ?>, minmax(10px, 1fr)); min-width: <?php echo intval($chartMinWidth); ?>px;">
-						<?php foreach ($timeSeries as $idx => $item) {
-							$height = max(3, intval(($item['total'] / $maxSeriesTotal) * 100));
-						?>
-							<div class="peak-col <?php echo $idx === $peakIndex && $item['total'] > 0 ? 'peak' : ''; ?>" title="<?php echo dashboardH($item['title'] . '，' . $item['total'] . '次，' . $item['people'] . '人'); ?>">
-								<div class="peak-bar" style="height: <?php echo $height; ?>%;"></div>
-								<?php if ($idx % $axisEvery === 0 || $idx === $seriesCount - 1) { ?><div class="peak-label"><?php echo dashboardH($item['label']); ?></div><?php } ?>
-							</div>
-						<?php } ?>
-					</div>
-				<?php } ?>
+				<div class="dashboard-chart-stage" id="dashboardChart"></div>
 			</div>
+			<div class="dashboard-tooltip" id="dashboardTooltip" aria-hidden="true"></div>
 		</div>
 		<div class="dash-panel">
 			<h4>人员类型</h4>
@@ -760,21 +923,6 @@ $rangeText = $startDate === $endDate ? $startDate : ($startDate . ' 至 ' . $end
 					<?php } ?>
 				</div>
 			<?php } ?>
-			<h4 style="margin-top: 20px;">失败点位</h4>
-			<?php if (count($failedDoorRows) === 0) { ?>
-				<div class="empty-state">暂无失败数据</div>
-			<?php } else { ?>
-				<?php foreach ($failedDoorRows as $row) {
-					$total = intval($row['total'] ?? 0);
-					$width = max(3, intval(($total / $maxFailedDoorTotal) * 100));
-				?>
-					<div class="rank-row">
-						<div class="rank-name"><?php echo dashboardH($row['label'] ?? '未知门禁'); ?></div>
-						<div><?php echo dashboardNumber($total); ?></div>
-						<div class="rank-line"><div class="rank-fill" style="width: <?php echo $width; ?>%;"></div></div>
-					</div>
-				<?php } ?>
-			<?php } ?>
 		</div>
 	</div>
 
@@ -810,3 +958,350 @@ $rangeText = $startDate === $endDate ? $startDate : ($startDate . ' 至 ' . $end
 		</table>
 	</div>
 </div>
+<script>
+	window.dashboardChartPayload = {
+		startTs: <?php echo intval($startTs); ?>,
+		endTs: <?php echo intval($endTs); ?>,
+		crossDay: <?php echo $crossDay ? 'true' : 'false'; ?>,
+		selectedGrain: <?php echo intval($selectedGrain); ?>,
+		chartType: <?php echo json_encode($chartType, JSON_UNESCAPED_UNICODE); ?>,
+		grains: <?php echo json_encode(dashboardGrainOptions(), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT); ?>,
+		series: <?php echo json_encode($chartSeriesByGrain, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT); ?>
+	};
+	(function() {
+		var payload = window.dashboardChartPayload || {};
+		var root = document.getElementById('main-wrapper');
+		var chart = document.getElementById('dashboardChart');
+		var grainSelect = document.getElementById('dashboardTimeGrain');
+		var summaryEl = document.getElementById('peakSummary');
+		var statusEl = document.getElementById('peakStatus');
+		var tooltip = document.getElementById('dashboardTooltip');
+		var darkToggle = document.getElementById('dashboardDarkToggle');
+		var seriesStore = payload.series || {};
+		if (!root || !chart) {
+			return;
+		}
+
+		function readStorage(key, fallback) {
+			try {
+				var value = localStorage.getItem(key);
+				return value === null ? fallback : value;
+			} catch (e) {
+				return fallback;
+			}
+		}
+
+		function writeStorage(key, value) {
+			try {
+				localStorage.setItem(key, value);
+			} catch (e) {}
+		}
+
+		var state = {
+			grain: readStorage('doorlockDashboardGrain', String(payload.selectedGrain || 60)),
+			chartType: readStorage('doorlockDashboardChartType', payload.chartType || 'bar'),
+			dark: readStorage('doorlockDashboardDark', '0') === '1'
+		};
+		if (!seriesStore[state.grain]) {
+			state.grain = String(payload.selectedGrain || 60);
+		}
+		if (state.chartType !== 'line') {
+			state.chartType = 'bar';
+		}
+
+		function escapeHtml(value) {
+			return String(value == null ? '' : value)
+				.replace(/&/g, '&amp;')
+				.replace(/</g, '&lt;')
+				.replace(/>/g, '&gt;')
+				.replace(/"/g, '&quot;')
+				.replace(/'/g, '&#039;');
+		}
+
+		function pad(value) {
+			return String(value).padStart(2, '0');
+		}
+
+		function dateParts(timestamp) {
+			var d = new Date(Number(timestamp) * 1000);
+			return {
+				year: d.getFullYear(),
+				month: pad(d.getMonth() + 1),
+				day: pad(d.getDate()),
+				hour: pad(d.getHours()),
+				minute: pad(d.getMinutes())
+			};
+		}
+
+		function shortLabel(timestamp, grain) {
+			var p = dateParts(timestamp);
+			if (Number(grain) >= 86400) {
+				return p.year + '-' + p.month + '-' + p.day;
+			}
+			return payload.crossDay ? (p.month + '-' + p.day + ' ' + p.hour + ':' + p.minute) : (p.hour + ':' + p.minute);
+		}
+
+		function fullLabel(timestamp) {
+			var p = dateParts(timestamp);
+			return p.year + '-' + p.month + '-' + p.day + ' ' + p.hour + ':' + p.minute;
+		}
+
+		function pointRange(point, grain) {
+			if (Number(grain) >= 86400) {
+				return shortLabel(point.start, grain);
+			}
+			if (payload.crossDay) {
+				return fullLabel(point.start) + ' - ' + fullLabel(point.end);
+			}
+			return shortLabel(point.start, grain) + ' - ' + shortLabel(point.end, grain);
+		}
+
+		function numberText(value) {
+			return Number(value || 0).toLocaleString('zh-CN');
+		}
+
+		function buildSeries(grain) {
+			var source = seriesStore[String(grain)] || seriesStore[String(payload.selectedGrain || 60)] || {};
+			var sourceGrain = Number(source.grain || grain || 60);
+			var bucketCount = Math.max(1, Number(source.bucket_count || 1));
+			var map = {};
+			(source.points || []).forEach(function(point) {
+				map[Number(point.index || 0)] = point;
+			});
+			var points = [];
+			for (var i = 0; i < bucketCount; i++) {
+				var base = map[i] || {};
+				var start = Number(payload.startTs || 0) + i * sourceGrain;
+				var end = Math.min(start + sourceGrain - 1, Number(payload.endTs || start));
+				points.push({
+					index: i,
+					start: Number(base.start || start),
+					end: Number(base.end || end),
+					total: Number(base.total || 0),
+					people: Number(base.people || 0),
+					success_total: Number(base.success_total || 0),
+					failed_total: Number(base.failed_total || 0),
+					top_doors: base.top_doors || []
+				});
+			}
+			return {
+				grain: sourceGrain,
+				label: source.label || ((payload.grains || {})[String(sourceGrain)] || ''),
+				bucketCount: bucketCount,
+				points: points
+			};
+		}
+
+		function findPeak(points) {
+			var peak = points[0] || null;
+			var maxTotal = 0;
+			points.forEach(function(point) {
+				if (point.total > maxTotal || !peak) {
+					peak = point;
+					maxTotal = point.total;
+				}
+			});
+			return {
+				point: peak,
+				total: maxTotal
+			};
+		}
+
+		function tooltipHtml(point, grain) {
+			var doors = (point.top_doors || []).map(function(door) {
+				return escapeHtml(door.name || '未知门禁') + ' ' + numberText(door.total || 0) + '次';
+			}).join('、');
+			return '<strong>' + escapeHtml(pointRange(point, grain)) + '</strong>'
+				+ '<div>刷卡 ' + numberText(point.total) + ' 次，' + numberText(point.people) + ' 人</div>'
+				+ '<div>成功 ' + numberText(point.success_total) + ' 次，失败 ' + numberText(point.failed_total) + ' 次</div>'
+				+ '<div>高频门禁：' + (doors || '-') + '</div>';
+		}
+
+		function moveTooltip(event) {
+			if (!tooltip) {
+				return;
+			}
+			var source = event.touches && event.touches[0] ? event.touches[0] : event;
+			var x = source.clientX || 0;
+			var y = source.clientY || 0;
+			var width = tooltip.offsetWidth || 240;
+			var height = tooltip.offsetHeight || 96;
+			var left = Math.min(window.innerWidth - width - 12, x + 14);
+			var top = Math.min(window.innerHeight - height - 12, y + 14);
+			tooltip.style.left = Math.max(12, left) + 'px';
+			tooltip.style.top = Math.max(12, top) + 'px';
+		}
+
+		function showTooltip(event, point, grain) {
+			if (!tooltip) {
+				return;
+			}
+			tooltip.innerHTML = tooltipHtml(point, grain);
+			tooltip.style.display = 'block';
+			tooltip.setAttribute('aria-hidden', 'false');
+			moveTooltip(event);
+		}
+
+		function hideTooltip() {
+			if (!tooltip) {
+				return;
+			}
+			tooltip.style.display = 'none';
+			tooltip.setAttribute('aria-hidden', 'true');
+		}
+
+		function bindTooltip(points, grain) {
+			Array.prototype.forEach.call(chart.querySelectorAll('[data-point-index]'), function(node) {
+				var index = Number(node.getAttribute('data-point-index'));
+				var point = points[index];
+				if (!point) {
+					return;
+				}
+				node.addEventListener('mouseenter', function(event) { showTooltip(event, point, grain); });
+				node.addEventListener('mousemove', moveTooltip);
+				node.addEventListener('mouseleave', hideTooltip);
+				node.addEventListener('touchstart', function(event) {
+					showTooltip(event, point, grain);
+					setTimeout(hideTooltip, 1800);
+				}, { passive: true });
+			});
+		}
+
+		function svgGrid(width, top, bottom) {
+			var lines = [];
+			for (var i = 0; i <= 3; i++) {
+				var y = top + ((bottom - top) / 3) * i;
+				lines.push('<line class="peak-svg-grid" x1="0" y1="' + y.toFixed(2) + '" x2="' + width.toFixed(2) + '" y2="' + y.toFixed(2) + '"></line>');
+			}
+			return lines.join('');
+		}
+
+		function axisLabels(points, grain, width, chartBottom) {
+			var labels = [];
+			var count = points.length;
+			var every = Math.max(1, Math.ceil(count / 10));
+			for (var i = 0; i < count; i++) {
+				if (i % every !== 0 && i !== count - 1) {
+					continue;
+				}
+				var x = count === 1 ? width / 2 : (i / (count - 1)) * width;
+				labels.push('<text class="peak-svg-axis" x="' + x.toFixed(2) + '" y="' + (chartBottom + 24) + '" text-anchor="' + (i === 0 ? 'start' : (i === count - 1 ? 'end' : 'middle')) + '">' + escapeHtml(shortLabel(points[i].start, grain)) + '</text>');
+			}
+			return labels.join('');
+		}
+
+		function renderBar(data, maxTotal, peakPoint) {
+			var points = data.points;
+			var width = Math.max(760, Math.min(48000, points.length * 10));
+			var top = 18;
+			var bottom = 220;
+			var step = width / Math.max(1, points.length);
+			var barWidth = Math.max(1, Math.min(14, step * .72));
+			var bars = [];
+			points.forEach(function(point, i) {
+				var barHeight = point.total > 0 ? Math.max(2, (point.total / maxTotal) * (bottom - top)) : 1;
+				var x = i * step + (step - barWidth) / 2;
+				var y = bottom - barHeight;
+				var isPeak = peakPoint && point.index === peakPoint.index && point.total > 0;
+				var tooltipAttr = point.total > 0 ? ' data-point-index="' + i + '"' : '';
+				bars.push('<rect class="peak-svg-bar' + (isPeak ? ' peak' : '') + '"' + tooltipAttr + ' x="' + x.toFixed(2) + '" y="' + y.toFixed(2) + '" width="' + barWidth.toFixed(2) + '" height="' + barHeight.toFixed(2) + '"></rect>');
+			});
+			chart.innerHTML = '<svg class="peak-svg-chart" style="width:' + width + 'px" viewBox="0 0 ' + width + ' 262" role="img" aria-label="高峰时段柱状图">'
+				+ svgGrid(width, top, bottom)
+				+ bars.join('')
+				+ axisLabels(points, data.grain, width, bottom)
+				+ '</svg>';
+			bindTooltip(points, data.grain);
+		}
+
+		function renderLine(data, maxTotal, peakPoint) {
+			var points = data.points;
+			var width = Math.max(760, Math.min(48000, points.length * 8));
+			var top = 18;
+			var bottom = 220;
+			var lineWidth = Math.max(1, width - 24);
+			var dotEvery = Math.max(1, Math.ceil(points.length / 260));
+			var polyline = [];
+			var dots = [];
+			points.forEach(function(point, i) {
+				var x = points.length === 1 ? width / 2 : 12 + (i / (points.length - 1)) * lineWidth;
+				var y = bottom - ((point.total / maxTotal) * (bottom - top));
+				polyline.push(x.toFixed(2) + ',' + y.toFixed(2));
+				var isPeak = peakPoint && point.index === peakPoint.index && point.total > 0;
+				if (point.total > 0 && (points.length <= 1200 || i % dotEvery === 0 || isPeak)) {
+					dots.push('<circle class="peak-svg-dot' + (isPeak ? ' peak' : '') + '" data-point-index="' + i + '" cx="' + x.toFixed(2) + '" cy="' + y.toFixed(2) + '" r="' + (isPeak ? 5 : 3.5) + '"></circle>');
+				}
+			});
+			chart.innerHTML = '<svg class="peak-svg-chart" style="width:' + width + 'px" viewBox="0 0 ' + width + ' 262" role="img" aria-label="高峰时段折线图">'
+				+ svgGrid(width, top, bottom)
+				+ '<polyline class="peak-svg-path" points="' + polyline.join(' ') + '"></polyline>'
+				+ dots.join('')
+				+ axisLabels(points, data.grain, width, bottom)
+				+ '</svg>';
+			bindTooltip(points, data.grain);
+		}
+
+		function syncControls() {
+			if (grainSelect) {
+				grainSelect.value = state.grain;
+			}
+			Array.prototype.forEach.call(document.querySelectorAll('[data-chart-type]'), function(button) {
+				button.classList.toggle('active', button.getAttribute('data-chart-type') === state.chartType);
+			});
+			root.classList.toggle('dark', state.dark);
+			document.body.classList.toggle('dashboard-dark-mode', state.dark);
+			if (darkToggle) {
+				darkToggle.classList.toggle('active', state.dark);
+				darkToggle.innerHTML = state.dark ? '<i class="fa fa-sun"></i><span>浅色模式</span>' : '<i class="fa fa-moon"></i><span>深色模式</span>';
+			}
+		}
+
+		function render() {
+			var data = buildSeries(state.grain);
+			var peak = findPeak(data.points);
+			var maxTotal = Math.max(1, peak.total);
+			syncControls();
+			if (!peak.point || peak.total <= 0) {
+				chart.innerHTML = '<div class="peak-empty">暂无可展示的高峰数据</div>';
+				if (summaryEl) {
+					summaryEl.textContent = '峰值：暂无数据';
+				}
+			} else {
+				if (summaryEl) {
+					summaryEl.textContent = '峰值：' + pointRange(peak.point, data.grain) + '，' + numberText(peak.total) + ' 次，' + numberText(peak.point.people) + ' 人';
+				}
+				if (state.chartType === 'line') {
+					renderLine(data, maxTotal, peak.point);
+				} else {
+					renderBar(data, maxTotal, peak.point);
+				}
+			}
+			if (statusEl) {
+				statusEl.textContent = '图表：' + (state.chartType === 'line' ? '折线图' : '柱状图') + '，粒度：' + (data.label || ((payload.grains || {})[state.grain] || state.grain + '秒')) + '，共 ' + numberText(data.bucketCount) + ' 个时间点';
+			}
+		}
+
+		if (grainSelect) {
+			grainSelect.addEventListener('change', function() {
+				state.grain = grainSelect.value;
+				writeStorage('doorlockDashboardGrain', state.grain);
+				render();
+			});
+		}
+		Array.prototype.forEach.call(document.querySelectorAll('[data-chart-type]'), function(button) {
+			button.addEventListener('click', function() {
+				state.chartType = button.getAttribute('data-chart-type') === 'line' ? 'line' : 'bar';
+				writeStorage('doorlockDashboardChartType', state.chartType);
+				render();
+			});
+		});
+		if (darkToggle) {
+			darkToggle.addEventListener('click', function() {
+				state.dark = !state.dark;
+				writeStorage('doorlockDashboardDark', state.dark ? '1' : '0');
+				render();
+			});
+		}
+		render();
+	})();
+</script>
