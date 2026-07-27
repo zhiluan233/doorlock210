@@ -830,7 +830,7 @@ $rangeText = $startDate === $endDate ? $startDate : ($startDate . ' 至 ' . $end
 	<div class="insight-grid">
 		<div class="insight-card"><span>活跃门禁点位</span><strong><?php echo dashboardNumber($activeDoorCount); ?></strong><small>区间内有刷卡记录的门禁</small></div>
 		<div class="insight-card"><span>活跃工牌</span><strong><?php echo dashboardNumber($activeCardCount); ?></strong><small>按卡号去重</small></div>
-		<div class="insight-card"><span>人均刷卡</span><strong><?php echo dashboardH($avgSwipePerPerson); ?> 次</strong><small>区间刷卡次数 / 刷卡人数</small></div>
+		<!-- div class="insight-card"><span>人均刷卡</span><strong><?php echo dashboardH($avgSwipePerPerson); ?> 次</strong><small>区间刷卡次数 / 刷卡人数</small></div -->
 		<div class="insight-card throughput-card">
 			<div class="throughput-head">
 				<span>峰值吞吐</span>
@@ -847,7 +847,7 @@ $rangeText = $startDate === $endDate ? $startDate : ($startDate . ' 至 ' . $end
 		<div class="insight-card"><span>最高频人员</span><strong><?php echo dashboardH($busiestPerson ? (($busiestPerson['name'] ?? '-') . ' / ' . ($busiestPerson['kind'] ?? '-')) : '-'); ?></strong><small><?php echo dashboardNumber($busiestPerson['total'] ?? 0); ?> 次刷卡</small></div>
 	</div>
 
-	<div class="dash-section-grid">
+	<div class="dash-section-grid" style="grid-template-columns: 1.25fr .15fr;">
 		<div class="dash-panel">
 			<div class="dash-panel-titlebar">
 				<h4>高峰时段</h4>
