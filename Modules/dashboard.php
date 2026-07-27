@@ -90,6 +90,111 @@ function dashboardFetchOne($table, $sql) {
 	return count($rows) > 0 ? $rows[0] : [];
 }
 
+function dashboardText($value, $emptyText = '-') {
+	$value = trim((string)$value);
+	return $value !== '' ? $value : $emptyText;
+}
+
+function dashboardEmployeeDepartmentPathText($employee) {
+	foreach (dashboardEmployeeDepartmentIds($employee) as $departmentId) {
+		$path = dashboardDepartmentPathById($departmentId);
+		if (count($path) > 0) {
+			return implode('/', $path);
+		}
+	}
+	$fallback = trim((string)($employee['department_name'] ?? ''));
+	return $fallback !== '' ? $fallback : '-';
+}
+
+function dashboardEmployeeDepartmentIds($employee) {
+	$ids = [];
+	$raw = $employee['department_ids'] ?? '';
+	if (is_string($raw) && trim($raw) !== '') {
+		$decoded = json_decode($raw, true);
+		if (is_array($decoded)) {
+			$raw = $decoded;
+		} else if (strpos($raw, ',') !== false) {
+			$raw = array_map('trim', explode(',', $raw));
+		}
+	}
+	if (is_array($raw)) {
+		foreach ($raw as $item) {
+			if (is_scalar($item) && trim((string)$item) !== '') {
+				$ids[] = trim((string)$item);
+			} else if (is_array($item)) {
+				foreach (['department_id', 'open_department_id', 'id'] as $key) {
+					if (!empty($item[$key])) {
+						$ids[] = trim((string)$item[$key]);
+						break;
+					}
+				}
+			}
+		}
+	}
+	if (!empty($employee['department_id'])) {
+		$ids[] = trim((string)$employee['department_id']);
+	}
+	return array_values(array_unique(array_filter($ids, function($id) {
+		return $id !== '';
+	})));
+}
+
+function dashboardDepartmentPathById($departmentId) {
+	$path = [];
+	$seen = [];
+	$department = dashboardFindDepartment($departmentId);
+	while (is_array($department)) {
+		$id = trim((string)($department['department_id'] ?? ''));
+		$openId = trim((string)($department['open_department_id'] ?? ''));
+		$seenKey = $id !== '' ? $id : $openId;
+		if ($seenKey !== '' && isset($seen[$seenKey])) {
+			break;
+		}
+		if ($seenKey !== '') {
+			$seen[$seenKey] = true;
+		}
+		$name = trim((string)($department['name'] ?? ''));
+		if ($name !== '') {
+			array_unshift($path, $name);
+		}
+		$parentId = trim((string)($department['parent_department_id'] ?? ''));
+		if ($parentId === '' || $parentId === '0') {
+			break;
+		}
+		$department = dashboardFindDepartment($parentId);
+	}
+	return $path;
+}
+
+function dashboardFindDepartment($departmentId) {
+	static $cache = [];
+	$departmentId = trim((string)$departmentId);
+	if ($departmentId === '') {
+		return null;
+	}
+	if (array_key_exists($departmentId, $cache)) {
+		return $cache[$departmentId];
+	}
+	$escaped = Database::escape($departmentId);
+	$sql = "SELECT * FROM `feishu_departments` WHERE `department_id`='{$escaped}' OR `open_department_id`='{$escaped}' LIMIT 1";
+	$row = Database::querySingleLine('feishu_departments', $sql, true);
+	$cache[$departmentId] = is_array($row) ? $row : null;
+	return $cache[$departmentId];
+}
+
+function dashboardDailyUnswipedWhere($alias, $dayStartTs, $dayEndTs) {
+	$cardColumn = $alias . ".`card_id`";
+	return "NOT EXISTS (
+		SELECT 1 FROM `logs` l
+		WHERE l.`time` BETWEEN " . intval($dayStartTs) . " AND " . intval($dayEndTs) . "
+		AND (
+			l.`cardid`={$cardColumn}
+			OR ({$cardColumn} REGEXP '^[0-9]+$' AND l.`cardid` REGEXP '^[0-9]+$' AND LPAD(l.`cardid`, 10, '0')=LPAD({$cardColumn}, 10, '0'))
+		)
+		LIMIT 1
+	)";
+}
+
 function dashboardWhereSql($startTs, $endTs, $keyword, $actionType) {
 	$where = [
 		"`time` BETWEEN " . intval($startTs) . " AND " . intval($endTs),
@@ -297,6 +402,62 @@ $lastRecordAt = intval($edgeTimes['last_record'] ?? 0);
 $busiestDoor = $doorRows[0] ?? null;
 $busiestPerson = $personRows[0] ?? null;
 $rangeText = $startDate === $endDate ? $startDate : ($startDate . ' 至 ' . $endDate);
+$chartDetailLimit = 50000;
+$chartDetailRows = [];
+$chartDetailLimited = $totalSwipes > $chartDetailLimit;
+if ($totalSwipes > 0) {
+	$chartDetailRawRows = dashboardFetchRows('logs', "SELECT `time`, IFNULL(NULLIF(`passusername`, ''), '未知人员') AS `passusername`, IFNULL(NULLIF(`passusertype`, ''), '未知') AS `passusertype`, IFNULL(NULLIF(`passdoor`, ''), '未知门禁') AS `passdoor`, IFNULL(NULLIF(`cardid`, ''), '-') AS `cardid`, IFNULL(NULLIF(`action`, ''), '-') AS `action` FROM `logs`{$whereSql} ORDER BY `time` ASC LIMIT {$chartDetailLimit}");
+	foreach ($chartDetailRawRows as $row) {
+		$chartDetailRows[] = [
+			'time' => intval($row['time'] ?? 0),
+			'passusername' => (string)($row['passusername'] ?? ''),
+			'passusertype' => (string)($row['passusertype'] ?? ''),
+			'passdoor' => (string)($row['passdoor'] ?? ''),
+			'cardid' => (string)($row['cardid'] ?? ''),
+			'action' => (string)($row['action'] ?? '')
+		];
+	}
+}
+$todayStartTs = strtotime($today . ' 00:00:00');
+$todayEndTs = strtotime($today . ' 23:59:59');
+$dailyUnswipedRows = [];
+$dailyUnswipedEmployeeRows = dashboardFetchRows('employee', "SELECT e.* FROM `employee` e WHERE e.`status`='true' AND TRIM(IFNULL(e.`card_id`, ''))<>'' AND " . dashboardDailyUnswipedWhere('e', $todayStartTs, $todayEndTs) . " ORDER BY e.`name` ASC");
+foreach ($dailyUnswipedEmployeeRows as $employeeRow) {
+	$dailyUnswipedRows[] = [
+		'kind' => '员工',
+		'id' => intval($employeeRow['id'] ?? 0),
+		'name' => dashboardText($employeeRow['name'] ?? ''),
+		'identifier_label' => '工号',
+		'identifier' => dashboardText($employeeRow['employee_id'] ?? '', '未分配工号'),
+		'group_label' => '部门',
+		'group_value' => dashboardEmployeeDepartmentPathText($employeeRow),
+		'realname' => dashboardText($employeeRow['realname'] ?? ''),
+		'mobile' => dashboardText($employeeRow['mobile'] ?? ''),
+		'status' => '已启用',
+		'card_id' => dashboardText($employeeRow['card_id'] ?? ''),
+		'updated_at' => '-'
+	];
+}
+$dailyUnswipedLearnerRows = dashboardFetchRows('learner', "SELECT l.* FROM `learner` l WHERE l.`status`='true' AND TRIM(IFNULL(l.`card_id`, ''))<>'' AND " . dashboardDailyUnswipedWhere('l', $todayStartTs, $todayEndTs) . " ORDER BY l.`name` ASC");
+foreach ($dailyUnswipedLearnerRows as $learnerRow) {
+	$classText = dashboardText($learnerRow['class_name'] ?? '');
+	$trainingCenter = dashboardText($learnerRow['training_center'] ?? '');
+	$dailyUnswipedRows[] = [
+		'kind' => '学员',
+		'id' => intval($learnerRow['id'] ?? 0),
+		'name' => dashboardText($learnerRow['name'] ?? ''),
+		'identifier_label' => '学号',
+		'identifier' => dashboardText($learnerRow['student_no'] ?? ''),
+		'group_label' => '班级',
+		'group_value' => $classText,
+		'realname' => dashboardText($learnerRow['realname'] ?? ''),
+		'mobile' => dashboardText($learnerRow['mobile'] ?? ''),
+		'status' => '已启用',
+		'card_id' => dashboardText($learnerRow['card_id'] ?? ''),
+		'updated_at' => intval($learnerRow['updated_at'] ?? 0) > 0 ? date('Y-m-d H:i:s', intval($learnerRow['updated_at'])) : '-',
+		'training_center' => $trainingCenter
+	];
+}
 ?>
 <style>
 	.dash-wrap {
@@ -664,6 +825,7 @@ $rangeText = $startDate === $endDate ? $startDate : ($startDate . ' 至 ' . $end
 		height: 262px;
 		min-width: 0;
 		overflow: hidden;
+		cursor: pointer;
 		touch-action: pan-y;
 	}
 	.peak-svg-axis {
@@ -738,6 +900,32 @@ $rangeText = $startDate === $endDate ? $startDate : ($startDate . ' 至 ' . $end
 		margin-bottom: 4px;
 		color: var(--dash-strong);
 		font-size: 13px;
+	}
+	.dashboard-detail-table,
+	.dashboard-unswiped-table {
+		width: 100%;
+		white-space: nowrap;
+	}
+	.dashboard-detail-table th,
+	.dashboard-unswiped-table th {
+		color: #667085;
+		font-weight: 500;
+	}
+	.dashboard-detail-wrap {
+		padding: 16px;
+		overflow-x: auto;
+	}
+	.dashboard-detail-summary {
+		margin-bottom: 12px;
+		color: #667085;
+		line-height: 1.7;
+	}
+	.dashboard-detail-warning {
+		margin-bottom: 10px;
+		padding: 8px 10px;
+		border-radius: 6px;
+		background: #fff7ed;
+		color: #b54708;
 	}
 	@media screen and (max-width: 1100px) {
 		.dash-grid,
@@ -952,6 +1140,49 @@ $rangeText = $startDate === $endDate ? $startDate : ($startDate . ' 至 ' . $end
 		</div>
 	</div>
 
+	<div class="dash-panel" style="overflow-x:auto; margin-bottom: 16px;">
+		<h4>当日未刷工牌</h4>
+		<div class="dash-subtitle" style="margin-bottom: 12px;">统计日期：<?php echo dashboardH($today); ?>，仅统计已启用且已绑定工牌的员工、学员。</div>
+		<table id="dailyUnswipedTable" class="table table-bordered dashboard-unswiped-table" data-toggle="table" data-pagination="true" data-page-size="10" data-page-list="[10, 20, 50, 100, 'All']" data-sortable="true" data-search="true">
+			<thead>
+				<tr>
+					<th>类型</th>
+					<th>ID</th>
+					<th>花名</th>
+					<th>工号/学号</th>
+					<th>真实姓名</th>
+					<th>部门/班级</th>
+					<th>培养中心</th>
+					<th>手机号</th>
+					<th>状态</th>
+					<th>门禁卡号</th>
+					<th>更新时间</th>
+				</tr>
+			</thead>
+			<tbody>
+				<?php if (count($dailyUnswipedRows) === 0) { ?>
+					<tr><td colspan="11" class="empty-state">暂无未刷工牌人员</td></tr>
+				<?php } else { ?>
+					<?php foreach ($dailyUnswipedRows as $row) { ?>
+						<tr>
+							<td><?php echo dashboardH($row['kind'] ?? '-'); ?></td>
+							<td><?php echo intval($row['id'] ?? 0); ?></td>
+							<td><?php echo dashboardH($row['name'] ?? '-'); ?></td>
+							<td><?php echo dashboardH($row['identifier'] ?? '-'); ?></td>
+							<td><?php echo dashboardH($row['realname'] ?? '-'); ?></td>
+							<td><?php echo dashboardH($row['group_value'] ?? '-'); ?></td>
+							<td><?php echo dashboardH($row['training_center'] ?? '-'); ?></td>
+							<td><?php echo dashboardH($row['mobile'] ?? '-'); ?></td>
+							<td><?php echo dashboardH($row['status'] ?? '-'); ?></td>
+							<td><?php echo dashboardH($row['card_id'] ?? '-'); ?></td>
+							<td><?php echo dashboardH($row['updated_at'] ?? '-'); ?></td>
+						</tr>
+					<?php } ?>
+				<?php } ?>
+			</tbody>
+		</table>
+	</div>
+
 	<div class="dash-panel" style="overflow-x:auto;">
 		<h4>最近刷卡记录</h4>
 		<table class="table table-bordered latest-table">
@@ -984,6 +1215,7 @@ $rangeText = $startDate === $endDate ? $startDate : ($startDate . ' 至 ' . $end
 		</table>
 	</div>
 </div>
+<script src="asset/layui/layui.js"></script>
 <script>
 	window.dashboardChartPayload = {
 		startTs: <?php echo intval($startTs); ?>,
@@ -993,6 +1225,9 @@ $rangeText = $startDate === $endDate ? $startDate : ($startDate . ' 至 ' . $end
 		chartType: <?php echo json_encode($chartType, JSON_UNESCAPED_UNICODE); ?>,
 		grains: <?php echo json_encode(dashboardGrainOptions(), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT); ?>,
 		throughputPeaks: <?php echo json_encode($throughputPeaks, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT); ?>,
+		detailRows: <?php echo json_encode($chartDetailRows, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT); ?>,
+		detailLimited: <?php echo $chartDetailLimited ? 'true' : 'false'; ?>,
+		detailLimit: <?php echo intval($chartDetailLimit); ?>,
 		series: <?php echo json_encode($chartSeriesByGrain, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT); ?>
 	};
 	(function() {
@@ -1093,6 +1328,76 @@ $rangeText = $startDate === $endDate ? $startDate : ($startDate . ' 至 ' . $end
 
 		function numberText(value) {
 			return Number(value || 0).toLocaleString('zh-CN');
+		}
+
+		function openDashboardLayer(options) {
+			if (window.layui && layui.use) {
+				layui.use(['layer'], function() {
+					layui.layer.open(options);
+				});
+				return;
+			}
+			if (window.layer && layer.open) {
+				layer.open(options);
+				return;
+			}
+			var plainText = String(options.content || '').replace(/<[^>]+>/g, '\n').replace(/\n{3,}/g, '\n\n');
+			alert((options.title ? options.title + '\n' : '') + plainText);
+		}
+
+		function bucketDetailRows(point) {
+			var rows = payload.detailRows || [];
+			var start = Number(point.start || 0);
+			var end = Number(point.end || start);
+			return rows.filter(function(row) {
+				var timestamp = Number(row.time || 0);
+				return timestamp >= start && timestamp <= end;
+			});
+		}
+
+		function openBucketDetail(point, grain) {
+			if (!point) {
+				return;
+			}
+			var rows = bucketDetailRows(point);
+			var maxRows = 1000;
+			var visibleRows = rows.slice(0, maxRows);
+			var title = pointRange(point, grain) + ' 刷卡明细';
+			var warning = '';
+			if (payload.detailLimited && Number(point.total || 0) > rows.length) {
+				warning += '<div class="dashboard-detail-warning">当前查询范围记录超过 ' + numberText(payload.detailLimit || 0) + ' 条，页面明细已截断，本时段列表可能不完整。</div>';
+			}
+			if (rows.length > maxRows) {
+				warning += '<div class="dashboard-detail-warning">本时段记录较多，仅展示前 ' + numberText(maxRows) + ' 条。</div>';
+			}
+			var html = '<div class="dashboard-detail-wrap">'
+				+ '<div class="dashboard-detail-summary">时段：' + escapeHtml(pointRange(point, grain)) + '<br>刷卡 ' + numberText(point.total) + ' 次，' + numberText(point.people) + ' 人，成功 ' + numberText(point.success_total) + ' 次，失败 ' + numberText(point.failed_total) + ' 次</div>'
+				+ warning;
+			if (visibleRows.length === 0) {
+				html += '<div class="empty-state">该时段暂无刷卡明细</div>';
+			} else {
+				html += '<table class="layui-table dashboard-detail-table"><thead><tr><th>时间</th><th>姓名/花名</th><th>类型</th><th>门禁</th><th>卡号</th><th>动作</th></tr></thead><tbody>';
+				visibleRows.forEach(function(row) {
+					html += '<tr>'
+						+ '<td>' + escapeHtml(fullLabel(row.time || 0)) + '</td>'
+						+ '<td>' + escapeHtml(row.passusername || '-') + '</td>'
+						+ '<td>' + escapeHtml(row.passusertype || '-') + '</td>'
+						+ '<td>' + escapeHtml(row.passdoor || '-') + '</td>'
+						+ '<td>' + escapeHtml(row.cardid || '-') + '</td>'
+						+ '<td>' + escapeHtml(row.action || '-') + '</td>'
+						+ '</tr>';
+				});
+				html += '</tbody></table>';
+			}
+			html += '</div>';
+			hideTooltip();
+			openDashboardLayer({
+				type: 1,
+				title: title,
+				area: ['920px', '620px'],
+				shadeClose: true,
+				content: html
+			});
 		}
 
 		function renderThroughput() {
@@ -1250,6 +1555,10 @@ $rangeText = $startDate === $endDate ? $startDate : ($startDate . ' 至 ' . $end
 			svg.addEventListener('mousemove', show);
 			svg.addEventListener('mouseenter', show);
 			svg.addEventListener('mouseleave', hide);
+			svg.addEventListener('click', function(event) {
+				var result = pointFromEvent(event);
+				openBucketDetail(result.point, grain);
+			});
 			svg.addEventListener('touchstart', show, { passive: true });
 			svg.addEventListener('touchmove', show, { passive: true });
 			svg.addEventListener('touchend', hide);
