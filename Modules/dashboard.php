@@ -48,6 +48,29 @@ function dashboardActionType() {
 	return in_array($type, ['all', 'success', 'failed'], true) ? $type : 'all';
 }
 
+function dashboardGrainOptions() {
+	return [
+		600 => '10分钟',
+		900 => '15分钟',
+		1800 => '30分钟',
+		3600 => '1小时',
+		7200 => '2小时',
+		14400 => '4小时',
+		86400 => '1天'
+	];
+}
+
+function dashboardTimeGrain() {
+	$value = intval($_GET['time_grain'] ?? 3600);
+	$options = dashboardGrainOptions();
+	return isset($options[$value]) ? $value : 3600;
+}
+
+function dashboardChartType() {
+	$type = trim((string)($_GET['chart_type'] ?? 'bar'));
+	return in_array($type, ['bar', 'line'], true) ? $type : 'bar';
+}
+
 function dashboardFetchRows($table, $sql) {
 	$rs = Database::query($table, $sql, '', true);
 	$rows = [];
@@ -101,6 +124,27 @@ function dashboardHourText($hour) {
 	return str_pad((string)intval($hour), 2, '0', STR_PAD_LEFT) . ':00';
 }
 
+function dashboardGrainText($grain) {
+	$options = dashboardGrainOptions();
+	return $options[intval($grain)] ?? '1小时';
+}
+
+function dashboardChartTypeText($type) {
+	return $type === 'line' ? '折线图' : '柱状图';
+}
+
+function dashboardBucketText($timestamp, $grain, $crossDay) {
+	$timestamp = intval($timestamp);
+	$grain = intval($grain);
+	if ($grain >= 86400) {
+		return date('Y-m-d', $timestamp);
+	}
+	if ($crossDay) {
+		return date('m-d H:i', $timestamp);
+	}
+	return date('H:i', $timestamp);
+}
+
 function dashboardActionTypeText($type) {
 	if ($type === 'success') { return '仅成功'; }
 	if ($type === 'failed') { return '仅失败'; }
@@ -119,11 +163,25 @@ $startTs = strtotime($startDate . ' 00:00:00');
 $endTs = strtotime($endDate . ' 23:59:59');
 $keyword = dashboardKeyword();
 $actionType = dashboardActionType();
+$selectedGrain = dashboardTimeGrain();
+$chartType = dashboardChartType();
+$crossDay = $startDate !== $endDate;
+$effectiveGrain = $selectedGrain;
+$maxChartPoints = 360;
+foreach (dashboardGrainOptions() as $grainValue => $grainLabel) {
+	if ($grainValue >= $selectedGrain && ceil(($endTs - $startTs + 1) / $grainValue) <= $maxChartPoints) {
+		$effectiveGrain = $grainValue;
+		break;
+	}
+}
+$grainAdjusted = $effectiveGrain !== $selectedGrain;
 $whereSql = dashboardWhereSql($startTs, $endTs, $keyword, $actionType);
 
 $summary = dashboardFetchOne('logs', "SELECT
 	COUNT(*) AS `total`,
 	COUNT(DISTINCT CONCAT(IFNULL(`passusertype`, ''), '|', IFNULL(`passusername`, ''), '|', IFNULL(`cardid`, ''))) AS `people`,
+	COUNT(DISTINCT IFNULL(`passdoor`, '')) AS `door_count`,
+	COUNT(DISTINCT IFNULL(`cardid`, '')) AS `card_count`,
 	SUM(CASE WHEN `action` LIKE '%成功%' THEN 1 ELSE 0 END) AS `success_total`,
 	SUM(CASE WHEN `action` LIKE '%失败%' THEN 1 ELSE 0 END) AS `failed_total`,
 	COUNT(DISTINCT CASE WHEN `passusertype`='员工' AND `action` LIKE '%成功%' THEN CONCAT(IFNULL(`passusername`, ''), '|', IFNULL(`cardid`, '')) ELSE NULL END) AS `employee_present`
@@ -133,43 +191,90 @@ $activeEmployeeTotal = intval($activeEmployee['total'] ?? 0);
 
 $typeRows = dashboardFetchRows('logs', "SELECT IFNULL(NULLIF(`passusertype`, ''), '未知') AS `label`, COUNT(*) AS `total` FROM `logs`{$whereSql} GROUP BY `label` ORDER BY `total` DESC");
 $doorRows = dashboardFetchRows('logs', "SELECT IFNULL(NULLIF(`passdoor`, ''), '未知门禁') AS `label`, COUNT(*) AS `total` FROM `logs`{$whereSql} GROUP BY `label` ORDER BY `total` DESC LIMIT 8");
+$failedDoorRows = dashboardFetchRows('logs', "SELECT IFNULL(NULLIF(`passdoor`, ''), '未知门禁') AS `label`, COUNT(*) AS `total` FROM `logs`" . dashboardWhereSql($startTs, $endTs, $keyword, 'failed') . " GROUP BY `label` ORDER BY `total` DESC LIMIT 6");
 $personRows = dashboardFetchRows('logs', "SELECT IFNULL(NULLIF(`passusername`, ''), '未知人员') AS `name`, IFNULL(NULLIF(`passusertype`, ''), '未知') AS `kind`, IFNULL(NULLIF(`cardid`, ''), '-') AS `cardid`, COUNT(*) AS `total` FROM `logs`{$whereSql} GROUP BY `name`, `kind`, `cardid` ORDER BY `total` DESC LIMIT 8");
-$hourRows = dashboardFetchRows('logs', "SELECT HOUR(FROM_UNIXTIME(`time`)) AS `hour`, COUNT(*) AS `total` FROM `logs`{$whereSql} GROUP BY `hour` ORDER BY `hour` ASC");
+$bucketRows = dashboardFetchRows('logs', "SELECT FLOOR((`time` - {$startTs}) / {$effectiveGrain}) AS `bucket_index`, COUNT(*) AS `total`, COUNT(DISTINCT CONCAT(IFNULL(`passusertype`, ''), '|', IFNULL(`passusername`, ''), '|', IFNULL(`cardid`, ''))) AS `people`, SUM(CASE WHEN `action` LIKE '%成功%' THEN 1 ELSE 0 END) AS `success_total`, SUM(CASE WHEN `action` LIKE '%失败%' THEN 1 ELSE 0 END) AS `failed_total` FROM `logs`{$whereSql} GROUP BY `bucket_index` ORDER BY `bucket_index` ASC");
 $dayRows = dashboardFetchRows('logs', "SELECT DATE(FROM_UNIXTIME(`time`)) AS `day`, COUNT(*) AS `total`, COUNT(DISTINCT CONCAT(IFNULL(`passusertype`, ''), '|', IFNULL(`passusername`, ''), '|', IFNULL(`cardid`, ''))) AS `people` FROM `logs`{$whereSql} GROUP BY `day` ORDER BY `day` ASC");
+$weekdayRows = dashboardFetchRows('logs', "SELECT CASE WHEN DAYOFWEEK(FROM_UNIXTIME(`time`)) IN (1,7) THEN '周末' ELSE '工作日' END AS `label`, COUNT(*) AS `total` FROM `logs`{$whereSql} GROUP BY `label` ORDER BY `total` DESC");
+$edgeTimes = dashboardFetchOne('logs', "SELECT MIN(CASE WHEN `action` LIKE '%成功%' THEN `time` ELSE NULL END) AS `first_success`, MAX(`time`) AS `last_record` FROM `logs`{$whereSql}");
 $latestRows = dashboardFetchRows('logs', "SELECT * FROM `logs`{$whereSql} ORDER BY `time` DESC LIMIT 12");
 
-$hours = [];
-for ($i = 0; $i < 24; $i++) {
-	$hours[$i] = 0;
+$bucketMap = [];
+foreach ($bucketRows as $row) {
+	$bucketMap[intval($row['bucket_index'] ?? 0)] = $row;
 }
-foreach ($hourRows as $row) {
-	$hours[intval($row['hour'] ?? 0)] = intval($row['total'] ?? 0);
-}
-$peakHour = 0;
+$bucketCount = max(1, intval(ceil(($endTs - $startTs + 1) / $effectiveGrain)));
+$timeSeries = [];
+$peakIndex = 0;
 $peakTotal = 0;
-foreach ($hours as $hour => $total) {
+$maxSeriesTotal = 1;
+for ($i = 0; $i < $bucketCount; $i++) {
+	$row = $bucketMap[$i] ?? [];
+	$bucketStart = $startTs + ($i * $effectiveGrain);
+	$bucketEnd = min($bucketStart + $effectiveGrain - 1, $endTs);
+	$total = intval($row['total'] ?? 0);
+	$item = [
+		'index' => $i,
+		'start' => $bucketStart,
+		'end' => $bucketEnd,
+		'label' => dashboardBucketText($bucketStart, $effectiveGrain, $crossDay),
+		'title' => dashboardBucketText($bucketStart, $effectiveGrain, true) . ' - ' . dashboardBucketText($bucketEnd, $effectiveGrain, true),
+		'total' => $total,
+		'people' => intval($row['people'] ?? 0),
+		'success_total' => intval($row['success_total'] ?? 0),
+		'failed_total' => intval($row['failed_total'] ?? 0)
+	];
+	$timeSeries[] = $item;
+	$maxSeriesTotal = max($maxSeriesTotal, $total);
 	if ($total > $peakTotal) {
-		$peakHour = $hour;
+		$peakIndex = $i;
 		$peakTotal = $total;
 	}
 }
 
 $totalSwipes = intval($summary['total'] ?? 0);
 $totalPeople = intval($summary['people'] ?? 0);
+$activeDoorCount = intval($summary['door_count'] ?? 0);
+$activeCardCount = intval($summary['card_count'] ?? 0);
 $successTotal = intval($summary['success_total'] ?? 0);
 $failedTotal = intval($summary['failed_total'] ?? 0);
 $employeePresent = intval($summary['employee_present'] ?? 0);
 $successRate = dashboardPercent($successTotal, $totalSwipes);
 $attendanceRate = dashboardPercent($employeePresent, $activeEmployeeTotal);
-$maxHourTotal = max(1, max($hours));
+$avgSwipePerPerson = $totalPeople > 0 ? number_format($totalSwipes / $totalPeople, 1) : '0.0';
 $maxDoorTotal = 1;
 foreach ($doorRows as $row) {
 	$maxDoorTotal = max($maxDoorTotal, intval($row['total'] ?? 0));
+}
+$maxFailedDoorTotal = 1;
+foreach ($failedDoorRows as $row) {
+	$maxFailedDoorTotal = max($maxFailedDoorTotal, intval($row['total'] ?? 0));
 }
 $maxDayTotal = 1;
 foreach ($dayRows as $row) {
 	$maxDayTotal = max($maxDayTotal, intval($row['total'] ?? 0));
 }
+$peakText = $peakTotal > 0 ? ($timeSeries[$peakIndex]['label'] ?? '-') : '-';
+$firstSuccessAt = intval($edgeTimes['first_success'] ?? 0);
+$lastRecordAt = intval($edgeTimes['last_record'] ?? 0);
+$busiestDoor = $doorRows[0] ?? null;
+$busiestPerson = $personRows[0] ?? null;
+$mostFailedDoor = $failedDoorRows[0] ?? null;
+$linePoints = [];
+$lineCircles = [];
+$seriesCount = count($timeSeries);
+foreach ($timeSeries as $idx => $item) {
+	$x = $seriesCount > 1 ? ($idx * 1000 / ($seriesCount - 1)) : 500;
+	$y = 205 - (($item['total'] / $maxSeriesTotal) * 180);
+	$linePoints[] = number_format($x, 2, '.', '') . ',' . number_format($y, 2, '.', '');
+	$lineCircles[] = [
+		'x' => $x,
+		'y' => $y,
+		'title' => $item['title'] . '，' . $item['total'] . ' 次，' . $item['people'] . ' 人'
+	];
+}
+$axisEvery = max(1, intval(ceil($seriesCount / 10)));
+$chartMinWidth = max(760, min(2400, $seriesCount * 20));
 $rangeText = $startDate === $endDate ? $startDate : ($startDate . ' 至 ' . $endDate);
 ?>
 <style>
@@ -255,37 +360,115 @@ $rangeText = $startDate === $endDate ? $startDate : ($startDate . ' 至 ' . $end
 		margin: 0 0 14px 0;
 		font-weight: 600;
 	}
-	.hour-chart {
+	.dash-chart-toolbar {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		gap: 12px;
+		margin-bottom: 12px;
+	}
+	.dash-chart-scroll {
+		width: 100%;
+		overflow-x: auto;
+		padding-bottom: 4px;
+	}
+	.peak-bar-chart {
 		display: grid;
-		grid-template-columns: repeat(24, minmax(12px, 1fr));
 		align-items: end;
-		height: 210px;
+		height: 240px;
 		gap: 5px;
 		padding-top: 10px;
 		border-bottom: 1px solid #e6e9ef;
 	}
-	.hour-col {
+	.peak-col {
 		display: flex;
 		flex-direction: column;
 		justify-content: flex-end;
 		align-items: center;
 		height: 100%;
 	}
-	.hour-bar {
+	.peak-bar {
 		width: 100%;
 		min-height: 3px;
 		border-radius: 6px 6px 0 0;
 		background: #f67302;
 	}
-	.hour-col.peak .hour-bar {
+	.peak-col.peak .peak-bar {
 		background: #22a06b;
 	}
-	.hour-label {
+	.peak-label {
 		font-size: 10px;
 		color: #98a2b3;
 		margin-top: 6px;
 		transform: rotate(-45deg);
 		white-space: nowrap;
+	}
+	.peak-line-chart {
+		height: 268px;
+		min-width: 760px;
+		border-bottom: 1px solid #e6e9ef;
+	}
+	.peak-line-chart svg {
+		width: 100%;
+		height: 230px;
+		display: block;
+	}
+	.peak-line-grid {
+		stroke: #edf0f5;
+		stroke-width: 1;
+	}
+	.peak-line-path {
+		fill: none;
+		stroke: #f67302;
+		stroke-width: 4;
+		stroke-linecap: round;
+		stroke-linejoin: round;
+	}
+	.peak-line-dot {
+		fill: #fff;
+		stroke: #f67302;
+		stroke-width: 3;
+	}
+	.peak-line-dot.peak {
+		stroke: #22a06b;
+		fill: #22a06b;
+	}
+	.peak-axis {
+		display: flex;
+		justify-content: space-between;
+		gap: 12px;
+		color: #98a2b3;
+		font-size: 10px;
+		margin-top: 6px;
+		white-space: nowrap;
+	}
+	.insight-grid {
+		display: grid;
+		grid-template-columns: repeat(3, minmax(160px, 1fr));
+		gap: 12px;
+		margin-bottom: 16px;
+	}
+	.insight-card {
+		background: #fff;
+		border: 1px solid #e6e9ef;
+		border-radius: 8px;
+		padding: 14px;
+		box-shadow: 0 8px 24px rgba(31, 41, 55, .05);
+	}
+	.insight-card span {
+		color: #667085;
+	}
+	.insight-card strong {
+		display: block;
+		margin-top: 6px;
+		font-size: 18px;
+		color: #111827;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.insight-card small {
+		color: #98a2b3;
 	}
 	.rank-row,
 	.trend-row {
@@ -353,17 +536,20 @@ $rangeText = $startDate === $endDate ? $startDate : ($startDate . ' 至 ' . $end
 	}
 	@media screen and (max-width: 1100px) {
 		.dash-grid,
-		.dash-section-grid {
+		.dash-section-grid,
+		.insight-grid {
 			grid-template-columns: 1fr 1fr;
 		}
 	}
 	@media screen and (max-width: 760px) {
 		.dash-header,
+		.dash-chart-toolbar,
 		.dash-filter .form-inline {
 			display: block;
 		}
 		.dash-grid,
-		.dash-section-grid {
+		.dash-section-grid,
+		.insight-grid {
 			grid-template-columns: 1fr;
 		}
 		.dash-filter .form-group,
@@ -372,10 +558,10 @@ $rangeText = $startDate === $endDate ? $startDate : ($startDate . ' 至 ' . $end
 			width: 100%;
 			margin: 0 0 8px 0;
 		}
-		.hour-chart {
+		.peak-bar-chart {
 			gap: 3px;
 		}
-		.hour-label {
+		.peak-label {
 			display: none;
 		}
 	}
@@ -413,6 +599,21 @@ $rangeText = $startDate === $endDate ? $startDate : ($startDate . ' 至 ' . $end
 				</select>
 			</div>
 			<div class="form-group" style="margin-left: 8px;">
+				<label>时间颗粒度</label>
+				<select class="form-control" name="time_grain">
+					<?php foreach (dashboardGrainOptions() as $grainValue => $grainLabel) { ?>
+						<option value="<?php echo intval($grainValue); ?>" <?php echo $selectedGrain === intval($grainValue) ? 'selected' : ''; ?>><?php echo dashboardH($grainLabel); ?></option>
+					<?php } ?>
+				</select>
+			</div>
+			<div class="form-group" style="margin-left: 8px;">
+				<label>图表形式</label>
+				<select class="form-control" name="chart_type">
+					<option value="bar" <?php echo $chartType === 'bar' ? 'selected' : ''; ?>>柱状图</option>
+					<option value="line" <?php echo $chartType === 'line' ? 'selected' : ''; ?>>折线图</option>
+				</select>
+			</div>
+			<div class="form-group" style="margin-left: 8px;">
 				<label>关键词</label>
 				<input type="text" class="form-control" name="q" value="<?php echo dashboardH($keyword); ?>" placeholder="姓名、卡号、门禁、动作">
 			</div>
@@ -428,17 +629,56 @@ $rangeText = $startDate === $endDate ? $startDate : ($startDate . ' 至 ' . $end
 		<div class="dash-card red"><span>失败记录</span><strong><?php echo dashboardNumber($failedTotal); ?></strong><small>成功 <?php echo dashboardNumber($successTotal); ?> 次</small></div>
 	</div>
 
+	<div class="insight-grid">
+		<div class="insight-card"><span>活跃门禁点位</span><strong><?php echo dashboardNumber($activeDoorCount); ?></strong><small>区间内有刷卡记录的门禁</small></div>
+		<div class="insight-card"><span>活跃工牌</span><strong><?php echo dashboardNumber($activeCardCount); ?></strong><small>按卡号去重</small></div>
+		<div class="insight-card"><span>人均刷卡</span><strong><?php echo dashboardH($avgSwipePerPerson); ?> 次</strong><small>区间刷卡次数 / 刷卡人数</small></div>
+		<div class="insight-card"><span>首刷/末刷</span><strong><?php echo dashboardH(($firstSuccessAt > 0 ? date('H:i', $firstSuccessAt) : '-') . ' / ' . ($lastRecordAt > 0 ? date('H:i', $lastRecordAt) : '-')); ?></strong><small><?php echo dashboardH($crossDay ? '跨日范围按实际日期统计' : $rangeText); ?></small></div>
+		<div class="insight-card"><span>最忙门禁</span><strong><?php echo dashboardH($busiestDoor ? ($busiestDoor['label'] ?? '-') : '-'); ?></strong><small><?php echo dashboardNumber($busiestDoor['total'] ?? 0); ?> 次刷卡</small></div>
+		<div class="insight-card"><span>最高频人员</span><strong><?php echo dashboardH($busiestPerson ? (($busiestPerson['name'] ?? '-') . ' / ' . ($busiestPerson['kind'] ?? '-')) : '-'); ?></strong><small><?php echo dashboardNumber($busiestPerson['total'] ?? 0); ?> 次刷卡</small></div>
+		<div class="insight-card"><span>失败最多门禁</span><strong><?php echo dashboardH($mostFailedDoor ? ($mostFailedDoor['label'] ?? '-') : '-'); ?></strong><small><?php echo dashboardNumber($mostFailedDoor['total'] ?? 0); ?> 次失败</small></div>
+	</div>
+
 	<div class="dash-section-grid">
 		<div class="dash-panel">
 			<h4>高峰时段</h4>
-			<div class="dash-subtitle">峰值：<?php echo dashboardH(dashboardHourText($peakHour)); ?>，<?php echo dashboardNumber($peakTotal); ?> 次</div>
-			<div class="hour-chart">
-				<?php foreach ($hours as $hour => $total) {
-					$height = max(3, intval(($total / $maxHourTotal) * 100));
-				?>
-					<div class="hour-col <?php echo $hour === $peakHour && $total > 0 ? 'peak' : ''; ?>" title="<?php echo dashboardH(dashboardHourText($hour) . ' ' . $total . '次'); ?>">
-						<div class="hour-bar" style="height: <?php echo $height; ?>%;"></div>
-						<div class="hour-label"><?php echo dashboardH(str_pad((string)$hour, 2, '0', STR_PAD_LEFT)); ?></div>
+			<div class="dash-chart-toolbar">
+				<div class="dash-subtitle">峰值：<?php echo dashboardH($peakText); ?>，<?php echo dashboardNumber($peakTotal); ?> 次</div>
+				<div class="dash-subtitle">图表：<?php echo dashboardH(dashboardChartTypeText($chartType)); ?>，粒度：<?php echo dashboardH(dashboardGrainText($effectiveGrain)); ?><?php echo $grainAdjusted ? '（范围较长，已自动优化）' : ''; ?></div>
+			</div>
+			<div class="dash-chart-scroll">
+				<?php if ($chartType === 'line') { ?>
+					<div class="peak-line-chart" style="min-width: <?php echo intval($chartMinWidth); ?>px;">
+						<svg viewBox="0 0 1000 230" role="img" aria-label="高峰时段折线图">
+							<line class="peak-line-grid" x1="0" y1="205" x2="1000" y2="205"></line>
+							<line class="peak-line-grid" x1="0" y1="145" x2="1000" y2="145"></line>
+							<line class="peak-line-grid" x1="0" y1="85" x2="1000" y2="85"></line>
+							<line class="peak-line-grid" x1="0" y1="25" x2="1000" y2="25"></line>
+							<polyline class="peak-line-path" points="<?php echo dashboardH(implode(' ', $linePoints)); ?>"></polyline>
+							<?php foreach ($lineCircles as $idx => $point) { ?>
+								<?php if ($idx % max(1, intval(ceil($seriesCount / 48))) === 0 || $idx === $peakIndex || $idx === $seriesCount - 1) { ?>
+									<circle class="peak-line-dot <?php echo $idx === $peakIndex && $peakTotal > 0 ? 'peak' : ''; ?>" cx="<?php echo number_format($point['x'], 2, '.', ''); ?>" cy="<?php echo number_format($point['y'], 2, '.', ''); ?>" r="<?php echo $idx === $peakIndex && $peakTotal > 0 ? 6 : 4; ?>">
+										<title><?php echo dashboardH($point['title']); ?></title>
+									</circle>
+								<?php } ?>
+							<?php } ?>
+						</svg>
+						<div class="peak-axis">
+							<?php foreach ($timeSeries as $idx => $item) { ?>
+								<?php if ($idx % $axisEvery === 0 || $idx === $seriesCount - 1) { ?><span><?php echo dashboardH($item['label']); ?></span><?php } ?>
+							<?php } ?>
+						</div>
+					</div>
+				<?php } else { ?>
+					<div class="peak-bar-chart" style="grid-template-columns: repeat(<?php echo max(1, $seriesCount); ?>, minmax(10px, 1fr)); min-width: <?php echo intval($chartMinWidth); ?>px;">
+						<?php foreach ($timeSeries as $idx => $item) {
+							$height = max(3, intval(($item['total'] / $maxSeriesTotal) * 100));
+						?>
+							<div class="peak-col <?php echo $idx === $peakIndex && $item['total'] > 0 ? 'peak' : ''; ?>" title="<?php echo dashboardH($item['title'] . '，' . $item['total'] . '次，' . $item['people'] . '人'); ?>">
+								<div class="peak-bar" style="height: <?php echo $height; ?>%;"></div>
+								<?php if ($idx % $axisEvery === 0 || $idx === $seriesCount - 1) { ?><div class="peak-label"><?php echo dashboardH($item['label']); ?></div><?php } ?>
+							</div>
+						<?php } ?>
 					</div>
 				<?php } ?>
 			</div>
@@ -510,13 +750,31 @@ $rangeText = $startDate === $endDate ? $startDate : ($startDate . ' 至 ' . $end
 			<?php } ?>
 		</div>
 		<div class="dash-panel">
-			<h4>关键指标</h4>
-			<div class="type-pills">
-				<div class="type-pill"><span>成功记录</span><b><?php echo dashboardNumber($successTotal); ?></b></div>
-				<div class="type-pill"><span>失败记录</span><b><?php echo dashboardNumber($failedTotal); ?></b></div>
-				<div class="type-pill"><span>员工到岗</span><b><?php echo dashboardNumber($employeePresent); ?></b></div>
-				<div class="type-pill"><span>峰值小时</span><b><?php echo dashboardH(dashboardHourText($peakHour)); ?></b></div>
-			</div>
+			<h4>时间构成</h4>
+			<?php if (count($weekdayRows) === 0) { ?>
+				<div class="empty-state">暂无数据</div>
+			<?php } else { ?>
+				<div class="type-pills">
+					<?php foreach ($weekdayRows as $row) { ?>
+						<div class="type-pill"><span><?php echo dashboardH($row['label'] ?? '-'); ?></span><b><?php echo dashboardNumber($row['total'] ?? 0); ?></b></div>
+					<?php } ?>
+				</div>
+			<?php } ?>
+			<h4 style="margin-top: 20px;">失败点位</h4>
+			<?php if (count($failedDoorRows) === 0) { ?>
+				<div class="empty-state">暂无失败数据</div>
+			<?php } else { ?>
+				<?php foreach ($failedDoorRows as $row) {
+					$total = intval($row['total'] ?? 0);
+					$width = max(3, intval(($total / $maxFailedDoorTotal) * 100));
+				?>
+					<div class="rank-row">
+						<div class="rank-name"><?php echo dashboardH($row['label'] ?? '未知门禁'); ?></div>
+						<div><?php echo dashboardNumber($total); ?></div>
+						<div class="rank-line"><div class="rank-fill" style="width: <?php echo $width; ?>%;"></div></div>
+					</div>
+				<?php } ?>
+			<?php } ?>
 		</div>
 	</div>
 

@@ -82,6 +82,107 @@ OperationLog::logPanelView($module, $rs);
 				content: "-";
 				color: #98a2b3;
 			}
+			.page-header .navbar-nav>li>a.panel-icon-button {
+				width: 40px;
+				height: 40px;
+				padding: 0;
+				margin: 8px 4px;
+				display: flex;
+				align-items: center;
+				justify-content: center;
+				border-radius: 8px;
+				color: #637282 !important;
+			}
+			.page-header .navbar-nav>li>a.panel-icon-button:hover {
+				background: #f4f6f8;
+				color: #ff5a1f !important;
+			}
+			.page-header .navbar-nav>li>a.panel-icon-button>i {
+				line-height: 1;
+				vertical-align: middle;
+			}
+			.page-sidebar-menu ul li a i.fa,
+			.page-sidebar-menu ul li a i.fa-solid {
+				width: 18px;
+				min-width: 18px;
+				margin-right: 10px;
+				padding-left: 0 !important;
+				padding-right: 0 !important;
+				text-align: center;
+			}
+			body.page-sidebar-collapsed .page-sidebar > .logo-box {
+				width: 60px;
+				height: 81px;
+				padding: 0;
+				display: flex;
+				align-items: center;
+				justify-content: center;
+			}
+			body.page-sidebar-collapsed .page-sidebar > .logo-box h4 {
+				display: none;
+			}
+			body.page-sidebar-collapsed .page-sidebar > .logo-box::before {
+				content: "门";
+				display: block;
+				width: 30px;
+				height: 30px;
+				line-height: 30px;
+				text-align: center;
+				border-radius: 8px;
+				background: #ff5a1f;
+				color: #fff;
+				font-weight: 600;
+			}
+			body.page-sidebar-collapsed .page-sidebar-menu>ul>li>a {
+				width: 60px;
+				padding: 14px 0;
+				display: flex;
+				justify-content: center;
+				align-items: center;
+			}
+			body.page-sidebar-collapsed .page-sidebar-menu ul li a i.fa,
+			body.page-sidebar-collapsed .page-sidebar-menu ul li a i.fa-solid {
+				margin-right: 0;
+			}
+			body.page-sidebar-collapsed .page-sidebar-menu ul li a span,
+			body.page-sidebar-collapsed .page-sidebar-menu ul li:hover a span,
+			body.page-sidebar-collapsed .page-sidebar-menu ul li a:hover span {
+				display: none !important;
+			}
+			body.page-sidebar-collapsed .page-sidebar-menu>ul>li:hover>a {
+				width: 60px;
+			}
+			@media screen and (max-width: 991px) {
+				#collapsed-sidebar-toggle-button {
+					display: none !important;
+				}
+				.logo-sm {
+					display: flex !important;
+					align-items: center;
+					min-height: 56px;
+				}
+				.logo-sm #sidebar-toggle-button {
+					width: 40px;
+					height: 40px;
+					padding: 0 !important;
+					margin: 8px 10px 8px 0 !important;
+					display: flex;
+					align-items: center;
+					justify-content: center;
+					border-radius: 8px;
+				}
+				.logo-sm .logo-box {
+					height: 40px;
+					margin: 8px 0 !important;
+					padding: 0 !important;
+					display: flex !important;
+					align-items: center;
+				}
+				.logo-sm .logo-box h4 {
+					margin: 0;
+					line-height: 1.35;
+				}
+			}
 			.cyberfurry-table {
 				clear: both;
 				margin-top: 20px;
@@ -120,6 +221,13 @@ OperationLog::logPanelView($module, $rs);
 	</head>
 
 	<body class="page-sidebar-fixed">
+		<script>
+			try {
+				if (window.innerWidth >= 992 && localStorage.getItem('doorlockSidebarCollapsed') === '1') {
+					document.body.classList.add('page-sidebar-collapsed');
+				}
+			} catch (e) {}
+		</script>
 		<!-- 页面容器 -->
 		<div class="page-container">
 			<!-- 页面侧边栏 -->
@@ -209,7 +317,10 @@ OperationLog::logPanelView($module, $rs);
 							<div class="collapse navbar-collapse" id="bs-example-navbar-collapse-1">
 								<ul class="nav navbar-nav">
 									<li>
-										<a href="javascript:void(0)" id="toggle-fullscreen"><i class="fa fa-expand"></i></a>
+										<a href="javascript:void(0)" id="collapsed-sidebar-toggle-button" class="panel-icon-button" title="收窄侧边栏"><i class="fa fa-outdent"></i></a>
+									</li>
+									<li>
+										<a href="javascript:void(0)" id="toggle-fullscreen" class="panel-icon-button" title="全屏"><i class="fa fa-expand"></i></a>
 									</li>
 								</ul>
 
@@ -271,5 +382,24 @@ OperationLog::logPanelView($module, $rs);
         <script src="asset/js/ecaps.min.js"></script>
         <script src="asset/plugins/Notification/Vanilla.Furry.min.js"></script>
 		<script type="text/javascript" src="/asset/js/md5.js"></script>
+		<script>
+			$(function() {
+				var $button = $('#collapsed-sidebar-toggle-button');
+				function syncSidebarButton() {
+					var collapsed = $('body').hasClass('page-sidebar-collapsed');
+					$button.attr('title', collapsed ? '展开侧边栏' : '收窄侧边栏');
+					$button.find('i').toggleClass('fa-indent', collapsed).toggleClass('fa-outdent', !collapsed);
+				}
+				$button.on('click', function() {
+					setTimeout(function() {
+						try {
+							localStorage.setItem('doorlockSidebarCollapsed', $('body').hasClass('page-sidebar-collapsed') ? '1' : '0');
+						} catch (e) {}
+						syncSidebarButton();
+					}, 0);
+				});
+				syncSidebarButton();
+			});
+		</script>
 	</body>
 </html>
