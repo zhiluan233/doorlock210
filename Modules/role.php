@@ -237,6 +237,12 @@ layui.use(['layer', 'form', 'transfer'], function(){
 		return '员工';
 	}
 
+	function allScopeLabel(kind) {
+		if (kind === 'learner') { return '全体学员'; }
+		if (kind === 'guest') { return '全体访客'; }
+		return '全体员工';
+	}
+
 	function roleExpiresDate(role) {
 		var expiresAt = parseInt((role && role.expires_at) || 0, 10);
 		if (!expiresAt) {
@@ -282,6 +288,21 @@ layui.use(['layer', 'form', 'transfer'], function(){
 		}
 	}
 
+	function updateAllowAllTitle(kind) {
+		var title = allScopeLabel(kind);
+		$('#allow_all').attr('title', title);
+		$('#allow_all').next('.layui-form-checkbox').find('span').text(title);
+	}
+
+	function handleSubjectKindChange(kind) {
+		kind = kind === 'learner' || kind === 'guest' ? kind : 'employee';
+		$('#subject_kind').val(kind);
+		renderMemberTransfer([]);
+		updateAllowAllTitle(kind);
+		setMemberVisible();
+		form.render('checkbox');
+	}
+
 	window.openRoleDialog = function(roleId) {
 		var role = roleId ? findRole(roleId) : null;
 		if (role && role.builtin_key) {
@@ -294,10 +315,10 @@ layui.use(['layer', 'form', 'transfer'], function(){
 		var rolePermanent = parseInt(role.expires_at || 0, 10) <= 0;
 		var html = '<div class="layui-form layui-form-pane" style="padding:16px;">'
 			+ '<div class="layui-form-item"><label class="layui-form-label">角色名</label><div class="layui-input-block"><input type="text" id="role_name" class="layui-input" value="' + escapeHtml(role.name) + '"></div></div>'
-			+ '<div class="layui-form-item"><label class="layui-form-label">对象</label><div class="layui-input-block"><select id="subject_kind"><option value="employee" ' + (role.subject_kind === 'employee' ? 'selected' : '') + '>员工</option><option value="learner" ' + (role.subject_kind === 'learner' ? 'selected' : '') + '>学员</option><option value="guest" ' + (role.subject_kind === 'guest' ? 'selected' : '') + '>访客</option></select></div></div>'
+			+ '<div class="layui-form-item"><label class="layui-form-label">对象</label><div class="layui-input-block"><select id="subject_kind" lay-filter="role_subject_kind"><option value="employee" ' + (role.subject_kind === 'employee' ? 'selected' : '') + '>员工</option><option value="learner" ' + (role.subject_kind === 'learner' ? 'selected' : '') + '>学员</option><option value="guest" ' + (role.subject_kind === 'guest' ? 'selected' : '') + '>访客</option></select></div></div>'
 			+ '<div class="layui-form-item"><label class="layui-form-label">备注</label><div class="layui-input-block"><input type="text" id="role_description" class="layui-input" value="' + escapeHtml(role.description) + '"></div></div>'
 			+ '<div class="layui-form-item"><label class="layui-form-label">有效期</label><div class="layui-input-block"><input type="checkbox" id="role_permanent" title="永久有效" lay-skin="primary" lay-filter="role_permanent" ' + (rolePermanent ? 'checked' : '') + '><input type="date" id="role_expires_date" class="layui-input" style="margin-top:10px;' + (rolePermanent ? 'display:none;' : '') + '" value="' + escapeHtml(roleExpiresDate(role)) + '" ' + (rolePermanent ? 'disabled' : '') + '></div></div>'
-			+ '<div class="layui-form-item"><input type="checkbox" id="allow_all" title="全体角色" lay-skin="primary" ' + (parseInt(role.allow_all, 10) === 1 ? 'checked' : '') + '></div>'
+			+ '<div class="layui-form-item"><input type="checkbox" id="allow_all" title="' + allScopeLabel(role.subject_kind) + '" lay-skin="primary" lay-filter="role_allow_all" ' + (parseInt(role.allow_all, 10) === 1 ? 'checked' : '') + '></div>'
 			+ '<div id="roleMemberWrap"><div id="roleMemberTransfer"></div></div>'
 			+ '<hr><div id="roleDeviceTransfer"></div>'
 			+ '<div style="text-align:center;margin-top:16px;"><button class="layui-btn layui-btn-normal" onclick="saveAccessRole(' + parseInt(role.id, 10) + ')">保存</button><button class="layui-btn layui-btn-primary" onclick="layui.layer.closeAll()">取消</button></div>'
@@ -320,10 +341,11 @@ layui.use(['layer', 'form', 'transfer'], function(){
 					showSearch: true,
 					id: 'roleDevices'
 				});
-				$('#allow_all').on('change', setMemberVisible);
-				$('#subject_kind').on('change', function() {
-					renderMemberTransfer([]);
-					form.render();
+				form.on('checkbox(role_allow_all)', function() {
+					setMemberVisible();
+				});
+				form.on('select(role_subject_kind)', function(data) {
+					handleSubjectKindChange(data.value);
 				});
 				form.on('checkbox(role_permanent)', function() {
 					syncRoleExpiresDate();
@@ -337,6 +359,7 @@ layui.use(['layer', 'form', 'transfer'], function(){
 				});
 				setMemberVisible();
 				syncRoleExpiresDate();
+				updateAllowAllTitle(role.subject_kind);
 				form.render();
 			}
 		});
