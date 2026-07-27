@@ -194,6 +194,40 @@ function dashboardBuildSeries($startTs, $endTs, $whereSql, $grain) {
 	];
 }
 
+function dashboardBuildThroughputPeak($startTs, $endTs, $whereSql, $grain) {
+	$grain = max(1, intval($grain));
+	$row = dashboardFetchOne('logs', "SELECT FLOOR((`time` - {$startTs}) / {$grain}) AS `bucket_index`, COUNT(*) AS `total`, COUNT(DISTINCT CONCAT(IFNULL(`passusertype`, ''), '|', IFNULL(`passusername`, ''), '|', IFNULL(`cardid`, ''))) AS `people` FROM `logs`{$whereSql} GROUP BY `bucket_index` ORDER BY `total` DESC LIMIT 1");
+	if (!$row || intval($row['total'] ?? 0) <= 0) {
+		return [
+			'grain' => $grain,
+			'total' => 0,
+			'people' => 0,
+			'start' => 0,
+			'end' => 0,
+			'top_doors' => []
+		];
+	}
+	$bucketIndex = intval($row['bucket_index'] ?? 0);
+	$bucketStart = $startTs + ($bucketIndex * $grain);
+	$bucketEnd = min($bucketStart + $grain - 1, $endTs);
+	$doorRows = dashboardFetchRows('logs', "SELECT IFNULL(NULLIF(`passdoor`, ''), '未知门禁') AS `door`, COUNT(*) AS `total` FROM `logs`{$whereSql} AND FLOOR((`time` - {$startTs}) / {$grain})={$bucketIndex} GROUP BY `door` ORDER BY `total` DESC LIMIT 3");
+	$doors = [];
+	foreach ($doorRows as $doorRow) {
+		$doors[] = [
+			'name' => (string)($doorRow['door'] ?? ''),
+			'total' => intval($doorRow['total'] ?? 0)
+		];
+	}
+	return [
+		'grain' => $grain,
+		'total' => intval($row['total'] ?? 0),
+		'people' => intval($row['people'] ?? 0),
+		'start' => $bucketStart,
+		'end' => $bucketEnd,
+		'top_doors' => $doors
+	];
+}
+
 $today = date('Y-m-d');
 $startDate = dashboardDateParam('start_date', $today);
 $endDate = dashboardDateParam('end_date', $today);
@@ -235,6 +269,10 @@ $chartSeriesByGrain = [];
 foreach (dashboardGrainOptions() as $grainValue => $grainLabel) {
 	$chartSeriesByGrain[(string)$grainValue] = dashboardBuildSeries($startTs, $endTs, $whereSql, intval($grainValue));
 }
+$throughputPeaks = [
+	'second' => dashboardBuildThroughputPeak($startTs, $endTs, $whereSql, 1),
+	'minute' => dashboardBuildThroughputPeak($startTs, $endTs, $whereSql, 60)
+];
 
 $totalSwipes = intval($summary['total'] ?? 0);
 $totalPeople = intval($summary['people'] ?? 0);
@@ -277,19 +315,6 @@ $rangeText = $startDate === $endDate ? $startDate : ($startDate . ' 至 ' . $end
 		--dash-blue: #2f80ed;
 		--dash-red: #d92d20;
 		color: var(--dash-text);
-	}
-	.dash-wrap.dark {
-		--dash-bg: #0b1120;
-		--dash-panel: #111827;
-		--dash-panel-soft: #172033;
-		--dash-border: #263244;
-		--dash-text: #dbe4f0;
-		--dash-strong: #f8fafc;
-		--dash-muted: #a9b4c2;
-		--dash-faint: #7f8da3;
-		--dash-grid-line: #27364b;
-		--dash-shadow: rgba(0, 0, 0, .24);
-		background: var(--dash-bg);
 	}
 	.dash-header {
 		display: flex;
@@ -379,7 +404,7 @@ $rangeText = $startDate === $endDate ? $startDate : ($startDate . ' 至 ' . $end
 	}
 	.dash-chart-scroll {
 		width: 100%;
-		overflow-x: auto;
+		overflow-x: hidden;
 		padding-bottom: 4px;
 	}
 	.peak-bar-chart {
@@ -480,6 +505,33 @@ $rangeText = $startDate === $endDate ? $startDate : ($startDate . ' 至 ' . $end
 	.insight-card small {
 		color: #98a2b3;
 	}
+	.throughput-head {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 10px;
+	}
+	.throughput-switch {
+		display: inline-flex;
+		padding: 2px;
+		border: 1px solid var(--dash-border);
+		border-radius: 8px;
+		background: var(--dash-panel-soft);
+	}
+	.throughput-switch button {
+		height: 24px;
+		padding: 0 8px;
+		border: 0;
+		border-radius: 6px;
+		background: transparent;
+		color: var(--dash-muted);
+		font-size: 12px;
+		outline: none;
+	}
+	.throughput-switch button.active {
+		background: var(--dash-orange);
+		color: #fff;
+	}
 	.rank-row,
 	.trend-row {
 		display: grid;
@@ -519,12 +571,23 @@ $rangeText = $startDate === $endDate ? $startDate : ($startDate . ' 至 ' . $end
 		flex-wrap: wrap;
 		gap: 10px;
 	}
+	.type-pills.type-list {
+		display: grid;
+		grid-template-columns: 1fr;
+	}
 	.type-pill {
 		border: 1px solid #e6e9ef;
 		border-radius: 8px;
 		padding: 10px 12px;
 		background: #fafbfc;
 		min-width: 120px;
+	}
+	.type-list .type-pill {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 16px;
+		min-width: 0;
 	}
 	.type-pill b {
 		display: block;
@@ -590,13 +653,6 @@ $rangeText = $startDate === $endDate ? $startDate : ($startDate . ' 至 ' . $end
 		background: var(--dash-orange);
 		color: #fff;
 	}
-	.dash-dark-button {
-		display: inline-flex;
-		align-items: center;
-		gap: 6px;
-		border: 1px solid var(--dash-border);
-		background: var(--dash-panel-soft);
-	}
 	.dashboard-chart-stage {
 		position: relative;
 		min-height: 286px;
@@ -604,9 +660,11 @@ $rangeText = $startDate === $endDate ? $startDate : ($startDate . ' 至 ' . $end
 	}
 	.peak-svg-chart {
 		display: block;
+		width: 100%;
 		height: 262px;
-		min-width: 760px;
-		overflow: visible;
+		min-width: 0;
+		overflow: hidden;
+		touch-action: pan-y;
 	}
 	.peak-svg-axis {
 		fill: var(--dash-faint);
@@ -645,6 +703,12 @@ $rangeText = $startDate === $endDate ? $startDate : ($startDate . ' 至 ' . $end
 		fill: transparent;
 		cursor: default;
 	}
+	.peak-svg-hover-line {
+		display: none;
+		stroke: rgba(31, 41, 55, .35);
+		stroke-width: 1;
+		pointer-events: none;
+	}
 	.peak-empty {
 		height: 240px;
 		display: flex;
@@ -675,53 +739,6 @@ $rangeText = $startDate === $endDate ? $startDate : ($startDate . ' 至 ' . $end
 		color: var(--dash-strong);
 		font-size: 13px;
 	}
-	body.dashboard-dark-mode .page-content,
-	body.dashboard-dark-mode .page-inner {
-		background: #0b1120 !important;
-	}
-	body.dashboard-dark-mode .breadcrumb-header,
-	.dash-wrap.dark .dash-title,
-	.dash-wrap.dark .dash-panel h4 {
-		color: var(--dash-strong);
-	}
-	.dash-wrap.dark .dash-filter,
-	.dash-wrap.dark .dash-card,
-	.dash-wrap.dark .dash-panel,
-	.dash-wrap.dark .insight-card {
-		background: var(--dash-panel);
-		border-color: var(--dash-border);
-		box-shadow: 0 8px 24px var(--dash-shadow);
-	}
-	.dash-wrap.dark .dash-subtitle,
-	.dash-wrap.dark .dash-card span,
-	.dash-wrap.dark .insight-card span,
-	.dash-wrap.dark .latest-table th,
-	.dash-wrap.dark .type-pill span,
-	.dash-wrap.dark .empty-state {
-		color: var(--dash-muted);
-	}
-	.dash-wrap.dark .dash-card strong,
-	.dash-wrap.dark .insight-card strong,
-	.dash-wrap.dark .type-pill b {
-		color: var(--dash-strong);
-	}
-	.dash-wrap.dark .type-pill,
-	.dash-wrap.dark .dash-filter .form-control,
-	.dash-wrap.dark .latest-table,
-	.dash-wrap.dark .latest-table td,
-	.dash-wrap.dark .latest-table th {
-		background: var(--dash-panel-soft);
-		border-color: var(--dash-border);
-		color: var(--dash-text);
-	}
-	.dash-wrap.dark .rank-name,
-	.dash-wrap.dark .trend-name {
-		color: var(--dash-text);
-	}
-	.dash-wrap.dark .rank-line,
-	.dash-wrap.dark .trend-line {
-		background: var(--dash-grid-line);
-	}
 	@media screen and (max-width: 1100px) {
 		.dash-grid,
 		.dash-section-grid,
@@ -740,8 +757,7 @@ $rangeText = $startDate === $endDate ? $startDate : ($startDate . ' 至 ' . $end
 			justify-content: flex-start;
 			margin-top: 10px;
 		}
-		.dash-chart-select,
-		.dash-dark-button {
+		.dash-chart-select {
 			flex: 1 1 auto;
 		}
 		.dash-grid,
@@ -815,6 +831,17 @@ $rangeText = $startDate === $endDate ? $startDate : ($startDate . ' 至 ' . $end
 		<div class="insight-card"><span>活跃门禁点位</span><strong><?php echo dashboardNumber($activeDoorCount); ?></strong><small>区间内有刷卡记录的门禁</small></div>
 		<div class="insight-card"><span>活跃工牌</span><strong><?php echo dashboardNumber($activeCardCount); ?></strong><small>按卡号去重</small></div>
 		<div class="insight-card"><span>人均刷卡</span><strong><?php echo dashboardH($avgSwipePerPerson); ?> 次</strong><small>区间刷卡次数 / 刷卡人数</small></div>
+		<div class="insight-card throughput-card">
+			<div class="throughput-head">
+				<span>峰值吞吐</span>
+				<div class="throughput-switch" role="group" aria-label="峰值吞吐单位">
+					<button type="button" data-throughput-mode="second">每秒</button>
+					<button type="button" data-throughput-mode="minute">每分钟</button>
+				</div>
+			</div>
+			<strong id="throughputValue">-</strong>
+			<small id="throughputDetail">用于诊断高峰刷卡压力</small>
+		</div>
 		<div class="insight-card"><span>首刷/末刷</span><strong><?php echo dashboardH(($firstSuccessAt > 0 ? date('H:i', $firstSuccessAt) : '-') . ' / ' . ($lastRecordAt > 0 ? date('H:i', $lastRecordAt) : '-')); ?></strong><small><?php echo dashboardH($crossDay ? '跨日范围按实际日期统计' : $rangeText); ?></small></div>
 		<div class="insight-card"><span>最忙门禁</span><strong><?php echo dashboardH($busiestDoor ? ($busiestDoor['label'] ?? '-') : '-'); ?></strong><small><?php echo dashboardNumber($busiestDoor['total'] ?? 0); ?> 次刷卡</small></div>
 		<div class="insight-card"><span>最高频人员</span><strong><?php echo dashboardH($busiestPerson ? (($busiestPerson['name'] ?? '-') . ' / ' . ($busiestPerson['kind'] ?? '-')) : '-'); ?></strong><small><?php echo dashboardNumber($busiestPerson['total'] ?? 0); ?> 次刷卡</small></div>
@@ -834,7 +861,6 @@ $rangeText = $startDate === $endDate ? $startDate : ($startDate . ' 至 ' . $end
 						<button type="button" class="dash-chart-button" data-chart-type="bar">柱状图</button>
 						<button type="button" class="dash-chart-button" data-chart-type="line">折线图</button>
 					</div>
-					<button type="button" class="dash-chart-button dash-dark-button" id="dashboardDarkToggle"><i class="fa fa-moon"></i><span>深色模式</span></button>
 				</div>
 			</div>
 			<div class="dash-chart-toolbar">
@@ -851,7 +877,7 @@ $rangeText = $startDate === $endDate ? $startDate : ($startDate . ' 至 ' . $end
 			<?php if (count($typeRows) === 0) { ?>
 				<div class="empty-state">暂无数据</div>
 			<?php } else { ?>
-				<div class="type-pills">
+				<div class="type-pills type-list">
 					<?php foreach ($typeRows as $row) { ?>
 						<div class="type-pill"><span><?php echo dashboardH($row['label'] ?? '未知'); ?></span><b><?php echo dashboardNumber($row['total'] ?? 0); ?></b></div>
 					<?php } ?>
@@ -966,6 +992,7 @@ $rangeText = $startDate === $endDate ? $startDate : ($startDate . ' 至 ' . $end
 		selectedGrain: <?php echo intval($selectedGrain); ?>,
 		chartType: <?php echo json_encode($chartType, JSON_UNESCAPED_UNICODE); ?>,
 		grains: <?php echo json_encode(dashboardGrainOptions(), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT); ?>,
+		throughputPeaks: <?php echo json_encode($throughputPeaks, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT); ?>,
 		series: <?php echo json_encode($chartSeriesByGrain, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT); ?>
 	};
 	(function() {
@@ -976,7 +1003,8 @@ $rangeText = $startDate === $endDate ? $startDate : ($startDate . ' 至 ' . $end
 		var summaryEl = document.getElementById('peakSummary');
 		var statusEl = document.getElementById('peakStatus');
 		var tooltip = document.getElementById('dashboardTooltip');
-		var darkToggle = document.getElementById('dashboardDarkToggle');
+		var throughputValue = document.getElementById('throughputValue');
+		var throughputDetail = document.getElementById('throughputDetail');
 		var seriesStore = payload.series || {};
 		if (!root || !chart) {
 			return;
@@ -1000,13 +1028,16 @@ $rangeText = $startDate === $endDate ? $startDate : ($startDate . ' 至 ' . $end
 		var state = {
 			grain: readStorage('doorlockDashboardGrain', String(payload.selectedGrain || 60)),
 			chartType: readStorage('doorlockDashboardChartType', payload.chartType || 'bar'),
-			dark: readStorage('doorlockDashboardDark', '0') === '1'
+			throughputMode: readStorage('doorlockDashboardThroughputMode', 'second')
 		};
 		if (!seriesStore[state.grain]) {
 			state.grain = String(payload.selectedGrain || 60);
 		}
 		if (state.chartType !== 'line') {
 			state.chartType = 'bar';
+		}
+		if (state.throughputMode !== 'minute') {
+			state.throughputMode = 'second';
 		}
 
 		function escapeHtml(value) {
@@ -1029,7 +1060,8 @@ $rangeText = $startDate === $endDate ? $startDate : ($startDate . ' 至 ' . $end
 				month: pad(d.getMonth() + 1),
 				day: pad(d.getDate()),
 				hour: pad(d.getHours()),
-				minute: pad(d.getMinutes())
+				minute: pad(d.getMinutes()),
+				second: pad(d.getSeconds())
 			};
 		}
 
@@ -1043,12 +1075,15 @@ $rangeText = $startDate === $endDate ? $startDate : ($startDate . ' 至 ' . $end
 
 		function fullLabel(timestamp) {
 			var p = dateParts(timestamp);
-			return p.year + '-' + p.month + '-' + p.day + ' ' + p.hour + ':' + p.minute;
+			return p.year + '-' + p.month + '-' + p.day + ' ' + p.hour + ':' + p.minute + ':' + p.second;
 		}
 
 		function pointRange(point, grain) {
 			if (Number(grain) >= 86400) {
 				return shortLabel(point.start, grain);
+			}
+			if (Number(grain) < 60) {
+				return fullLabel(point.start);
 			}
 			if (payload.crossDay) {
 				return fullLabel(point.start) + ' - ' + fullLabel(point.end);
@@ -1058,6 +1093,33 @@ $rangeText = $startDate === $endDate ? $startDate : ($startDate . ' 至 ' . $end
 
 		function numberText(value) {
 			return Number(value || 0).toLocaleString('zh-CN');
+		}
+
+		function renderThroughput() {
+			var peaks = payload.throughputPeaks || {};
+			var mode = state.throughputMode === 'minute' ? 'minute' : 'second';
+			var data = peaks[mode] || {};
+			var total = Number(data.total || 0);
+			var unit = mode === 'minute' ? '次/分钟' : '次/秒';
+			Array.prototype.forEach.call(document.querySelectorAll('[data-throughput-mode]'), function(button) {
+				button.classList.toggle('active', button.getAttribute('data-throughput-mode') === mode);
+			});
+			if (!throughputValue || !throughputDetail) {
+				return;
+			}
+			if (total <= 0 || !data.start) {
+				throughputValue.textContent = '-';
+				throughputDetail.textContent = '暂无峰值数据';
+				return;
+			}
+			var doors = (data.top_doors || []).map(function(door) {
+				return (door.name || '未知门禁') + ' ' + numberText(door.total || 0) + '次';
+			}).join('、');
+			throughputValue.textContent = numberText(total) + ' ' + unit;
+			throughputDetail.textContent = pointRange({
+				start: Number(data.start || 0),
+				end: Number(data.end || data.start || 0)
+			}, Number(data.grain || (mode === 'minute' ? 60 : 1))) + '，' + numberText(data.people || 0) + ' 人' + (doors ? '，' + doors : '');
 		}
 
 		function buildSeries(grain) {
@@ -1150,21 +1212,47 @@ $rangeText = $startDate === $endDate ? $startDate : ($startDate . ' 至 ' . $end
 			tooltip.setAttribute('aria-hidden', 'true');
 		}
 
-		function bindTooltip(points, grain) {
-			Array.prototype.forEach.call(chart.querySelectorAll('[data-point-index]'), function(node) {
-				var index = Number(node.getAttribute('data-point-index'));
-				var point = points[index];
-				if (!point) {
+		function bindChartPointer(svg, points, grain, plotLeft, plotWidth) {
+			var marker = svg ? svg.querySelector('.peak-svg-hover-line') : null;
+			if (!svg || !points.length) {
+				return;
+			}
+			function pointFromEvent(event) {
+				var source = event.touches && event.touches[0] ? event.touches[0] : event;
+				var rect = svg.getBoundingClientRect();
+				var x = ((source.clientX - rect.left) / Math.max(1, rect.width)) * 1000;
+				var ratio = (x - plotLeft) / Math.max(1, plotWidth);
+				var index = Math.max(0, Math.min(points.length - 1, Math.floor(ratio * points.length)));
+				return {
+					index: index,
+					x: plotLeft + ((points.length === 1 ? .5 : index / (points.length - 1)) * plotWidth),
+					point: points[index]
+				};
+			}
+			function show(event) {
+				var result = pointFromEvent(event);
+				if (!result.point) {
 					return;
 				}
-				node.addEventListener('mouseenter', function(event) { showTooltip(event, point, grain); });
-				node.addEventListener('mousemove', moveTooltip);
-				node.addEventListener('mouseleave', hideTooltip);
-				node.addEventListener('touchstart', function(event) {
-					showTooltip(event, point, grain);
-					setTimeout(hideTooltip, 1800);
-				}, { passive: true });
-			});
+				if (marker) {
+					marker.style.display = 'block';
+					marker.setAttribute('x1', result.x.toFixed(2));
+					marker.setAttribute('x2', result.x.toFixed(2));
+				}
+				showTooltip(event, result.point, grain);
+			}
+			function hide() {
+				if (marker) {
+					marker.style.display = 'none';
+				}
+				hideTooltip();
+			}
+			svg.addEventListener('mousemove', show);
+			svg.addEventListener('mouseenter', show);
+			svg.addEventListener('mouseleave', hide);
+			svg.addEventListener('touchstart', show, { passive: true });
+			svg.addEventListener('touchmove', show, { passive: true });
+			svg.addEventListener('touchend', hide);
 		}
 
 		function svgGrid(width, top, bottom) {
@@ -1176,7 +1264,7 @@ $rangeText = $startDate === $endDate ? $startDate : ($startDate . ' 至 ' . $end
 			return lines.join('');
 		}
 
-		function axisLabels(points, grain, width, chartBottom) {
+		function axisLabels(points, grain, width, chartBottom, plotLeft, plotWidth) {
 			var labels = [];
 			var count = points.length;
 			var every = Math.max(1, Math.ceil(count / 10));
@@ -1184,7 +1272,7 @@ $rangeText = $startDate === $endDate ? $startDate : ($startDate . ' 至 ' . $end
 				if (i % every !== 0 && i !== count - 1) {
 					continue;
 				}
-				var x = count === 1 ? width / 2 : (i / (count - 1)) * width;
+				var x = count === 1 ? width / 2 : plotLeft + (i / (count - 1)) * plotWidth;
 				labels.push('<text class="peak-svg-axis" x="' + x.toFixed(2) + '" y="' + (chartBottom + 24) + '" text-anchor="' + (i === 0 ? 'start' : (i === count - 1 ? 'end' : 'middle')) + '">' + escapeHtml(shortLabel(points[i].start, grain)) + '</text>');
 			}
 			return labels.join('');
@@ -1192,53 +1280,57 @@ $rangeText = $startDate === $endDate ? $startDate : ($startDate . ' 至 ' . $end
 
 		function renderBar(data, maxTotal, peakPoint) {
 			var points = data.points;
-			var width = Math.max(760, Math.min(48000, points.length * 10));
+			var width = 1000;
 			var top = 18;
 			var bottom = 220;
-			var step = width / Math.max(1, points.length);
-			var barWidth = Math.max(1, Math.min(14, step * .72));
+			var plotLeft = 14;
+			var plotWidth = width - plotLeft * 2;
+			var step = plotWidth / Math.max(1, points.length);
+			var barWidth = Math.max(.35, Math.min(12, step * .72));
 			var bars = [];
 			points.forEach(function(point, i) {
 				var barHeight = point.total > 0 ? Math.max(2, (point.total / maxTotal) * (bottom - top)) : 1;
-				var x = i * step + (step - barWidth) / 2;
+				var x = plotLeft + i * step + (step - barWidth) / 2;
 				var y = bottom - barHeight;
 				var isPeak = peakPoint && point.index === peakPoint.index && point.total > 0;
-				var tooltipAttr = point.total > 0 ? ' data-point-index="' + i + '"' : '';
-				bars.push('<rect class="peak-svg-bar' + (isPeak ? ' peak' : '') + '"' + tooltipAttr + ' x="' + x.toFixed(2) + '" y="' + y.toFixed(2) + '" width="' + barWidth.toFixed(2) + '" height="' + barHeight.toFixed(2) + '"></rect>');
+				bars.push('<rect class="peak-svg-bar' + (isPeak ? ' peak' : '') + '" x="' + x.toFixed(2) + '" y="' + y.toFixed(2) + '" width="' + barWidth.toFixed(2) + '" height="' + barHeight.toFixed(2) + '"></rect>');
 			});
-			chart.innerHTML = '<svg class="peak-svg-chart" style="width:' + width + 'px" viewBox="0 0 ' + width + ' 262" role="img" aria-label="高峰时段柱状图">'
+			chart.innerHTML = '<svg class="peak-svg-chart" viewBox="0 0 ' + width + ' 262" preserveAspectRatio="none" role="img" aria-label="高峰时段柱状图">'
 				+ svgGrid(width, top, bottom)
 				+ bars.join('')
-				+ axisLabels(points, data.grain, width, bottom)
+				+ '<line class="peak-svg-hover-line" x1="0" y1="' + top + '" x2="0" y2="' + bottom + '"></line>'
+				+ axisLabels(points, data.grain, width, bottom, plotLeft, plotWidth)
 				+ '</svg>';
-			bindTooltip(points, data.grain);
+			bindChartPointer(chart.querySelector('svg'), points, data.grain, plotLeft, plotWidth);
 		}
 
 		function renderLine(data, maxTotal, peakPoint) {
 			var points = data.points;
-			var width = Math.max(760, Math.min(48000, points.length * 8));
+			var width = 1000;
 			var top = 18;
 			var bottom = 220;
-			var lineWidth = Math.max(1, width - 24);
+			var plotLeft = 14;
+			var plotWidth = width - plotLeft * 2;
 			var dotEvery = Math.max(1, Math.ceil(points.length / 260));
 			var polyline = [];
 			var dots = [];
 			points.forEach(function(point, i) {
-				var x = points.length === 1 ? width / 2 : 12 + (i / (points.length - 1)) * lineWidth;
+				var x = points.length === 1 ? width / 2 : plotLeft + (i / (points.length - 1)) * plotWidth;
 				var y = bottom - ((point.total / maxTotal) * (bottom - top));
 				polyline.push(x.toFixed(2) + ',' + y.toFixed(2));
 				var isPeak = peakPoint && point.index === peakPoint.index && point.total > 0;
 				if (point.total > 0 && (points.length <= 1200 || i % dotEvery === 0 || isPeak)) {
-					dots.push('<circle class="peak-svg-dot' + (isPeak ? ' peak' : '') + '" data-point-index="' + i + '" cx="' + x.toFixed(2) + '" cy="' + y.toFixed(2) + '" r="' + (isPeak ? 5 : 3.5) + '"></circle>');
+					dots.push('<circle class="peak-svg-dot' + (isPeak ? ' peak' : '') + '" cx="' + x.toFixed(2) + '" cy="' + y.toFixed(2) + '" r="' + (isPeak ? 5 : 3.5) + '"></circle>');
 				}
 			});
-			chart.innerHTML = '<svg class="peak-svg-chart" style="width:' + width + 'px" viewBox="0 0 ' + width + ' 262" role="img" aria-label="高峰时段折线图">'
+			chart.innerHTML = '<svg class="peak-svg-chart" viewBox="0 0 ' + width + ' 262" preserveAspectRatio="none" role="img" aria-label="高峰时段折线图">'
 				+ svgGrid(width, top, bottom)
 				+ '<polyline class="peak-svg-path" points="' + polyline.join(' ') + '"></polyline>'
 				+ dots.join('')
-				+ axisLabels(points, data.grain, width, bottom)
+				+ '<line class="peak-svg-hover-line" x1="0" y1="' + top + '" x2="0" y2="' + bottom + '"></line>'
+				+ axisLabels(points, data.grain, width, bottom, plotLeft, plotWidth)
 				+ '</svg>';
-			bindTooltip(points, data.grain);
+			bindChartPointer(chart.querySelector('svg'), points, data.grain, plotLeft, plotWidth);
 		}
 
 		function syncControls() {
@@ -1248,12 +1340,7 @@ $rangeText = $startDate === $endDate ? $startDate : ($startDate . ' 至 ' . $end
 			Array.prototype.forEach.call(document.querySelectorAll('[data-chart-type]'), function(button) {
 				button.classList.toggle('active', button.getAttribute('data-chart-type') === state.chartType);
 			});
-			root.classList.toggle('dark', state.dark);
-			document.body.classList.toggle('dashboard-dark-mode', state.dark);
-			if (darkToggle) {
-				darkToggle.classList.toggle('active', state.dark);
-				darkToggle.innerHTML = state.dark ? '<i class="fa fa-sun"></i><span>浅色模式</span>' : '<i class="fa fa-moon"></i><span>深色模式</span>';
-			}
+			renderThroughput();
 		}
 
 		function render() {
@@ -1295,13 +1382,16 @@ $rangeText = $startDate === $endDate ? $startDate : ($startDate . ' 至 ' . $end
 				render();
 			});
 		});
-		if (darkToggle) {
-			darkToggle.addEventListener('click', function() {
-				state.dark = !state.dark;
-				writeStorage('doorlockDashboardDark', state.dark ? '1' : '0');
-				render();
+		Array.prototype.forEach.call(document.querySelectorAll('[data-throughput-mode]'), function(button) {
+			button.addEventListener('click', function() {
+				state.throughputMode = button.getAttribute('data-throughput-mode') === 'minute' ? 'minute' : 'second';
+				writeStorage('doorlockDashboardThroughputMode', state.throughputMode);
+				renderThroughput();
+				Array.prototype.forEach.call(document.querySelectorAll('[data-throughput-mode]'), function(item) {
+					item.classList.toggle('active', item.getAttribute('data-throughput-mode') === state.throughputMode);
+				});
 			});
-		}
+		});
 		render();
 	})();
 </script>
