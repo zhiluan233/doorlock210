@@ -54,6 +54,15 @@ function roleExpiresText($expiresAt) {
 	return $expiresAt > 0 ? date('Y-m-d', $expiresAt) : '永久有效';
 }
 
+function roleStatusText($role) {
+	$enabled = intval($role['enabled'] ?? 0) === 1;
+	$expiresAt = intval($role['expires_at'] ?? 0);
+	if ($expiresAt > 0 && $expiresAt < time()) {
+		return $enabled ? '已过期，待自动停用' : '已过期';
+	}
+	return $enabled ? '有效' : '已停用';
+}
+
 Database::delete('access_role_members', "DELETE m FROM `access_role_members` m LEFT JOIN `employee` e ON e.`open_id`=m.`employee_open_id` WHERE IFNULL(m.`member_kind`, 'employee')='employee' AND e.`open_id` IS NULL", '', true);
 Database::delete('access_role_members', "DELETE m FROM `access_role_members` m LEFT JOIN `learner` l ON l.`student_no`=m.`employee_open_id` WHERE m.`member_kind`='learner' AND l.`student_no` IS NULL", '', true);
 Database::delete('access_role_members', "DELETE m FROM `access_role_members` m LEFT JOIN `guest` g ON g.`open_id`=m.`employee_open_id` WHERE m.`member_kind`='guest' AND g.`open_id` IS NULL", '', true);
@@ -62,8 +71,8 @@ $employeesRaw = roleFetchRows("SELECT `open_id`, `name`, `employee_id`, `status`
 $learnersRaw = roleFetchRows("SELECT `student_no`, `name`, `realname`, `class_name`, `training_center`, `enrolled_at`, `status` FROM `learner` WHERE `student_no`<>'' ORDER BY `status` DESC, `name` ASC", 'learner');
 $guestsRaw = roleFetchRows("SELECT `open_id`, `name`, `status` FROM `guest` WHERE `open_id`<>'' ORDER BY `status` DESC, `name` ASC", 'guest');
 $devicesRaw = roleFetchRows("SELECT `id`, `name`, `ip` FROM `devices` ORDER BY `id` ASC", 'devices');
-$rolesRaw = roleFetchRows("SELECT r.*, (SELECT COUNT(*) FROM `access_role_members` m WHERE m.`role_id`=r.`id`) AS member_count FROM `access_roles` r WHERE r.`enabled`=1 ORDER BY r.`builtin_key` DESC, r.`id` ASC", 'access_roles');
-$membersRaw = roleFetchRows("SELECT m.`role_id`, IFNULL(m.`member_kind`, 'employee') AS `member_kind`, m.`employee_open_id` FROM `access_role_members` m INNER JOIN `access_roles` r ON r.`id`=m.`role_id` WHERE r.`enabled`=1 ORDER BY m.`role_id` ASC, m.`id` ASC", 'access_role_members');
+$rolesRaw = roleFetchRows("SELECT r.*, (SELECT COUNT(*) FROM `access_role_members` m WHERE m.`role_id`=r.`id`) AS member_count FROM `access_roles` r ORDER BY r.`builtin_key` DESC, r.`enabled` DESC, r.`id` ASC", 'access_roles');
+$membersRaw = roleFetchRows("SELECT m.`role_id`, IFNULL(m.`member_kind`, 'employee') AS `member_kind`, m.`employee_open_id` FROM `access_role_members` m INNER JOIN `access_roles` r ON r.`id`=m.`role_id` ORDER BY m.`role_id` ASC, m.`id` ASC", 'access_role_members');
 $rolePoliciesRaw = roleFetchRows("SELECT `device_id`, `subject_value` FROM `access_policies` WHERE `enabled`=1 AND `subject_type`='role' ORDER BY `device_id` ASC", 'access_policies');
 
 $employees = [];
@@ -138,6 +147,7 @@ foreach ($rolesRaw as $role) {
 		'allow_all' => intval($role['allow_all']),
 		'builtin_key' => $role['builtin_key'] ?? '',
 		'expires_at' => intval($role['expires_at'] ?? 0),
+		'enabled' => intval($role['enabled'] ?? 0),
 		'member_count' => intval($role['member_count']),
 		'members' => $membersByRole[$roleId] ?? [],
 		'device_ids' => array_values(array_unique($devicesByRole[$roleId] ?? []))
@@ -162,6 +172,7 @@ foreach ($rolesRaw as $role) {
                                 <th>角色名</th>
 								<th>对象</th>
 								<th>范围</th>
+								<th>状态</th>
 								<th>成员数</th>
 								<th>已下发门禁</th>
 								<th>过期时间</th>
@@ -176,6 +187,7 @@ foreach ($rolesRaw as $role) {
 									<td><?php echo roleH($role['name']); ?></td>
 									<td><?php echo roleSubjectLabel($role['subject_kind']); ?></td>
 									<td><?php echo intval($role['allow_all']) === 1 ? roleAllScopeLabel($role['subject_kind']) : '指定成员'; ?></td>
+									<td><?php echo roleH(roleStatusText($role)); ?></td>
 									<td><?php echo intval($role['allow_all']) === 1 ? '动态全体' : intval($role['member_count']); ?></td>
 									<td><?php echo count($role['device_ids']); ?></td>
 									<td><?php echo roleH(roleExpiresText($role['expires_at'])); ?></td>

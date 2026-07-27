@@ -14,6 +14,7 @@ class OperationLog {
         '' => '首页',
         'home' => '首页',
         'admininfo' => '用户信息',
+        'dashboard' => '数据大屏',
         'submitcard' => '发卡管理',
         'learner' => '学员管理',
         'deviceopt' => '设备管理',
