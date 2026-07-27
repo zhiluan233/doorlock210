@@ -196,6 +196,11 @@ function submitcardH($value) {
 	return htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8');
 }
 
+function submitcardText($value, $emptyText = '-') {
+	$value = trim((string)$value);
+	return $value !== '' ? $value : $emptyText;
+}
+
 function submitcardFetchRows($sql, $table) {
 	$rs = Database::query($table, $sql, '', true);
 	$rows = [];
@@ -255,7 +260,7 @@ function submitcardEmployeeDepartmentPathText($employee) {
 		return implode('；', $paths);
 	}
 	$fallback = trim((string)($employee['department_name'] ?? ''));
-	return $fallback !== '' ? $fallback : '--';
+	return $fallback !== '' ? $fallback : '-';
 }
 */
 
@@ -269,7 +274,7 @@ function submitcardEmployeeDepartmentPathText($employee) {
 	}
 
 	$fallback = trim((string)($employee['department_name'] ?? ''));
-	return $fallback !== '' ? $fallback : '--';
+	return $fallback !== '' ? $fallback : '-';
 }
 
 function submitcardEmployeeDepartmentIds($employee) {
@@ -443,6 +448,7 @@ foreach ($employeeData as $employee) {
                                 <th>ID</th>
                                 <th>姓名</th>
                                 <th>手机号</th>
+                                <th>外部访客主体</th>
                                 <th>邀约人</th>
                                 <th>邀约部门</th>
                                 <th>过期时间</th>
@@ -469,10 +475,11 @@ foreach ($employeeData as $employee) {
 									$guestExpiresText = $guestExpiresAt > 0 ? date('Y-m-d', $guestExpiresAt) : '永久有效';
                                     echo "<tr>
                                     <td>".$guestRowId."</td>
-                                    <td>".submitcardH($gData['name'])."</td>
-                                    <td>".submitcardH($gData['phone'])."</td>
-                                    <td>".submitcardH($gData['inviter_name'] ?? '--')."</td>
-                                    <td>".submitcardH($gData['inviter_department_name'] ?? '--')."</td>
+                                    <td>".submitcardH(submitcardText($gData['name'] ?? ''))."</td>
+                                    <td>".submitcardH(submitcardText($gData['phone'] ?? ''))."</td>
+                                    <td>".submitcardH(submitcardText($gData['external_subject'] ?? ''))."</td>
+                                    <td>".submitcardH(submitcardText($gData['inviter_name'] ?? ''))."</td>
+                                    <td>".submitcardH(submitcardText($gData['inviter_department_name'] ?? ''))."</td>
                                     <td>".submitcardH($guestExpiresText)."</td>
                                     <td>".submitcardH($gStatus)."</td>
                                     <td>".submitcardH($guestCardId)."</td>
@@ -501,6 +508,12 @@ foreach ($employeeData as $employee) {
       <label class="layui-form-label">手机号</label>
       <div class="layui-input-block">
         <input type="text" id="phone" class="layui-input" placeholder="18888888888">
+      </div>
+    </div>
+    <div class="layui-form-item">
+      <label class="layui-form-label">外部访客主体</label>
+      <div class="layui-input-block">
+        <input type="text" id="external_subject" class="layui-input" maxlength="100" required placeholder="例如：保洁、xx学校、xx公司">
       </div>
     </div>
     <div class="layui-form-item">
@@ -1946,7 +1959,7 @@ foreach ($employeeData as $employee) {
         type: 1,
         title: '创建访客',
         content: $('#createGuestDialogTpl').html(),
-        area: isMobileClient() ? ['92%', '560px'] : ['460px', '560px'],
+        area: isMobileClient() ? ['92%', '620px'] : ['460px', '620px'],
 		success: function() {
 			prepareGuestDialog();
 		}
@@ -2005,11 +2018,16 @@ foreach ($employeeData as $employee) {
     function createGuest() {
       var name = $('#name').val();
       var phone = $('#phone').val();
+	  var externalSubject = $('#external_subject').val();
 	  var inviterOpenId = $('#guest_inviter_open_id').val();
 	  var permanent = $('#guest_permanent').is(':checked');
 	  var expiresDate = $('#guest_expires_date').val();
 	  if ($.trim(name) === '') {
 		vt.error('访客姓名不能为空', {position: 'top-center'});
+		return;
+	  }
+	  if ($.trim(externalSubject) === '') {
+		vt.error('外部访客主体不能为空', {position: 'top-center'});
 		return;
 	  }
 	  if (!inviterOpenId) {
@@ -2028,6 +2046,7 @@ foreach ($employeeData as $employee) {
 		data: {
             name: name,
 			phone: phone,
+			external_subject: externalSubject,
 			inviter_open_id: inviterOpenId,
 			guest_permanent: permanent ? 'true' : 'false',
 			expires_date: expiresDate

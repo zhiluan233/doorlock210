@@ -11,7 +11,7 @@ namespace anim210System;
 
 class Migrator {
 
-    const SCHEMA_VERSION = '20260726';
+    const SCHEMA_VERSION = '20260727';
 
     public static function ensure()
     {
@@ -285,6 +285,7 @@ class Migrator {
         self::addColumn('employee', 'updated_at', "int unsigned NOT NULL DEFAULT 0", $errors);
 
         self::addColumn('guest', 'card_id', "varchar(64) NOT NULL DEFAULT ''", $errors);
+        self::addColumn('guest', 'external_subject', "varchar(255) NOT NULL DEFAULT ''", $errors);
         self::addColumn('guest', 'expires_at', "int unsigned NOT NULL DEFAULT 0", $errors);
         self::addColumn('guest', 'inviter_open_id', "varchar(128) NOT NULL DEFAULT ''", $errors);
         self::addColumn('guest', 'inviter_name', "varchar(255) NOT NULL DEFAULT ''", $errors);

@@ -226,6 +226,7 @@ class PostHandler {
 					$this->requireAdminUser();
 					$name = trim((string)($_POST['name'] ?? ''));
 					$phone = trim((string)($_POST['phone'] ?? ''));
+					$externalSubject = trim((string)($_POST['external_subject'] ?? ''));
 					$inviterOpenId = trim((string)($_POST['inviter_open_id'] ?? ''));
 					$permanent = $this->truthy($_POST['guest_permanent'] ?? 'true');
 					$expiresAt = 0;
@@ -248,6 +249,14 @@ class PostHandler {
 						Header("HTTP/1.1 400 Bad Request");
 						exit("访客手机号过长");
 					}
+					if ($externalSubject === '') {
+						Header("HTTP/1.1 400 Bad Request");
+						exit("外部访客主体不能为空");
+					}
+					if ($this->utf8Length($externalSubject) > 100) {
+						Header("HTTP/1.1 400 Bad Request");
+						exit("外部访客主体过长");
+					}
 					if ($inviterOpenId === '') {
 						Header("HTTP/1.1 400 Bad Request");
 						exit("请选择邀约人");
@@ -266,6 +275,7 @@ class PostHandler {
 						"open_id" => $localGuestId,
 						"name" => $name,
 						"phone" => $phone,
+						"external_subject" => $externalSubject,
 						"status" => 'true',
 						"expires_at" => $expiresAt,
 						"inviter_open_id" => $inviterOpenId,
@@ -659,10 +669,10 @@ class PostHandler {
 					if ($keyword !== '' && !$loadAll) {
 						$safeKeyword = Database::escape($keyword);
 						$like = "'%{$safeKeyword}%'";
-						$where[] = "(`name` LIKE {$like} OR `phone` LIKE {$like} OR `inviter_name` LIKE {$like} OR `inviter_department_name` LIKE {$like} OR `card_id` LIKE {$like})";
+						$where[] = "(`name` LIKE {$like} OR `phone` LIKE {$like} OR `external_subject` LIKE {$like} OR `inviter_name` LIKE {$like} OR `inviter_department_name` LIKE {$like} OR `card_id` LIKE {$like})";
 					}
 					$limit = $loadAll ? 3000 : 20;
-					$sql = "SELECT `id`, `open_id`, `name`, `phone`, `card_id`, `status`, `expires_at`, `inviter_name`, `inviter_department_name` FROM `guest` WHERE " . implode(' AND ', $where) . " ORDER BY CASE WHEN `card_id`='' THEN 0 ELSE 1 END, `name` ASC LIMIT {$limit}";
+					$sql = "SELECT `id`, `open_id`, `name`, `phone`, `external_subject`, `card_id`, `status`, `expires_at`, `inviter_name`, `inviter_department_name` FROM `guest` WHERE " . implode(' AND ', $where) . " ORDER BY CASE WHEN `card_id`='' THEN 0 ELSE 1 END, `name` ASC LIMIT {$limit}";
 					$rs = Database::query('guest', $sql, '', true);
 					$items = [];
 					if ($rs instanceof \mysqli_result) {
@@ -673,6 +683,7 @@ class PostHandler {
 								'open_id' => $row['open_id'] ?? '',
 								'name' => $row['name'] ?? '',
 								'phone' => $row['phone'] ?? '',
+								'external_subject' => $row['external_subject'] ?? '',
 								'card_id' => $row['card_id'] ?? '',
 								'status' => $row['status'] ?? '',
 								'expires_at' => $expiresAt,
@@ -1498,7 +1509,7 @@ class PostHandler {
 			}
 		}
 		$fallback = trim((string)($employee['department_name'] ?? ''));
-		return $fallback !== '' ? $fallback : '--';
+		return $fallback !== '' ? $fallback : '-';
 	}
 
 	private function employeeDepartmentIds($employee)

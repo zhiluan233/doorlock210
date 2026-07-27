@@ -77,6 +77,11 @@ OperationLog::logPanelView($module, $rs);
 				width: 100%;
 				white-space: nowrap;
 			}
+			.panel .table td:empty:not([colspan])::before,
+			.panel dd:empty::before {
+				content: "-";
+				color: #98a2b3;
+			}
 			.cyberfurry-table {
 				clear: both;
 				margin-top: 20px;

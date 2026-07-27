@@ -22,12 +22,12 @@ function learnerH($value) {
 
 function learnerTime($timestamp) {
 	$timestamp = intval($timestamp);
-	return $timestamp > 0 ? date('Y-m-d H:i:s', $timestamp) : '--';
+	return $timestamp > 0 ? date('Y-m-d H:i:s', $timestamp) : '-';
 }
 
 function learnerDate($timestamp) {
 	$timestamp = intval($timestamp);
-	return $timestamp > 0 ? date('Y-m-d', $timestamp) : '--';
+	return $timestamp > 0 ? date('Y-m-d', $timestamp) : '-';
 }
 
 $learnerData = [];

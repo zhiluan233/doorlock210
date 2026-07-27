@@ -167,6 +167,7 @@ function badgeRenderPage($data)
     $joinedAt = intval($person['joined_at'] ?? 0);
     $realname = $person['realname'] ?? '';
     $guestExpiresAt = intval($person['expires_at'] ?? 0);
+    $guestExternalSubject = trim((string)($person['external_subject'] ?? ''));
     $guestInviterName = trim((string)($person['inviter_name'] ?? ''));
     $guestInviterDepartmentName = trim((string)($person['inviter_department_name'] ?? ''));
     $role = badgeRoleFromMode($mode);
@@ -644,6 +645,7 @@ function badgeRenderPage($data)
                         <?php if ($trainingCenter !== '') { ?><div class="info-row"><span>培养中心</span><span><?php echo badgeH($trainingCenter); ?></span></div><?php } ?>
                         <?php if ($studentNo !== '' && $enrolledAt > 0) { ?><div class="info-row"><span>入学时间</span><span><?php echo badgeH(date('Y-m-d', $enrolledAt)); ?></span></div><?php } ?>
                         <?php if ($role === 'guest') { ?><div class="info-row"><span>有效期</span><span><?php echo badgeH($guestExpiresAt > 0 ? date('Y-m-d', $guestExpiresAt) : '永久有效'); ?></span></div><?php } ?>
+                        <?php if ($role === 'guest' && $guestExternalSubject !== '') { ?><div class="info-row"><span>外部访客主体</span><span><?php echo badgeH($guestExternalSubject); ?></span></div><?php } ?>
                         <?php if ($role === 'guest' && $guestInviterName !== '') { ?><div class="info-row"><span>邀约人</span><span><?php echo badgeH($guestInviterName); ?></span></div><?php } ?>
                         <?php if ($role === 'guest' && $guestInviterDepartmentName !== '') { ?><div class="info-row"><span>邀约部门</span><span><?php echo badgeH($guestInviterDepartmentName); ?></span></div><?php } ?>
                         <?php if ($departmentDisplay['value'] !== '') { ?><div class="info-row"><span><?php echo badgeH($departmentDisplay['label']); ?></span><span><?php echo badgeH($departmentDisplay['value']); ?></span></div><?php } ?>
@@ -915,7 +917,7 @@ function badgeRenderPage($data)
             var input = document.getElementById('personSearch');
             if (input) {
                 input.value = '';
-                input.placeholder = assignKind === 'learner' ? '搜索花名、拼音、学号、班级、培养中心' : (assignKind === 'guest' ? '搜索访客姓名、拼音、手机、邀约人' : '搜索花名、拼音、工号、部门');
+                input.placeholder = assignKind === 'learner' ? '搜索花名、拼音、学号、班级、培养中心' : (assignKind === 'guest' ? '搜索访客姓名、拼音、手机、外部主体、邀约人' : '搜索花名、拼音、工号、部门');
                 input.focus();
             }
             searchPeople('');
@@ -947,6 +949,7 @@ function badgeRenderPage($data)
                 }
                 if (assignKind === 'guest') {
                     var guestMeta = [
+                        item.external_subject || '未设置外部主体',
                         item.phone || '未设置手机号',
                         item.inviter_name ? '邀约人 ' + item.inviter_name : '未设置邀约人',
                         item.inviter_department_name || '',
@@ -1066,6 +1069,7 @@ function badgeRenderPage($data)
             ] : (kind === 'guest' ? [
                 item.name || '',
                 item.phone || '',
+                item.external_subject || '',
                 item.inviter_name || '',
                 item.inviter_department_name || '',
                 item.expires_text || '',
