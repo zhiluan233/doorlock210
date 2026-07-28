@@ -56,6 +56,8 @@ AMT 凭证也继续放在 `config.php` 的 `oa.appId` 和 `oa.appSecret`。
 - `配对间隔秒`：默认 300 秒。
 - `迟到宽限秒`：默认 60 秒。
 - `免工牌点位`：异地分子公司、外部人脸点位前缀。
+- `有效提醒`：有效考勤生成后向员工推送飞书卡片消息，失败进入重试队列。
+- `提醒标题` / `提醒卡片` / `提醒批量`：配置有效考勤提醒的卡片标题、Markdown 或飞书卡片 JSON、单轮发送数量。
 - `全量同步`：启用后按配置时间自动同步。
 - `同步时间`：建议配置 `13:00,13:30,14:00`，用于中午闲时多次校准。
 - `同步天数`：默认 2 天，覆盖今天和昨天。
@@ -107,7 +109,9 @@ https://你的域名/?action=feishuWebhook
 ## 故障排查
 
 - 看不到飞书流水：检查 `attendance:task:readonly`、应用数据权限范围和 `attendanceUserFlowsQuery` endpoint。
-- 事件不进系统：检查事件订阅 URL、Token、Encrypt Key 和事件类型。
+- 事件不进系统：检查事件订阅 URL、Token、Encrypt Key 和事件类型；用户打卡成功事件如果缺少点位，系统会按 `record_id` 补查单条流水。
 - 免工牌点位不生效：确认配置的是飞书 `location_name` 的前缀，不是设备名。
-- 日报缺少工牌证据：确认本地 `logs` 有员工开门成功记录；全量同步会回填历史 `logs`。
+- 日报缺少工牌证据：确认本地 `logs` 有员工开门成功记录；全量同步会回填历史 `logs`，如果本地历史缺失，会使用飞书 `工牌-` 流水作为历史工牌证据参与计算。
+- 点位显示为 `-`：系统会按批次从飞书流水 `raw_payload` 回填 `location_name`；GPS 点位读取 `location_name`，考勤机流水只有 `device_id` 时显示为 `考勤机-{device_id}`。
+- 有效考勤提醒未发送：检查 `attendance_effective_message_queue`、飞书 `im:message` 权限和员工 `open_id`。
 - 任务长时间运行：检查 `attendance_sync_jobs` 和 `tmp/doorlock_attendance_worker.lock`。

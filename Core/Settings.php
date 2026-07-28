@@ -53,6 +53,10 @@ class Settings {
             'attendance_oa_push_path' => '/open/user/v1/attendanceEffective/upload',
             'attendance_oa_batch_size' => '100',
             'attendance_export_fields' => 'work_date,employee_name,employee_no,group_name,scheduled_start,scheduled_end,first_effective_at,last_effective_at,effective_count,status,late_minutes,trace',
+            'attendance_effective_message_enabled' => 'false',
+            'attendance_effective_message_template' => '有效考勤',
+            'attendance_effective_message_card_template' => "**考勤结果** 有效考勤\n**考勤时间** {datetime}\n**考勤点位** {location}\n**工牌时间** {badge_datetime}\n**人脸时间** {face_datetime}",
+            'attendance_effective_message_batch_size' => '50',
 
             'feishu_event_enabled' => 'true',
             'feishu_contact_sync_enabled' => 'true',

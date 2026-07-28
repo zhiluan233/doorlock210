@@ -414,9 +414,15 @@ function showAttendanceTrace(reportId) {
 			data: {report_id: reportId},
 			success: function(resp) {
 				var data = resp.data || {};
+				var report = data.report || {};
 				var sources = data.sources || [];
 				var effective = data.effective || [];
 				var html = '<div class="attendance-trace-wrap">';
+				var trace = parseTrace(report.raw_trace);
+				if (trace && trace.feishu_badge_compare) {
+					var cmp = trace.feishu_badge_compare;
+					html += '<div class="attendance-subtitle">飞书工牌对比：共 ' + esc(cmp.feishu_badge_total || 0) + ' 条，匹配本地 ' + esc(cmp.matched_local_total || 0) + ' 条，缺失本地 ' + esc(cmp.missing_local_total || 0) + ' 条</div>';
+				}
 				html += '<h4>有效考勤</h4><table class="table table-bordered"><thead><tr><th>时间</th><th>工牌时间</th><th>人脸时间</th><th>间隔秒</th><th>状态</th></tr></thead><tbody>';
 				if (!effective.length) {
 					html += '<tr><td colspan="5">-</td></tr>';
@@ -451,5 +457,13 @@ function esc(value) {
 	return String(value == null ? '' : value).replace(/[&<>"']/g, function(ch) {
 		return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch];
 	});
+}
+function parseTrace(value) {
+	if (!value) return null;
+	try {
+		return JSON.parse(value);
+	} catch (e) {
+		return null;
+	}
 }
 </script>

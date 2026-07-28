@@ -11,7 +11,7 @@ namespace anim210System;
 
 class Migrator {
 
-    const SCHEMA_VERSION = '20260728';
+    const SCHEMA_VERSION = '20260728_attendance_notice';
 
     public static function ensure()
     {
@@ -199,6 +199,8 @@ class Migrator {
             `status` varchar(32) NOT NULL DEFAULT 'normal',
             `group_id` bigint unsigned NOT NULL DEFAULT 0,
             `group_name` varchar(255) NOT NULL DEFAULT '',
+            `location_name` varchar(255) NOT NULL DEFAULT '',
+            `device_name` varchar(255) NOT NULL DEFAULT '',
             `rule_snapshot` mediumtext,
             `created_at` int unsigned NOT NULL DEFAULT 0,
             `updated_at` int unsigned NOT NULL DEFAULT 0,
@@ -207,6 +209,36 @@ class Migrator {
             KEY `idx_attendance_effective_person_date` (`person_key`, `work_date`),
             KEY `idx_attendance_effective_date_status` (`work_date`, `status`),
             KEY `idx_attendance_effective_time` (`effective_time`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4", $errors);
+
+        self::exec("CREATE TABLE IF NOT EXISTS `attendance_effective_message_queue` (
+            `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+            `pair_hash` char(64) NOT NULL,
+            `person_key` varchar(191) NOT NULL DEFAULT '',
+            `employee_open_id` varchar(128) NOT NULL DEFAULT '',
+            `employee_user_id` varchar(128) NOT NULL DEFAULT '',
+            `employee_no` varchar(128) NOT NULL DEFAULT '',
+            `employee_name` varchar(255) NOT NULL DEFAULT '',
+            `work_date` date NOT NULL,
+            `effective_time` int unsigned NOT NULL DEFAULT 0,
+            `badge_time` int unsigned NOT NULL DEFAULT 0,
+            `face_time` int unsigned NOT NULL DEFAULT 0,
+            `interval_seconds` int unsigned NOT NULL DEFAULT 0,
+            `status_text` varchar(32) NOT NULL DEFAULT '',
+            `group_name` varchar(255) NOT NULL DEFAULT '',
+            `location_name` varchar(255) NOT NULL DEFAULT '',
+            `device_name` varchar(255) NOT NULL DEFAULT '',
+            `message_status` varchar(20) NOT NULL DEFAULT 'pending',
+            `message_attempts` int unsigned NOT NULL DEFAULT 0,
+            `message_next_retry` int unsigned NOT NULL DEFAULT 0,
+            `message_response` text,
+            `raw_payload` mediumtext,
+            `created_at` int unsigned NOT NULL DEFAULT 0,
+            `updated_at` int unsigned NOT NULL DEFAULT 0,
+            PRIMARY KEY (`id`),
+            UNIQUE KEY `uniq_attendance_effective_message_pair` (`pair_hash`),
+            KEY `idx_attendance_effective_message_retry` (`message_status`, `message_next_retry`),
+            KEY `idx_attendance_effective_message_employee` (`employee_open_id`, `effective_time`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4", $errors);
 
         self::exec("CREATE TABLE IF NOT EXISTS `attendance_daily_reports` (
@@ -460,6 +492,8 @@ class Migrator {
         self::addColumn('access_roles', 'builtin_key', "varchar(64) NOT NULL DEFAULT ''", $errors);
         self::addColumn('access_roles', 'expires_at', "int unsigned NOT NULL DEFAULT 0", $errors);
         self::addColumn('access_role_members', 'member_kind', "varchar(20) NOT NULL DEFAULT 'employee'", $errors);
+        self::addColumn('attendance_effective_records', 'location_name', "varchar(255) NOT NULL DEFAULT ''", $errors);
+        self::addColumn('attendance_effective_records', 'device_name', "varchar(255) NOT NULL DEFAULT ''", $errors);
         self::addColumn('device_card_bindings', 'valid_to', "int unsigned NOT NULL DEFAULT 0", $errors);
         self::addColumn('device_card_sync_jobs', 'valid_to', "int unsigned NOT NULL DEFAULT 0", $errors);
 

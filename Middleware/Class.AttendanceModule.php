@@ -79,7 +79,12 @@ class AttendanceModuleService {
         $firstOpenId = '';
         foreach ($records as $record) {
             $record['event_id'] = $eventId;
+            $flowId = self::flowIdFromRecord($record);
             if (self::recordHasEnoughFields($record)) {
+                if (self::flowLocationNeedsFetch($record) && $flowId !== '') {
+                    self::enqueueFetchFlow($flowId, $eventId, 'feishu_event');
+                    continue;
+                }
                 $recordId = self::ingestFeishuFlowRecord($record, $payload);
                 if ($recordId > 0) {
                     self::enqueueRecalculateForRecord($recordId, 'feishu_event');
@@ -89,7 +94,6 @@ class AttendanceModuleService {
                 }
                 continue;
             }
-            $flowId = trim((string)($record['record_id'] ?? ($record['user_flow_id'] ?? '')));
             if ($flowId !== '') {
                 self::enqueueFetchFlow($flowId, $eventId, 'feishu_event');
             }
@@ -179,6 +183,8 @@ class AttendanceModuleService {
         return [
             'schedule' => self::scheduleFullSyncIfDue(),
             'worker' => self::ensureWorkerRunning(),
+            'repair_locations' => self::repairMissingLocationNames(500),
+            'message' => self::processEffectiveMessageQueue(Settings::getInt('attendance_effective_message_batch_size', 50)),
             'oa' => self::processOaQueue(Settings::getInt('attendance_oa_batch_size', 100))
         ];
     }
@@ -468,6 +474,12 @@ class AttendanceModuleService {
         }
         $count = 0;
         $resultRows = $resp['data']['user_flow_results'] ?? ($resp['data']['flow_records'] ?? ($resp['data']['records'] ?? []));
+        if (!is_array($resultRows)) {
+            $resultRows = [];
+        }
+        if (count($resultRows) === 0 && !empty($resp['data']['items']) && is_array($resp['data']['items'])) {
+            $resultRows = $resp['data']['items'];
+        }
         foreach ($resultRows as $resultRow) {
             if (!is_array($resultRow)) {
                 continue;
@@ -518,9 +530,20 @@ class AttendanceModuleService {
         if ($personKey === '') {
             return ['ok' => false, 'message' => '重算人员为空'];
         }
-        self::recalculatePersonDay($personKey, $date);
+        $notify = self::shouldNotifyForRecalculateJob($job);
+        self::recalculatePersonDay($personKey, $date, null, $notify);
+        $messageResult = $notify ? self::processEffectiveMessageQueue(Settings::getInt('attendance_effective_message_batch_size', 50)) : ['total' => 0, 'sent' => 0, 'failed' => 0, 'message' => '非实时增量重算，不推送有效考勤提醒'];
         Settings::set('attendance_last_incremental_at', (string)time());
-        return ['ok' => true, 'done' => true, 'message' => '考勤日报已重算：' . $personKey . ' ' . $date];
+        return ['ok' => true, 'done' => true, 'message' => '考勤日报已重算：' . $personKey . ' ' . $date, 'payload' => ['message' => $messageResult]];
+    }
+
+    private static function shouldNotifyForRecalculateJob($job)
+    {
+        $source = (string)($job['source'] ?? '');
+        if ($source === 'repair_location' || $source === 'manual_panel' || strpos($source, 'schedule_') === 0) {
+            return false;
+        }
+        return !in_array($source, ['full_flow', 'full_flow_done'], true);
     }
 
     private static function processRecalculateDateJob($job)
@@ -531,7 +554,7 @@ class AttendanceModuleService {
         $limit = max(50, min(500, Settings::getInt('attendance_recalculate_batch_size', 200)));
         $employees = self::activeEmployees($limit, $offset);
         foreach ($employees as $employee) {
-            self::recalculatePersonDay(self::personKeyFromEmployee($employee), $date, $employee);
+            self::recalculatePersonDay(self::personKeyFromEmployee($employee), $date, $employee, false);
         }
         $payload['offset'] = $offset + count($employees);
         self::updateJob(intval($job['id']), [
@@ -659,6 +682,57 @@ class AttendanceModuleService {
         return $row ? true : false;
     }
 
+    private static function repairMissingLocationNames($limit = 500)
+    {
+        if (!self::enabled()) {
+            return ['total' => 0, 'updated' => 0, 'message' => '考勤模块未启用'];
+        }
+        $limit = max(1, min(2000, intval($limit)));
+        $rows = self::fetchRows('attendance_source_records', "SELECT * FROM `attendance_source_records` WHERE `source`='feishu' AND (`location_name`='' OR `location_name`='-') ORDER BY `id` ASC LIMIT {$limit}");
+        $updated = 0;
+        foreach ($rows as $row) {
+            $raw = self::decodePayload($row['raw_payload'] ?? '');
+            $candidates = [];
+            if (is_array($raw)) {
+                $candidates[] = $raw;
+                foreach (self::flowRecordsFromQueryResult($raw) as $record) {
+                    $candidates[] = $record;
+                }
+                foreach (self::extractRecordsFromEvent($raw) as $record) {
+                    $candidates[] = $record;
+                }
+            }
+            $location = '';
+            $deviceName = '';
+            foreach ($candidates as $candidate) {
+                if (!is_array($candidate)) {
+                    continue;
+                }
+                $location = self::extractFeishuLocationName($candidate);
+                $deviceName = self::extractFeishuDeviceName($candidate);
+                if ($location === '') {
+                    $location = $deviceName;
+                }
+                if ($location !== '') {
+                    break;
+                }
+            }
+            if ($location === '') {
+                continue;
+            }
+            $sourceKind = self::isBadgeFlow(['location_name' => $location]) ? 'feishu_badge' : (self::isExemptFaceLocation($location) ? 'exempt_face' : (($row['source_kind'] ?? '') ?: 'face'));
+            Database::update('attendance_source_records', [
+                'location_name' => $location,
+                'device_name' => $deviceName,
+                'source_kind' => $sourceKind,
+                'updated_at' => time()
+            ], ['id' => intval($row['id'])]);
+            self::enqueueRecalculateForRecord(intval($row['id']), 'repair_location');
+            $updated++;
+        }
+        return ['total' => count($rows), 'updated' => $updated];
+    }
+
     private static function upsertSourceRecord($data)
     {
         global $conn;
@@ -687,7 +761,7 @@ class AttendanceModuleService {
         }
         if ($record['source_kind'] === '') {
             if (self::isBadgeFlow($record)) {
-                $record['source_kind'] = $record['source'] === 'feishu' ? 'badge_shadow' : 'badge';
+                $record['source_kind'] = $record['source'] === 'feishu' ? 'feishu_badge' : 'badge';
             } elseif (self::isExemptFaceLocation($record['location_name'])) {
                 $record['source_kind'] = 'exempt_face';
             } else {
@@ -744,13 +818,17 @@ class AttendanceModuleService {
         $identity = self::resolveFlowIdentity($record, $employeeType);
         $userId = $identity['value'];
         $employee = $identity['employee'];
-        $location = trim((string)($record['location_name'] ?? ($record['location'] ?? ($record['device_name'] ?? ''))));
+        $location = self::extractFeishuLocationName($record);
+        $deviceName = self::extractFeishuDeviceName($record);
+        if ($location === '') {
+            $location = $deviceName;
+        }
         $externalId = trim((string)($record['record_id'] ?? ($record['user_flow_id'] ?? ($record['id'] ?? ''))));
         if ($externalId === '') {
             $externalId = hash('sha256', json_encode($record, JSON_UNESCAPED_UNICODE) . '|' . $checkTime);
         }
         if (self::isBadgeFlow(['location_name' => $location, 'comment' => $record['comment'] ?? ''])) {
-            $sourceKind = 'badge_shadow';
+            $sourceKind = 'feishu_badge';
         } elseif (self::isExemptFaceLocation($location)) {
             $sourceKind = 'exempt_face';
         } else {
@@ -769,7 +847,7 @@ class AttendanceModuleService {
             'punch_time' => $checkTime,
             'punch_date' => date('Y-m-d', $checkTime),
             'location_name' => $location,
-            'device_name' => $record['device_id'] ?? ($record['device_name'] ?? ''),
+            'device_name' => $deviceName,
             'raw_payload' => $rawPayload
         ]);
     }
@@ -783,14 +861,28 @@ class AttendanceModuleService {
             'employee_no' => trim((string)($record['employee_no'] ?? ''))
         ];
         $candidates = [];
+        $addCandidate = function($type, $value) use (&$candidates) {
+            $value = trim((string)$value);
+            if ($value === '') {
+                return;
+            }
+            foreach ($candidates as $candidate) {
+                if ($candidate['type'] === $type && $candidate['value'] === $value) {
+                    return;
+                }
+            }
+            $candidates[] = ['type' => $type, 'value' => $value];
+        };
         if ($preferredType === 'employee_no') {
-            $candidates[] = ['type' => 'employee_no', 'value' => $values['employee_no']];
-            $candidates[] = ['type' => 'employee_no', 'value' => $values['user_id']];
-            $candidates[] = ['type' => 'employee_id', 'value' => $values['employee_id']];
+            $addCandidate('employee_no', $values['employee_no']);
+            $addCandidate('employee_id', $values['employee_id']);
+            $addCandidate('employee_no', $values['user_id']);
+            $addCandidate('employee_id', $values['user_id']);
         } else {
-            $candidates[] = ['type' => 'employee_id', 'value' => $values['employee_id']];
-            $candidates[] = ['type' => 'employee_id', 'value' => $values['user_id']];
-            $candidates[] = ['type' => 'employee_no', 'value' => $values['employee_no']];
+            $addCandidate('employee_id', $values['employee_id']);
+            $addCandidate('employee_no', $values['employee_no']);
+            $addCandidate('employee_id', $values['user_id']);
+            $addCandidate('employee_no', $values['user_id']);
         }
         foreach ($candidates as $candidate) {
             if ($candidate['value'] === '') {
@@ -851,6 +943,114 @@ class AttendanceModuleService {
         return $out;
     }
 
+    private static function extractFeishuLocationName($record)
+    {
+        if (!is_array($record)) {
+            return '';
+        }
+        foreach (['location_name', 'locationName', 'check_location_name', 'checkLocationName', 'address_name', 'addressName', 'position_name', 'positionName', 'poi_name', 'poiName'] as $key) {
+            if (isset($record[$key]) && is_scalar($record[$key])) {
+                $value = self::cleanFeishuText($record[$key]);
+                if ($value !== '') {
+                    return $value;
+                }
+            }
+        }
+        foreach (['location', 'location_info', 'locationInfo', 'check_location', 'checkLocation', 'check_location_info', 'checkLocationInfo', 'position', 'position_info', 'address', 'place'] as $key) {
+            if (!empty($record[$key])) {
+                $value = self::extractNameFromNestedValue($record[$key]);
+                if ($value !== '') {
+                    return $value;
+                }
+            }
+        }
+        return '';
+    }
+
+    private static function extractFeishuDeviceName($record)
+    {
+        if (!is_array($record)) {
+            return '';
+        }
+        foreach (['device_name', 'deviceName', 'attendance_machine_name', 'attendanceMachineName', 'machine_name', 'machineName'] as $key) {
+            if (isset($record[$key]) && is_scalar($record[$key])) {
+                $value = self::cleanFeishuText($record[$key]);
+                if ($value !== '') {
+                    return $value;
+                }
+            }
+        }
+        foreach (['device', 'device_info', 'deviceInfo', 'attendance_machine', 'attendanceMachine', 'machine'] as $key) {
+            if (!empty($record[$key])) {
+                $value = self::extractNameFromNestedValue($record[$key]);
+                if ($value !== '') {
+                    return $value;
+                }
+            }
+        }
+        foreach (['device_id', 'deviceId', 'attendance_machine_id', 'attendanceMachineId', 'machine_id', 'machineId'] as $key) {
+            if (isset($record[$key]) && is_scalar($record[$key])) {
+                $value = self::cleanFeishuText($record[$key]);
+                if ($value !== '') {
+                    return '考勤机-' . $value;
+                }
+            }
+        }
+        return '';
+    }
+
+    private static function extractNameFromNestedValue($value)
+    {
+        if (is_scalar($value)) {
+            return self::cleanFeishuText($value);
+        }
+        if (!is_array($value)) {
+            return '';
+        }
+        foreach (['location_name', 'locationName', 'device_name', 'deviceName', 'name', 'title', 'address_name', 'addressName', 'address', 'display_name', 'displayName'] as $key) {
+            if (isset($value[$key]) && is_scalar($value[$key])) {
+                $text = self::cleanFeishuText($value[$key]);
+                if ($text !== '') {
+                    return $text;
+                }
+            }
+        }
+        foreach ($value as $item) {
+            if (is_array($item)) {
+                $found = self::extractNameFromNestedValue($item);
+                if ($found !== '') {
+                    return $found;
+                }
+            }
+        }
+        return '';
+    }
+
+    private static function cleanFeishuText($value)
+    {
+        if (!is_scalar($value)) {
+            return '';
+        }
+        $text = trim((string)$value);
+        return $text === '-' ? '' : $text;
+    }
+
+    private static function flowIdFromRecord($record)
+    {
+        if (!is_array($record)) {
+            return '';
+        }
+        return trim((string)($record['record_id'] ?? ($record['user_flow_id'] ?? ($record['flow_id'] ?? ''))));
+    }
+
+    private static function flowLocationNeedsFetch($record)
+    {
+        if (!is_array($record)) {
+            return false;
+        }
+        return self::extractFeishuLocationName($record) === '' && self::extractFeishuDeviceName($record) === '';
+    }
+
     private static function enqueueRecalculateForRecord($recordId, $source)
     {
         $record = Database::querySingleLine('attendance_source_records', ['id' => intval($recordId)]);
@@ -868,7 +1068,7 @@ class AttendanceModuleService {
         ]);
     }
 
-    private static function recalculatePersonDay($personKey, $date, $employee = null)
+    private static function recalculatePersonDay($personKey, $date, $employee = null, $notify = false)
     {
         global $conn;
 
@@ -891,14 +1091,18 @@ class AttendanceModuleService {
         $faces = [];
         $pairs = [];
         foreach ($records as $record) {
-            if (($record['source_kind'] ?? '') === 'badge_shadow') {
+            $sourceKind = (string)($record['source_kind'] ?? '');
+            if ($sourceKind === 'badge_shadow') {
+                $sourceKind = 'feishu_badge';
+            }
+            if ($sourceKind === 'feishu_badge' && self::hasLocalBadgeMatch($records, $record)) {
                 continue;
             }
-            if (($record['source_kind'] ?? '') === 'exempt_face') {
+            if ($sourceKind === 'exempt_face') {
                 $pairs[] = self::buildExemptPair($personKey, $date, $record);
                 continue;
             }
-            $kind = $record['source_kind'] === 'badge' ? 'badge' : 'face';
+            $kind = in_array($sourceKind, ['badge', 'feishu_badge'], true) ? 'badge' : 'face';
             if ($kind === 'badge') {
                 $matchIndex = self::findMatchIndex($faces, intval($record['punch_time']), $interval);
                 if ($matchIndex >= 0) {
@@ -932,7 +1136,7 @@ class AttendanceModuleService {
             $pair['group_id'] = intval($group['id'] ?? 0);
             $pair['group_name'] = $group['name'] ?? '默认考勤组';
             $pair['rule_snapshot'] = json_encode($rule, JSON_UNESCAPED_UNICODE);
-            self::insertEffectivePair($pair);
+            self::insertEffectivePair($pair, $notify);
         }
         self::upsertDailyReport($personKey, $date, $employee, $group, $pairs, $records);
         return true;
@@ -952,12 +1156,42 @@ class AttendanceModuleService {
         return $best;
     }
 
+    private static function hasLocalBadgeMatch($records, $feishuBadge)
+    {
+        $targetTime = intval($feishuBadge['punch_time'] ?? 0);
+        $targetLocation = self::normalizeBadgeLocationText($feishuBadge['location_name'] ?? '');
+        foreach ($records as $record) {
+            if (($record['source_kind'] ?? '') !== 'badge') {
+                continue;
+            }
+            if (abs(intval($record['punch_time'] ?? 0) - $targetTime) > 2) {
+                continue;
+            }
+            $recordLocation = self::normalizeBadgeLocationText($record['location_name'] ?? '');
+            if ($targetLocation === '' || $recordLocation === '' || $targetLocation === $recordLocation) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static function normalizeBadgeLocationText($value)
+    {
+        $value = trim((string)$value);
+        if (strpos($value, '工牌-') === 0) {
+            $value = substr($value, strlen('工牌-'));
+        }
+        return $value;
+    }
+
     private static function buildPair($personKey, $date, $badge, $face)
     {
         $badgeTime = intval($badge['punch_time']);
         $faceTime = intval($face['punch_time']);
         $effectiveTime = max($badgeTime, $faceTime);
         $pairHash = hash('sha256', implode('|', [$personKey, $date, $badge['id'], $face['id']]));
+        $locationName = self::effectiveLocationName($badge, $face);
+        $deviceName = self::effectiveDeviceName($badge, $face);
         return [
             'pair_hash' => $pairHash,
             'person_key' => $personKey,
@@ -972,7 +1206,9 @@ class AttendanceModuleService {
             'badge_time' => $badgeTime,
             'face_time' => $faceTime,
             'interval_seconds' => abs($badgeTime - $faceTime),
-            'status' => 'normal'
+            'status' => 'normal',
+            'location_name' => $locationName,
+            'device_name' => $deviceName
         ];
     }
 
@@ -994,18 +1230,232 @@ class AttendanceModuleService {
             'badge_time' => 0,
             'face_time' => $time,
             'interval_seconds' => 0,
-            'status' => 'exempt'
+            'status' => 'exempt',
+            'location_name' => $record['location_name'] ?? '',
+            'device_name' => $record['device_name'] ?? ''
         ];
     }
 
-    private static function insertEffectivePair($pair)
+    private static function insertEffectivePair($pair, $notify = false)
     {
         $now = time();
         $data = array_merge($pair, [
             'created_at' => $now,
             'updated_at' => $now
         ]);
-        Database::insert('attendance_effective_records', $data);
+        $result = Database::insert('attendance_effective_records', $data);
+        if ($result === true && $notify) {
+            self::enqueueEffectiveMessage($pair);
+        }
+    }
+
+    private static function effectiveLocationName($badge, $face)
+    {
+        $faceLocation = trim((string)($face['location_name'] ?? ''));
+        if ($faceLocation !== '') {
+            return $faceLocation;
+        }
+        return trim((string)($badge['location_name'] ?? ''));
+    }
+
+    private static function effectiveDeviceName($badge, $face)
+    {
+        $faceDevice = trim((string)($face['device_name'] ?? ''));
+        if ($faceDevice !== '') {
+            return $faceDevice;
+        }
+        return trim((string)($badge['device_name'] ?? ''));
+    }
+
+    private static function enqueueEffectiveMessage($pair)
+    {
+        global $conn;
+
+        if (!Settings::getBool('attendance_effective_message_enabled')) {
+            return false;
+        }
+        $openId = trim((string)($pair['employee_open_id'] ?? ''));
+        if ($openId === '') {
+            return false;
+        }
+        $now = time();
+        $data = [
+            'pair_hash' => $pair['pair_hash'] ?? '',
+            'person_key' => $pair['person_key'] ?? '',
+            'employee_open_id' => $openId,
+            'employee_user_id' => $pair['employee_user_id'] ?? '',
+            'employee_no' => $pair['employee_no'] ?? '',
+            'employee_name' => $pair['employee_name'] ?? '',
+            'work_date' => $pair['work_date'] ?? date('Y-m-d', intval($pair['effective_time'] ?? time())),
+            'effective_time' => intval($pair['effective_time'] ?? 0),
+            'badge_time' => intval($pair['badge_time'] ?? 0),
+            'face_time' => intval($pair['face_time'] ?? 0),
+            'interval_seconds' => intval($pair['interval_seconds'] ?? 0),
+            'status_text' => $pair['status'] ?? '',
+            'group_name' => $pair['group_name'] ?? '',
+            'location_name' => $pair['location_name'] ?? '',
+            'device_name' => $pair['device_name'] ?? '',
+            'message_status' => 'pending',
+            'message_next_retry' => 0,
+            'raw_payload' => json_encode($pair, JSON_UNESCAPED_UNICODE),
+            'created_at' => $now,
+            'updated_at' => $now
+        ];
+        if ($data['pair_hash'] === '' || $data['effective_time'] <= 0) {
+            return false;
+        }
+
+        $columns = [];
+        $values = [];
+        foreach ($data as $key => $value) {
+            $columns[] = "`" . Database::escape($key) . "`";
+            $values[] = "'" . Database::escape((string)$value) . "'";
+        }
+        $sql = "INSERT IGNORE INTO `attendance_effective_message_queue` (" . implode(',', $columns) . ") VALUES (" . implode(',', $values) . ")";
+        mysqli_query($conn, $sql);
+        return mysqli_affected_rows($conn) > 0;
+    }
+
+    private static function processEffectiveMessageQueue($limit = 50)
+    {
+        if (!Settings::getBool('attendance_effective_message_enabled')) {
+            return ['total' => 0, 'sent' => 0, 'failed' => 0, 'message' => '有效考勤提醒未启用'];
+        }
+        $limit = max(1, min(200, intval($limit)));
+        $now = time();
+        $rows = self::fetchRows('attendance_effective_message_queue', "SELECT * FROM `attendance_effective_message_queue` WHERE `message_status`<>'sent' AND `message_next_retry`<={$now} ORDER BY `id` ASC LIMIT {$limit}");
+        if (count($rows) === 0) {
+            return ['total' => 0, 'sent' => 0, 'failed' => 0];
+        }
+
+        $feishu = new appLinkFeishu(true);
+        $sent = 0;
+        $failed = 0;
+        foreach ($rows as $row) {
+            if (trim((string)($row['employee_open_id'] ?? '')) === '') {
+                self::markEffectiveMessageFailed([$row], '缺少飞书 open_id');
+                $failed++;
+                continue;
+            }
+            $uuid = substr('eff_' . ($row['pair_hash'] ?? ''), 0, 50);
+            $resp = $feishu->sendInteractiveMessage($row['employee_open_id'], self::buildEffectiveMessageCard($row), $uuid);
+            if (!empty($resp['ok'])) {
+                self::markEffectiveMessageSent([$row], json_encode($resp['data'], JSON_UNESCAPED_UNICODE));
+                $sent++;
+            } else {
+                self::markEffectiveMessageFailed([$row], $resp['message'] ?? '飞书消息发送失败');
+                $failed++;
+            }
+            usleep(50000);
+        }
+        return ['total' => count($rows), 'sent' => $sent, 'failed' => $failed];
+    }
+
+    private static function markEffectiveMessageSent($rows, $response)
+    {
+        self::markEffectiveMessages($rows, 'sent', 0, $response);
+    }
+
+    private static function markEffectiveMessageFailed($rows, $response)
+    {
+        self::markEffectiveMessages($rows, 'failed', null, $response);
+    }
+
+    private static function markEffectiveMessages($rows, $status, $nextRetry, $response)
+    {
+        global $conn;
+
+        if (count($rows) === 0) {
+            return;
+        }
+        $now = time();
+        $response = Database::escape(substr((string)$response, 0, 60000));
+        $status = Database::escape($status);
+        if ($status === 'failed') {
+            foreach ($rows as $row) {
+                $attempts = intval($row['message_attempts'] ?? 0) + 1;
+                $retryAt = $now + self::retryDelay($attempts);
+                $id = intval($row['id']);
+                mysqli_query($conn, "UPDATE `attendance_effective_message_queue` SET `message_status`='{$status}', `message_attempts`={$attempts}, `message_next_retry`={$retryAt}, `message_response`='{$response}', `updated_at`={$now} WHERE `id`={$id}");
+            }
+            return;
+        }
+        $ids = array_map(function($row) { return intval($row['id']); }, $rows);
+        mysqli_query($conn, "UPDATE `attendance_effective_message_queue` SET `message_status`='{$status}', `message_next_retry`=0, `message_response`='{$response}', `updated_at`={$now} WHERE `id` IN (" . implode(',', $ids) . ")");
+    }
+
+    private static function buildEffectiveMessageCard($row)
+    {
+        $titleText = Settings::get('attendance_effective_message_template', '有效考勤');
+        if ($titleText === '') {
+            $titleText = '有效考勤';
+        }
+        $template = Settings::get('attendance_effective_message_card_template', '');
+        if (trim($template) === '') {
+            $template = "**考勤结果** 有效考勤\n**考勤时间** {datetime}\n**考勤点位** {location}\n**工牌时间** {badge_datetime}\n**人脸时间** {face_datetime}";
+        }
+        $rendered = self::renderEffectiveMessageTemplate($template, $row);
+        $customCard = json_decode($rendered, true);
+        if (json_last_error() === JSON_ERROR_NONE && is_array($customCard)) {
+            $customCard['config'] = $customCard['config'] ?? ['wide_screen_mode' => true];
+            $customCard['header'] = [
+                'template' => $customCard['header']['template'] ?? 'green',
+                'title' => [
+                    'tag' => 'plain_text',
+                    'content' => self::renderEffectiveMessageTemplate($titleText, $row)
+                ]
+            ];
+            return $customCard;
+        }
+        return [
+            'config' => ['wide_screen_mode' => true],
+            'header' => [
+                'template' => 'green',
+                'title' => [
+                    'tag' => 'plain_text',
+                    'content' => self::renderEffectiveMessageTemplate($titleText, $row)
+                ]
+            ],
+            'elements' => [
+                [
+                    'tag' => 'markdown',
+                    'content' => $rendered
+                ]
+            ]
+        ];
+    }
+
+    private static function renderEffectiveMessageTemplate($template, $row)
+    {
+        $effectiveTime = intval($row['effective_time'] ?? time());
+        $badgeTime = intval($row['badge_time'] ?? 0);
+        $faceTime = intval($row['face_time'] ?? 0);
+        $location = trim((string)($row['location_name'] ?? ''));
+        if ($location === '') {
+            $location = trim((string)($row['device_name'] ?? ''));
+        }
+        if ($location === '') {
+            $location = '-';
+        }
+        $replacements = [
+            '{time}' => date('H:i', $effectiveTime),
+            '{date}' => date('Y年m月d日', $effectiveTime),
+            '{datetime}' => date('Y-m-d H:i:s', $effectiveTime),
+            '{work_date}' => $row['work_date'] ?? date('Y-m-d', $effectiveTime),
+            '{name}' => (string)($row['employee_name'] ?? ''),
+            '{employee_no}' => (string)($row['employee_no'] ?? ''),
+            '{location}' => $location,
+            '{device}' => (string)($row['device_name'] ?? ''),
+            '{group}' => (string)($row['group_name'] ?? ''),
+            '{status}' => self::statusText($row['status_text'] ?? ''),
+            '{badge_time}' => $badgeTime > 0 ? date('H:i:s', $badgeTime) : '-',
+            '{badge_datetime}' => $badgeTime > 0 ? date('Y-m-d H:i:s', $badgeTime) : '-',
+            '{face_time}' => $faceTime > 0 ? date('H:i:s', $faceTime) : '-',
+            '{face_datetime}' => $faceTime > 0 ? date('Y-m-d H:i:s', $faceTime) : '-',
+            '{interval_seconds}' => (string)intval($row['interval_seconds'] ?? 0),
+            '{pair_hash}' => (string)($row['pair_hash'] ?? '')
+        ];
+        return strtr((string)$template, $replacements);
     }
 
     private static function upsertDailyReport($personKey, $date, $employee, $group, $pairs, $records)
@@ -1054,13 +1504,16 @@ class AttendanceModuleService {
             'calculated_at' => $now,
             'raw_trace' => json_encode([
                 'source_record_ids' => array_map(function($row) { return intval($row['id']); }, $records),
+                'feishu_badge_compare' => self::feishuBadgeComparison($records),
                 'pairs' => array_map(function($pair) {
                     return [
                         'badge_record_id' => intval($pair['badge_record_id']),
                         'face_record_id' => intval($pair['face_record_id']),
                         'badge_time' => intval($pair['badge_time']),
                         'face_time' => intval($pair['face_time']),
-                        'effective_time' => intval($pair['effective_time'])
+                        'effective_time' => intval($pair['effective_time']),
+                        'location_name' => $pair['location_name'] ?? '',
+                        'device_name' => $pair['device_name'] ?? ''
                     ];
                 }, $pairs)
             ], JSON_UNESCAPED_UNICODE),
@@ -1084,6 +1537,30 @@ class AttendanceModuleService {
         }
         $sql = "INSERT INTO `attendance_daily_reports` (" . implode(',', $columns) . ") VALUES (" . implode(',', $values) . ") ON DUPLICATE KEY UPDATE " . implode(',', $update);
         mysqli_query($conn, $sql);
+    }
+
+    private static function feishuBadgeComparison($records)
+    {
+        $result = [
+            'feishu_badge_total' => 0,
+            'matched_local_total' => 0,
+            'missing_local_total' => 0,
+            'missing_local_record_ids' => []
+        ];
+        foreach ($records as $record) {
+            $sourceKind = (string)($record['source_kind'] ?? '');
+            if (!in_array($sourceKind, ['feishu_badge', 'badge_shadow'], true)) {
+                continue;
+            }
+            $result['feishu_badge_total']++;
+            if (self::hasLocalBadgeMatch($records, $record)) {
+                $result['matched_local_total']++;
+            } else {
+                $result['missing_local_total']++;
+                $result['missing_local_record_ids'][] = intval($record['id'] ?? 0);
+            }
+        }
+        return $result;
     }
 
     private static function enqueueFetchFlow($flowId, $eventId, $source)
@@ -1479,6 +1956,9 @@ class AttendanceModuleService {
     {
         $records = [];
         $event = is_array($payload['event'] ?? null) ? $payload['event'] : $payload;
+        if (self::recordHasEnoughFields($event)) {
+            $records[] = $event;
+        }
         foreach (['user_flow', 'user_flow_record', 'record', 'attendance_record', 'data'] as $key) {
             if (isset($event[$key]) && is_array($event[$key])) {
                 $records[] = $event[$key];
@@ -1493,19 +1973,18 @@ class AttendanceModuleService {
                 }
             }
         }
-        foreach (['record_id', 'user_flow_id', 'flow_id'] as $key) {
-            if (!empty($event[$key])) {
-                $records[] = [
-                    'record_id' => $event[$key],
-                    'user_id' => $event['user_id'] ?? '',
-                    'employee_id' => $event['employee_id'] ?? '',
-                    'employee_no' => $event['employee_no'] ?? '',
-                    'check_time' => $event['check_time'] ?? ''
-                ];
+        if (count($records) === 0) {
+            foreach (['record_id', 'user_flow_id', 'flow_id'] as $key) {
+                if (!empty($event[$key])) {
+                    $records[] = [
+                        'record_id' => $event[$key],
+                        'user_id' => $event['user_id'] ?? '',
+                        'employee_id' => $event['employee_id'] ?? '',
+                        'employee_no' => $event['employee_no'] ?? '',
+                        'check_time' => $event['check_time'] ?? ''
+                    ];
+                }
             }
-        }
-        if (count($records) === 0 && self::recordHasEnoughFields($event)) {
-            $records[] = $event;
         }
         return $records;
     }
