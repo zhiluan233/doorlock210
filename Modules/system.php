@@ -86,6 +86,32 @@ function settingValue($key) {
 						<hr>
 						<div class="layui-row layui-col-space20">
 							<div class="layui-col-md6">
+								<h5>P0考勤模块</h5>
+								<div class="layui-form-item"><label class="layui-form-label">启用模块</label><div class="layui-input-block"><input type="checkbox" name="attendance_module_enabled" value="true" lay-skin="switch" <?php echo checked('attendance_module_enabled'); ?>></div></div>
+								<div class="layui-form-item"><label class="layui-form-label">配对间隔秒</label><div class="layui-input-block"><input class="layui-input" name="attendance_pair_interval_seconds" value="<?php echo settingValue('attendance_pair_interval_seconds'); ?>" placeholder="默认300"></div></div>
+								<div class="layui-form-item"><label class="layui-form-label">迟到宽限秒</label><div class="layui-input-block"><input class="layui-input" name="attendance_late_grace_seconds" value="<?php echo settingValue('attendance_late_grace_seconds'); ?>" placeholder="默认60"></div></div>
+								<div class="layui-form-item"><label class="layui-form-label">默认考勤组</label><div class="layui-input-block"><input class="layui-input" name="attendance_default_group_name" value="<?php echo settingValue('attendance_default_group_name'); ?>"></div></div>
+								<div class="layui-form-item"><label class="layui-form-label">默认上班</label><div class="layui-input-block"><input class="layui-input" name="attendance_default_start_time" value="<?php echo settingValue('attendance_default_start_time'); ?>" placeholder="09:30"></div></div>
+								<div class="layui-form-item"><label class="layui-form-label">默认下班</label><div class="layui-input-block"><input class="layui-input" name="attendance_default_end_time" value="<?php echo settingValue('attendance_default_end_time'); ?>" placeholder="18:30"></div></div>
+								<div class="layui-form-item"><label class="layui-form-label">免工牌点位</label><div class="layui-input-block"><textarea class="layui-textarea" name="attendance_exempt_location_prefixes" rows="5" placeholder="飞书点位前缀，逗号、分号或换行分隔；命中后人脸打卡直接算有效考勤"><?php echo settingValue('attendance_exempt_location_prefixes'); ?></textarea></div></div>
+							</div>
+							<div class="layui-col-md6">
+								<h5>考勤同步与导出</h5>
+								<div class="layui-form-item"><label class="layui-form-label">全量同步</label><div class="layui-input-block"><input type="checkbox" name="attendance_full_sync_enabled" value="true" lay-skin="switch" <?php echo checked('attendance_full_sync_enabled'); ?>></div></div>
+								<div class="layui-form-item"><label class="layui-form-label">同步时间</label><div class="layui-input-block"><textarea class="layui-textarea" name="attendance_full_sync_times" rows="3" placeholder="13:00,13:30,14:00"><?php echo settingValue('attendance_full_sync_times'); ?></textarea></div></div>
+								<div class="layui-form-item"><label class="layui-form-label">同步天数</label><div class="layui-input-block"><input class="layui-input" name="attendance_full_sync_window_days" value="<?php echo settingValue('attendance_full_sync_window_days'); ?>" placeholder="默认2"></div></div>
+								<div class="layui-form-item"><label class="layui-form-label">单批员工</label><div class="layui-input-block"><input class="layui-input" name="attendance_full_sync_batch_size" value="<?php echo settingValue('attendance_full_sync_batch_size'); ?>" placeholder="1-50"></div></div>
+								<div class="layui-form-item"><label class="layui-form-label">重算批量</label><div class="layui-input-block"><input class="layui-input" name="attendance_recalculate_batch_size" value="<?php echo settingValue('attendance_recalculate_batch_size'); ?>" placeholder="50-500"></div></div>
+								<div class="layui-form-item"><label class="layui-form-label">AMT推送</label><div class="layui-input-block"><input type="checkbox" name="attendance_oa_push_enabled" value="true" lay-skin="switch" <?php echo checked('attendance_oa_push_enabled'); ?>></div></div>
+								<div class="layui-form-item"><label class="layui-form-label">AMT路径</label><div class="layui-input-block"><input class="layui-input" name="attendance_oa_push_path" value="<?php echo settingValue('attendance_oa_push_path'); ?>"></div></div>
+								<div class="layui-form-item"><label class="layui-form-label">AMT批量</label><div class="layui-input-block"><input class="layui-input" name="attendance_oa_batch_size" value="<?php echo settingValue('attendance_oa_batch_size'); ?>"></div></div>
+								<div class="layui-form-item"><label class="layui-form-label">导出字段</label><div class="layui-input-block"><textarea class="layui-textarea" name="attendance_export_fields" rows="4" placeholder="逗号分隔字段"><?php echo settingValue('attendance_export_fields'); ?></textarea></div></div>
+								<p>飞书假勤接口端点在 config.php 的 feishu.appEndpoint 中维护；考勤组可在考勤板块手动同步。</p>
+							</div>
+						</div>
+						<hr>
+						<div class="layui-row layui-col-space20">
+							<div class="layui-col-md6">
 								<h5>飞书事件与登录</h5>
 								<div class="layui-form-item"><label class="layui-form-label">事件订阅</label><div class="layui-input-block"><input type="checkbox" name="feishu_event_enabled" value="true" lay-skin="switch" <?php echo checked('feishu_event_enabled'); ?>></div></div>
 								<div class="layui-form-item"><label class="layui-form-label">通讯录同步</label><div class="layui-input-block"><input type="checkbox" name="feishu_contact_sync_enabled" value="true" lay-skin="switch" <?php echo checked('feishu_contact_sync_enabled'); ?>></div></div>

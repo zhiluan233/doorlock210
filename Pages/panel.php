@@ -24,7 +24,7 @@ if (!$isAdmin && !$isReadonly) {
     exit("<script>location='/?page=login';</script>");
 }
 
-if ($isReadonly && !in_array($module, ['home', 'admininfo', 'dashboard', 'accesslog', 'operationlog', ''], true)) {
+if ($isReadonly && !in_array($module, ['home', 'admininfo', 'dashboard', 'attendance', 'accesslog', 'operationlog', ''], true)) {
     $module = 'accesslog';
     $_GET['module'] = 'accesslog';
 }
@@ -299,6 +299,9 @@ OperationLog::logPanelView($module, $rs);
                             </li>
 							<li class="<?php echo $module == "dashboard" || $module == "" ? "active-page" : ""; ?>">
 								<a href="/?page=panel&module=dashboard"><i class="fa-solid fa-chart-line" style="padding-left: 2.5px; padding-right: 2px"></i><span>数据大屏</span></a>
+							</li>
+							<li class="<?php echo $module == "attendance" || $module == "" ? "active-page" : ""; ?>">
+								<a href="/?page=panel&module=attendance"><i class="fa-solid fa-clipboard-check" style="padding-left: 2.5px; padding-right: 2px"></i><span>考勤管理</span></a>
 							</li>
                             <?php if($isAdmin) { ?>
                             <li class="menu-divider"></li>

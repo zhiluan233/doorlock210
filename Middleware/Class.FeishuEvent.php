@@ -54,6 +54,12 @@ class FeishuEventHandler {
         }
 
         $openId = anim210System\FeishuContactSync::applyUserEvent($payload, $eventType);
+        if (class_exists(__NAMESPACE__ . '\\AttendanceModuleService')) {
+            $attendanceOpenId = anim210System\AttendanceModuleService::handleFeishuEvent($payload, $eventType, $eventId);
+            if ($openId === '' && $attendanceOpenId !== '') {
+                $openId = $attendanceOpenId;
+            }
+        }
         self::storeEvent($eventId ?: hash('sha256', json_encode($payload)), $eventType, $openId, $payload);
 
         exit(json_encode(['code' => 0, 'msg' => 'success'], JSON_UNESCAPED_UNICODE));

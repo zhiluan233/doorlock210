@@ -11,7 +11,7 @@ namespace anim210System;
 
 class Migrator {
 
-    const SCHEMA_VERSION = '20260727';
+    const SCHEMA_VERSION = '20260728';
 
     public static function ensure()
     {
@@ -152,6 +152,156 @@ class Migrator {
             KEY `idx_feishu_retry` (`need_feishu`, `feishu_status`, `feishu_next_retry`),
             KEY `idx_message_retry` (`need_message`, `message_status`, `message_next_retry`),
             KEY `idx_employee_time` (`employee_open_id`, `punch_time`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4", $errors);
+
+        self::exec("CREATE TABLE IF NOT EXISTS `attendance_source_records` (
+            `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+            `source` varchar(32) NOT NULL DEFAULT '',
+            `source_kind` varchar(32) NOT NULL DEFAULT '',
+            `external_id` varchar(191) NOT NULL DEFAULT '',
+            `event_id` varchar(128) NOT NULL DEFAULT '',
+            `employee_open_id` varchar(128) NOT NULL DEFAULT '',
+            `employee_user_id` varchar(128) NOT NULL DEFAULT '',
+            `employee_no` varchar(128) NOT NULL DEFAULT '',
+            `employee_name` varchar(255) NOT NULL DEFAULT '',
+            `card_id` varchar(64) NOT NULL DEFAULT '',
+            `punch_time` int unsigned NOT NULL DEFAULT 0,
+            `punch_date` date NOT NULL,
+            `location_name` varchar(255) NOT NULL DEFAULT '',
+            `device_name` varchar(255) NOT NULL DEFAULT '',
+            `raw_payload` mediumtext,
+            `created_at` int unsigned NOT NULL DEFAULT 0,
+            `updated_at` int unsigned NOT NULL DEFAULT 0,
+            PRIMARY KEY (`id`),
+            UNIQUE KEY `uniq_attendance_source_external` (`source`, `external_id`),
+            KEY `idx_attendance_source_open_time` (`employee_open_id`, `punch_time`),
+            KEY `idx_attendance_source_no_time` (`employee_no`, `punch_time`),
+            KEY `idx_attendance_source_date_kind` (`punch_date`, `source_kind`),
+            KEY `idx_attendance_source_event` (`event_id`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4", $errors);
+
+        self::exec("CREATE TABLE IF NOT EXISTS `attendance_effective_records` (
+            `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+            `pair_hash` char(64) NOT NULL,
+            `person_key` varchar(191) NOT NULL DEFAULT '',
+            `employee_open_id` varchar(128) NOT NULL DEFAULT '',
+            `employee_user_id` varchar(128) NOT NULL DEFAULT '',
+            `employee_no` varchar(128) NOT NULL DEFAULT '',
+            `employee_name` varchar(255) NOT NULL DEFAULT '',
+            `work_date` date NOT NULL,
+            `sequence_no` int unsigned NOT NULL DEFAULT 0,
+            `effective_time` int unsigned NOT NULL DEFAULT 0,
+            `badge_record_id` bigint unsigned NOT NULL DEFAULT 0,
+            `face_record_id` bigint unsigned NOT NULL DEFAULT 0,
+            `badge_time` int unsigned NOT NULL DEFAULT 0,
+            `face_time` int unsigned NOT NULL DEFAULT 0,
+            `interval_seconds` int unsigned NOT NULL DEFAULT 0,
+            `status` varchar(32) NOT NULL DEFAULT 'normal',
+            `group_id` bigint unsigned NOT NULL DEFAULT 0,
+            `group_name` varchar(255) NOT NULL DEFAULT '',
+            `rule_snapshot` mediumtext,
+            `created_at` int unsigned NOT NULL DEFAULT 0,
+            `updated_at` int unsigned NOT NULL DEFAULT 0,
+            PRIMARY KEY (`id`),
+            UNIQUE KEY `uniq_attendance_effective_pair` (`pair_hash`),
+            KEY `idx_attendance_effective_person_date` (`person_key`, `work_date`),
+            KEY `idx_attendance_effective_date_status` (`work_date`, `status`),
+            KEY `idx_attendance_effective_time` (`effective_time`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4", $errors);
+
+        self::exec("CREATE TABLE IF NOT EXISTS `attendance_daily_reports` (
+            `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+            `report_hash` char(64) NOT NULL,
+            `person_key` varchar(191) NOT NULL DEFAULT '',
+            `employee_open_id` varchar(128) NOT NULL DEFAULT '',
+            `employee_user_id` varchar(128) NOT NULL DEFAULT '',
+            `employee_no` varchar(128) NOT NULL DEFAULT '',
+            `employee_name` varchar(255) NOT NULL DEFAULT '',
+            `work_date` date NOT NULL,
+            `group_id` bigint unsigned NOT NULL DEFAULT 0,
+            `group_name` varchar(255) NOT NULL DEFAULT '',
+            `scheduled_start` int unsigned NOT NULL DEFAULT 0,
+            `scheduled_end` int unsigned NOT NULL DEFAULT 0,
+            `first_effective_at` int unsigned NOT NULL DEFAULT 0,
+            `last_effective_at` int unsigned NOT NULL DEFAULT 0,
+            `effective_count` int unsigned NOT NULL DEFAULT 0,
+            `late_minutes` int unsigned NOT NULL DEFAULT 0,
+            `status` varchar(32) NOT NULL DEFAULT 'absent',
+            `source_updated_at` int unsigned NOT NULL DEFAULT 0,
+            `calculated_at` int unsigned NOT NULL DEFAULT 0,
+            `raw_trace` mediumtext,
+            `oa_status` varchar(20) NOT NULL DEFAULT 'skipped',
+            `oa_attempts` int unsigned NOT NULL DEFAULT 0,
+            `oa_next_retry` int unsigned NOT NULL DEFAULT 0,
+            `oa_response` text,
+            `created_at` int unsigned NOT NULL DEFAULT 0,
+            `updated_at` int unsigned NOT NULL DEFAULT 0,
+            PRIMARY KEY (`id`),
+            UNIQUE KEY `uniq_attendance_daily_report` (`report_hash`),
+            KEY `idx_attendance_daily_person_date` (`person_key`, `work_date`),
+            KEY `idx_attendance_daily_date_status` (`work_date`, `status`),
+            KEY `idx_attendance_daily_oa` (`oa_status`, `oa_next_retry`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4", $errors);
+
+        self::exec("CREATE TABLE IF NOT EXISTS `attendance_groups` (
+            `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+            `group_key` varchar(191) NOT NULL DEFAULT '',
+            `name` varchar(255) NOT NULL DEFAULT '',
+            `source` varchar(32) NOT NULL DEFAULT 'manual',
+            `feishu_group_id` varchar(128) NOT NULL DEFAULT '',
+            `start_time` varchar(5) NOT NULL DEFAULT '09:30',
+            `end_time` varchar(5) NOT NULL DEFAULT '18:30',
+            `enabled` tinyint(1) NOT NULL DEFAULT 1,
+            `auto_sync` tinyint(1) NOT NULL DEFAULT 0,
+            `member_count` int unsigned NOT NULL DEFAULT 0,
+            `raw_payload` mediumtext,
+            `created_at` int unsigned NOT NULL DEFAULT 0,
+            `updated_at` int unsigned NOT NULL DEFAULT 0,
+            PRIMARY KEY (`id`),
+            UNIQUE KEY `uniq_attendance_group_key` (`group_key`),
+            KEY `idx_attendance_group_enabled` (`enabled`),
+            KEY `idx_attendance_group_feishu` (`feishu_group_id`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4", $errors);
+
+        self::exec("CREATE TABLE IF NOT EXISTS `attendance_group_members` (
+            `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+            `group_id` bigint unsigned NOT NULL DEFAULT 0,
+            `employee_open_id` varchar(128) NOT NULL DEFAULT '',
+            `employee_user_id` varchar(128) NOT NULL DEFAULT '',
+            `employee_no` varchar(128) NOT NULL DEFAULT '',
+            `employee_name` varchar(255) NOT NULL DEFAULT '',
+            `created_at` int unsigned NOT NULL DEFAULT 0,
+            PRIMARY KEY (`id`),
+            KEY `idx_attendance_group_member_group` (`group_id`),
+            KEY `idx_attendance_group_member_open` (`employee_open_id`),
+            KEY `idx_attendance_group_member_user` (`employee_user_id`),
+            KEY `idx_attendance_group_member_no` (`employee_no`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4", $errors);
+
+        self::exec("CREATE TABLE IF NOT EXISTS `attendance_sync_jobs` (
+            `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+            `job_type` varchar(40) NOT NULL DEFAULT '',
+            `source` varchar(40) NOT NULL DEFAULT '',
+            `status` varchar(20) NOT NULL DEFAULT 'pending',
+            `date_from` varchar(10) NOT NULL DEFAULT '',
+            `date_to` varchar(10) NOT NULL DEFAULT '',
+            `total_count` int unsigned NOT NULL DEFAULT 0,
+            `processed_count` int unsigned NOT NULL DEFAULT 0,
+            `success_count` int unsigned NOT NULL DEFAULT 0,
+            `failed_count` int unsigned NOT NULL DEFAULT 0,
+            `attempts` int unsigned NOT NULL DEFAULT 0,
+            `next_retry` int unsigned NOT NULL DEFAULT 0,
+            `locked_at` int unsigned NOT NULL DEFAULT 0,
+            `started_at` int unsigned NOT NULL DEFAULT 0,
+            `finished_at` int unsigned NOT NULL DEFAULT 0,
+            `message` text,
+            `raw_payload` mediumtext,
+            `created_at` int unsigned NOT NULL DEFAULT 0,
+            `updated_at` int unsigned NOT NULL DEFAULT 0,
+            PRIMARY KEY (`id`),
+            KEY `idx_attendance_job_retry` (`status`, `next_retry`, `id`),
+            KEY `idx_attendance_job_type` (`job_type`, `status`, `created_at`),
+            KEY `idx_attendance_job_locked` (`locked_at`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4", $errors);
 
         self::exec("CREATE TABLE IF NOT EXISTS `feishu_event_log` (

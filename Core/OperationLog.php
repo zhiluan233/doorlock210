@@ -15,6 +15,7 @@ class OperationLog {
         'home' => '首页',
         'admininfo' => '用户信息',
         'dashboard' => '数据大屏',
+        'attendance' => '考勤管理',
         'submitcard' => '发卡管理',
         'learner' => '学员管理',
         'deviceopt' => '设备管理',
@@ -169,6 +170,10 @@ class OperationLog {
             'setDeviceLocalCard' => '切换端侧卡库',
             'syncDeviceCards' => '同步端侧卡库',
             'syncFeishuMember' => '同步飞书通讯录',
+            'syncAttendanceFlows' => '同步飞书考勤流水',
+            'syncAttendanceGroups' => '同步飞书考勤组',
+            'exportAttendanceReports' => '导出考勤日报',
+            'attendanceTrace' => '查看考勤溯源',
             'editPassPermission' => '修改通行权限',
             'saveSystemSettings' => '保存系统设置',
             'remoteOpenDoor' => '远程开门',
@@ -261,6 +266,19 @@ class OperationLog {
                 break;
             case 'syncFeishuMember':
                 $descriptor['detail'] = '手动同步飞书通讯录';
+                break;
+            case 'syncAttendanceFlows':
+                $descriptor['detail'] = '手动同步飞书考勤流水：' . self::limit((string)($_POST['date_from'] ?? ''), 10) . ' 至 ' . self::limit((string)($_POST['date_to'] ?? ''), 10);
+                break;
+            case 'syncAttendanceGroups':
+                $descriptor['detail'] = '手动同步飞书考勤组';
+                break;
+            case 'exportAttendanceReports':
+                $descriptor['detail'] = '导出考勤日报：' . self::limit((string)($_POST['date_from'] ?? ''), 10) . ' 至 ' . self::limit((string)($_POST['date_to'] ?? ''), 10);
+                break;
+            case 'attendanceTrace':
+                $descriptor = self::withTarget($descriptor, 'attendance_report', $_POST['report_id'] ?? '', $_POST['report_id'] ?? '');
+                $descriptor['detail'] = '查看考勤溯源：日报#' . self::limit((string)($_POST['report_id'] ?? ''), 32);
                 break;
             case 'saveSystemSettings':
                 $descriptor['detail'] = '保存系统设置';

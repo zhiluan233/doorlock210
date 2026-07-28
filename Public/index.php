@@ -85,5 +85,6 @@ if (!(isset($_GET['action']) && $_GET['action'] === 'api')) {
 //页面渲染类与路由中间件
 include(ROOT . "/Core/Pages.php");
 include(ROOT . "/Middleware/Class.Attendance.php");
+include(ROOT . "/Middleware/Class.AttendanceModule.php");
 include(ROOT . "/Core/DeviceCardSync.php");
 include(ROOT . "/Middleware/Class.Router.php");

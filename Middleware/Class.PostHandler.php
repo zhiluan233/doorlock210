@@ -791,6 +791,61 @@ class PostHandler {
 						exit("你没有足够的权限这么做");
 					}
 				break;
+				case "syncAttendanceFlows":
+					$this->requireAdminUser();
+					Header("Content-Type: application/json; charset=utf-8");
+					if (!class_exists(__NAMESPACE__ . '\\AttendanceModuleService')) {
+						Header("HTTP/1.1 500 Internal Error");
+						exit(json_encode(['ok' => false, 'message' => '考勤模块未加载'], JSON_UNESCAPED_UNICODE));
+					}
+					$result = AttendanceModuleService::enqueueManualFullSync($_POST['date_from'] ?? date('Y-m-d'), $_POST['date_to'] ?? date('Y-m-d'), 'manual_panel');
+					if (!empty($result['ok'])) {
+						exit(json_encode($result, JSON_UNESCAPED_UNICODE));
+					}
+					Header("HTTP/1.1 400 Bad Request");
+					exit(json_encode($result, JSON_UNESCAPED_UNICODE));
+				break;
+				case "syncAttendanceGroups":
+					$this->requireAdminUser();
+					Header("Content-Type: application/json; charset=utf-8");
+					if (!class_exists(__NAMESPACE__ . '\\AttendanceModuleService')) {
+						Header("HTTP/1.1 500 Internal Error");
+						exit(json_encode(['ok' => false, 'message' => '考勤模块未加载'], JSON_UNESCAPED_UNICODE));
+					}
+					$result = AttendanceModuleService::enqueueGroupSync('manual_panel');
+					if (!empty($result['ok'])) {
+						exit(json_encode($result, JSON_UNESCAPED_UNICODE));
+					}
+					Header("HTTP/1.1 400 Bad Request");
+					exit(json_encode($result, JSON_UNESCAPED_UNICODE));
+				break;
+				case "exportAttendanceReports":
+					$this->requirePanelReader();
+					if (!class_exists(__NAMESPACE__ . '\\AttendanceModuleService')) {
+						Header("HTTP/1.1 500 Internal Error");
+						exit("考勤模块未加载");
+					}
+					$filters = [
+						'date_from' => $_POST['date_from'] ?? date('Y-m-d'),
+						'date_to' => $_POST['date_to'] ?? date('Y-m-d'),
+						'status' => $_POST['status'] ?? 'all',
+						'keyword' => $_POST['q'] ?? ''
+					];
+					$filename = 'attendance-' . date('Ymd-His') . '.xls';
+					Header("Content-Type: application/vnd.ms-excel; charset=UTF-8");
+					Header("Content-Disposition: attachment; filename=\"{$filename}\"");
+					exit(AttendanceModuleService::exportReportsXml($filters));
+				break;
+				case "attendanceTrace":
+					$this->requirePanelReader();
+					Header("Content-Type: application/json; charset=utf-8");
+					if (!class_exists(__NAMESPACE__ . '\\AttendanceModuleService')) {
+						Header("HTTP/1.1 500 Internal Error");
+						exit(json_encode(['ok' => false, 'message' => '考勤模块未加载'], JSON_UNESCAPED_UNICODE));
+					}
+					$result = AttendanceModuleService::sourceRecordsForReport(intval($_POST['report_id'] ?? 0));
+					exit(json_encode(['ok' => true, 'data' => $result], JSON_UNESCAPED_UNICODE));
+				break;
 				case "editPassPermission":
 					$um = new anim210System\UserCheck();
 					if($um->isLogged()) {
@@ -892,6 +947,10 @@ class PostHandler {
 							'feishu_attendance_enabled', 'card_as_attendance_enabled', 'feishu_attendance_mode',
 							'feishu_employee_id_type', 'feishu_attendance_batch_size', 'feishu_attendance_cron_max_batches', 'feishu_attendance_batch_interval_ms',
 							'feishu_message_enabled', 'feishu_message_template', 'feishu_message_card_template', 'feishu_message_batch_size',
+							'attendance_module_enabled', 'attendance_pair_interval_seconds', 'attendance_late_grace_seconds',
+							'attendance_default_group_name', 'attendance_default_start_time', 'attendance_default_end_time', 'attendance_exempt_location_prefixes',
+							'attendance_full_sync_enabled', 'attendance_full_sync_times', 'attendance_full_sync_window_days', 'attendance_full_sync_batch_size',
+							'attendance_recalculate_batch_size', 'attendance_oa_push_enabled', 'attendance_oa_push_path', 'attendance_oa_batch_size', 'attendance_export_fields',
 							'feishu_event_enabled',
 							'feishu_contact_sync_enabled', 'feishu_contact_sync_daily_time', 'feishu_contact_sync_release_missing',
 							'feishu_oauth_enabled', 'feishu_oauth_redirect_uri', 'feishu_oauth_scope', 'feishu_oauth_prompt',
@@ -905,7 +964,7 @@ class PostHandler {
 								$data[$key] = $_POST[$key];
 							}
 						}
-						foreach (['oa_attendance_enabled','feishu_attendance_enabled','card_as_attendance_enabled','feishu_message_enabled','feishu_event_enabled','feishu_contact_sync_enabled','feishu_contact_sync_release_missing','feishu_oauth_enabled','remote_open_enabled'] as $boolKey) {
+						foreach (['oa_attendance_enabled','feishu_attendance_enabled','card_as_attendance_enabled','feishu_message_enabled','attendance_module_enabled','attendance_full_sync_enabled','attendance_oa_push_enabled','feishu_event_enabled','feishu_contact_sync_enabled','feishu_contact_sync_release_missing','feishu_oauth_enabled','remote_open_enabled'] as $boolKey) {
 							if (!isset($data[$boolKey])) {
 								$data[$boolKey] = 'false';
 							}
@@ -922,6 +981,22 @@ class PostHandler {
 							Header("HTTP/1.1 400 Bad Request");
 							exit("飞书授权确认参数不合法");
 						}
+						foreach (['attendance_default_start_time' => '默认上班时间', 'attendance_default_end_time' => '默认下班时间'] as $timeKey => $timeName) {
+							if (isset($data[$timeKey]) && !preg_match('/^\d{2}:\d{2}$/', $data[$timeKey])) {
+								Header("HTTP/1.1 400 Bad Request");
+								exit($timeName . "格式应为 HH:MM");
+							}
+						}
+						if (isset($data['attendance_full_sync_times'])) {
+							$parts = preg_split('/[,\n;\s]+/', (string)$data['attendance_full_sync_times']);
+							foreach ($parts as $part) {
+								$part = trim($part);
+								if ($part !== '' && !preg_match('/^\d{2}:\d{2}$/', $part)) {
+									Header("HTTP/1.1 400 Bad Request");
+									exit("考勤全量同步时间格式应为 HH:MM，可用逗号或换行分隔");
+								}
+							}
+						}
 						if (isset($data['remote_open_method'])) {
 							$data['remote_open_method'] = strtoupper($data['remote_open_method']);
 							if (!in_array($data['remote_open_method'], ['GET', 'POST'], true)) {
@@ -933,6 +1008,12 @@ class PostHandler {
 							'feishu_attendance_batch_size' => [1, 50, '飞书考勤单批条数应为 1-50'],
 							'feishu_attendance_cron_max_batches' => [1, 100, '飞书考勤每轮批次应为 1-100'],
 							'feishu_attendance_batch_interval_ms' => [0, 2000, '飞书考勤批次间隔应为 0-2000 毫秒'],
+							'attendance_pair_interval_seconds' => [60, 3600, '有效考勤配对间隔应为 60-3600 秒'],
+							'attendance_late_grace_seconds' => [0, 3600, '迟到宽限秒数应为 0-3600 秒'],
+							'attendance_full_sync_window_days' => [1, 31, '考勤全量同步窗口应为 1-31 天'],
+							'attendance_full_sync_batch_size' => [1, 50, '考勤全量同步单批员工数应为 1-50'],
+							'attendance_recalculate_batch_size' => [50, 500, '考勤日报重算单批人数应为 50-500'],
+							'attendance_oa_batch_size' => [1, 500, '考勤 AMT 推送批量应为 1-500'],
 							'remote_open_timeout' => [1, 30, '远程开门超时秒数应为 1-30'],
 							'device_card_sync_batch_size' => [1, 1000, '端侧卡库单轮下发条数应为 1-1000'],
 							'device_card_sync_interval_ms' => [0, 2000, '端侧卡库下发间隔应为 0-2000 毫秒'],
@@ -1468,6 +1549,22 @@ class PostHandler {
 		anim210System\Utils::checkCsrf();
 		$us = $um->getInfoByUser($_SESSION['user']);
 		if(!$us || $us['type'] !== "admin") {
+			Header("HTTP/1.1 403 Forbidden");
+			exit("你没有足够的权限这么做");
+		}
+		return $us;
+	}
+
+	private function requirePanelReader()
+	{
+		$um = new anim210System\UserCheck();
+		if(!$um->isLogged()) {
+			Header("HTTP/1.1 403 Forbidden");
+			exit("登录会话已超时，请重新登录");
+		}
+		anim210System\Utils::checkCsrf();
+		$us = $um->getInfoByUser($_SESSION['user']);
+		if(!$us || !in_array($us['type'] ?? '', ['admin', 'readonly'], true)) {
 			Header("HTTP/1.1 403 Forbidden");
 			exit("你没有足够的权限这么做");
 		}

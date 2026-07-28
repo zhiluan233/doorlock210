@@ -210,8 +210,9 @@ class AttendanceService {
         $needOa = Settings::getBool('oa_attendance_enabled');
         $needFeishu = Settings::getBool('feishu_attendance_enabled') && Settings::getBool('card_as_attendance_enabled');
         $needMessage = Settings::getBool('feishu_message_enabled');
+        $needAttendanceModule = class_exists(__NAMESPACE__ . '\\AttendanceModuleService') && AttendanceModuleService::enabled();
 
-        if (!$needOa && !$needFeishu && !$needMessage) {
+        if (!$needOa && !$needFeishu && !$needMessage && !$needAttendanceModule) {
             return '';
         }
 
@@ -264,6 +265,9 @@ class AttendanceService {
 
         $sql = "INSERT IGNORE INTO `attendance_queue` (" . implode(',', $columns) . ") VALUES (" . implode(',', $values) . ")";
         mysqli_query($conn, $sql);
+        if ($needAttendanceModule) {
+            AttendanceModuleService::ingestBadgeSwipe($employeeInfo, $deviceInfo, $cardId, $eventTime, $eventHash);
+        }
         if ($needMessage) {
             self::scheduleAsyncMessage($eventHash);
         }
@@ -744,6 +748,11 @@ class AttendanceService {
             $location = '公司门禁';
         }
         return strpos($location, '工牌-') === 0 ? $location : '工牌-' . $location;
+    }
+
+    public static function externalAttendanceLocationForModule($row)
+    {
+        return self::externalAttendanceLocation($row);
     }
 
     private static function attendanceFlowComment()

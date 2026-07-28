@@ -292,6 +292,151 @@ class appLinkFeishu {
         return ['ok' => false, 'message' => json_encode($data, JSON_UNESCAPED_UNICODE)];
     }
 
+    public function queryAttendanceUserFlows($userIds, $checkTimeFrom, $checkTimeTo) {
+        $tenantToken = $this->getTenantAccessToken();
+        if ($tenantToken === '') {
+            return ['ok' => false, 'message' => '无法获取 tenant_access_token'];
+        }
+        $endpoint = $this->endpoint('attendanceUserFlowsQuery');
+        if ($endpoint === '') {
+            return ['ok' => false, 'message' => '飞书 attendanceUserFlowsQuery endpoint 未在 config.php 中配置'];
+        }
+        $employeeType = Settings::get('feishu_employee_id_type', 'employee_no');
+        if (!in_array($employeeType, ['employee_id', 'employee_no'], true)) {
+            $employeeType = 'employee_no';
+        }
+        $url = $this->appendQuery($endpoint, [
+            'employee_type' => $employeeType,
+            'include_terminated_user' => 'true'
+        ]);
+        $body = [
+            'user_ids' => array_values(array_filter(array_map('strval', is_array($userIds) ? $userIds : []))),
+            'check_time_from' => (string)intval($checkTimeFrom),
+            'check_time_to' => (string)intval($checkTimeTo)
+        ];
+        $data = $this->requestFeishu($url, 'POST', $tenantToken, $body, 15, 2);
+        if (($data['status_code'] ?? 0) >= 200 && ($data['status_code'] ?? 0) < 300 && intval($data['response']['code'] ?? -1) === 0) {
+            return ['ok' => true, 'data' => $data['response']['data'] ?? []];
+        }
+        return ['ok' => false, 'message' => json_encode($data, JSON_UNESCAPED_UNICODE)];
+    }
+
+    public function getAttendanceUserFlow($flowId) {
+        $tenantToken = $this->getTenantAccessToken();
+        if ($tenantToken === '') {
+            return ['ok' => false, 'message' => '无法获取 tenant_access_token'];
+        }
+        $endpoint = $this->endpoint('attendanceUserFlowGet');
+        if ($endpoint === '') {
+            return ['ok' => false, 'message' => '飞书 attendanceUserFlowGet endpoint 未在 config.php 中配置'];
+        }
+        $flowId = rawurlencode(trim((string)$flowId));
+        $url = strpos($endpoint, '{user_flow_id}') !== false ? str_replace('{user_flow_id}', $flowId, $endpoint) : rtrim($endpoint, '/') . '/' . $flowId;
+        $employeeType = Settings::get('feishu_employee_id_type', 'employee_no');
+        if (!in_array($employeeType, ['employee_id', 'employee_no'], true)) {
+            $employeeType = 'employee_no';
+        }
+        $url = $this->appendQuery($url, ['employee_type' => $employeeType]);
+        $data = $this->requestFeishu($url, 'GET', $tenantToken, null, 10, 2);
+        if (($data['status_code'] ?? 0) >= 200 && ($data['status_code'] ?? 0) < 300 && intval($data['response']['code'] ?? -1) === 0) {
+            return ['ok' => true, 'data' => $data['response']['data'] ?? []];
+        }
+        return ['ok' => false, 'message' => json_encode($data, JSON_UNESCAPED_UNICODE)];
+    }
+
+    public function listAttendanceGroups() {
+        $tenantToken = $this->getTenantAccessToken();
+        if ($tenantToken === '') {
+            return ['ok' => false, 'message' => '无法获取 tenant_access_token'];
+        }
+        $endpoint = $this->endpoint('attendanceGroupsList');
+        if ($endpoint === '') {
+            return ['ok' => false, 'message' => '飞书 attendanceGroupsList endpoint 未在 config.php 中配置'];
+        }
+        $groups = [];
+        $pageToken = '';
+        do {
+            $url = $this->appendQuery($endpoint, [
+                'page_size' => 50,
+                'page_token' => $pageToken
+            ]);
+            $data = $this->requestFeishu($url, 'GET', $tenantToken, null, 10, 2);
+            if (($data['status_code'] ?? 0) < 200 || ($data['status_code'] ?? 0) >= 300 || intval($data['response']['code'] ?? -1) !== 0) {
+                return ['ok' => false, 'message' => json_encode($data, JSON_UNESCAPED_UNICODE)];
+            }
+            $respData = $data['response']['data'] ?? [];
+            foreach (($respData['group_list'] ?? []) as $group) {
+                if (is_array($group)) {
+                    $groups[] = $group;
+                }
+            }
+            $pageToken = (string)($respData['page_token'] ?? '');
+            $hasMore = !empty($respData['has_more']);
+        } while ($hasMore && $pageToken !== '');
+
+        return ['ok' => true, 'data' => ['group_list' => $groups]];
+    }
+
+    public function getAttendanceGroup($groupId) {
+        $tenantToken = $this->getTenantAccessToken();
+        if ($tenantToken === '') {
+            return ['ok' => false, 'message' => '无法获取 tenant_access_token'];
+        }
+        $endpoint = $this->endpoint('attendanceGroupGet');
+        if ($endpoint === '') {
+            return ['ok' => false, 'message' => '飞书 attendanceGroupGet endpoint 未在 config.php 中配置'];
+        }
+        $groupId = rawurlencode(trim((string)$groupId));
+        $url = strpos($endpoint, '{group_id}') !== false ? str_replace('{group_id}', $groupId, $endpoint) : rtrim($endpoint, '/') . '/' . $groupId;
+        $url = $this->appendQuery($url, [
+            'employee_type' => Settings::get('feishu_employee_id_type', 'employee_no'),
+            'dept_type' => 'open_id'
+        ]);
+        $data = $this->requestFeishu($url, 'GET', $tenantToken, null, 10, 2);
+        if (($data['status_code'] ?? 0) >= 200 && ($data['status_code'] ?? 0) < 300 && intval($data['response']['code'] ?? -1) === 0) {
+            return ['ok' => true, 'data' => $data['response']['data'] ?? []];
+        }
+        return ['ok' => false, 'message' => json_encode($data, JSON_UNESCAPED_UNICODE)];
+    }
+
+    public function listAttendanceGroupUsers($groupId) {
+        $tenantToken = $this->getTenantAccessToken();
+        if ($tenantToken === '') {
+            return ['ok' => false, 'message' => '无法获取 tenant_access_token'];
+        }
+        $endpoint = $this->endpoint('attendanceGroupListUser');
+        if ($endpoint === '') {
+            return ['ok' => false, 'message' => '飞书 attendanceGroupListUser endpoint 未在 config.php 中配置'];
+        }
+        $groupId = rawurlencode(trim((string)$groupId));
+        $baseUrl = strpos($endpoint, '{group_id}') !== false ? str_replace('{group_id}', $groupId, $endpoint) : rtrim($endpoint, '/') . '/' . $groupId . '/list_user';
+        $users = [];
+        $pageToken = '';
+        do {
+            $url = $this->appendQuery($baseUrl, [
+                'employee_type' => Settings::get('feishu_employee_id_type', 'employee_no'),
+                'dept_type' => 'open_id',
+                'member_clock_type' => 0,
+                'page_size' => 50,
+                'page_token' => $pageToken
+            ]);
+            $data = $this->requestFeishu($url, 'GET', $tenantToken, null, 10, 2);
+            if (($data['status_code'] ?? 0) < 200 || ($data['status_code'] ?? 0) >= 300 || intval($data['response']['code'] ?? -1) !== 0) {
+                return ['ok' => false, 'message' => json_encode($data, JSON_UNESCAPED_UNICODE)];
+            }
+            $respData = $data['response']['data'] ?? [];
+            foreach (($respData['users'] ?? []) as $user) {
+                if (is_array($user)) {
+                    $users[] = $user;
+                }
+            }
+            $pageToken = (string)($respData['page_token'] ?? '');
+            $hasMore = !empty($respData['has_more']);
+        } while ($hasMore && $pageToken !== '');
+
+        return ['ok' => true, 'data' => ['users' => $users]];
+    }
+
     private function fetchDepartments(&$allDepartments, $pageToken = null) {
         $token = $this->getTenantAccessToken();
         if ($token === '') {
@@ -578,6 +723,20 @@ class appLinkFeishu {
         $params = [];
         parse_str($query, $params);
         return isset($params[$key]) ? (string)$params[$key] : '';
+    }
+
+    private function appendQuery($url, $params) {
+        $pairs = [];
+        foreach ($params as $key => $value) {
+            if ($value === null || $value === '') {
+                continue;
+            }
+            $pairs[] = rawurlencode((string)$key) . '=' . rawurlencode((string)$value);
+        }
+        if (count($pairs) === 0) {
+            return $url;
+        }
+        return $url . (strpos($url, '?') === false ? '?' : '&') . implode('&', $pairs);
     }
 
     private function extractRealName($item) {
@@ -885,7 +1044,12 @@ class appLinkFeishu {
             'oauthAuthorize' => 'https://accounts.feishu.cn/open-apis/authen/v1/authorize',
             'getUserAccessTokenV3' => 'https://accounts.feishu.cn/oauth/v3/token',
             'getJsSdkTicket' => 'https://open.feishu.cn/open-apis/jssdk/ticket/get',
-            'batchCreateAttendanceFlow' => 'https://open.feishu.cn/open-apis/attendance/v1/user_flows/batch_create'
+            'batchCreateAttendanceFlow' => 'https://open.feishu.cn/open-apis/attendance/v1/user_flows/batch_create',
+            'attendanceUserFlowsQuery' => 'https://open.feishu.cn/open-apis/attendance/v1/user_flows/query',
+            'attendanceUserFlowGet' => 'https://open.feishu.cn/open-apis/attendance/v1/user_flows/{user_flow_id}',
+            'attendanceGroupsList' => 'https://open.feishu.cn/open-apis/attendance/v1/groups',
+            'attendanceGroupGet' => 'https://open.feishu.cn/open-apis/attendance/v1/groups/{group_id}',
+            'attendanceGroupListUser' => 'https://open.feishu.cn/open-apis/attendance/v1/groups/{group_id}/list_user'
         ];
         return $defaults[$key] ?? '';
     }
