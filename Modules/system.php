@@ -86,7 +86,7 @@ function settingValue($key) {
 						<hr>
 						<div class="layui-row layui-col-space20">
 							<div class="layui-col-md6">
-								<h5>P0考勤模块</h5>
+								<h5>考勤模块</h5>
 								<div class="layui-form-item"><label class="layui-form-label">启用模块</label><div class="layui-input-block"><input type="checkbox" name="attendance_module_enabled" value="true" lay-skin="switch" <?php echo checked('attendance_module_enabled'); ?>></div></div>
 								<div class="layui-form-item"><label class="layui-form-label">配对间隔秒</label><div class="layui-input-block"><input class="layui-input" name="attendance_pair_interval_seconds" value="<?php echo settingValue('attendance_pair_interval_seconds'); ?>" placeholder="默认300"></div></div>
 								<div class="layui-form-item"><label class="layui-form-label">迟到宽限秒</label><div class="layui-input-block"><input class="layui-input" name="attendance_late_grace_seconds" value="<?php echo settingValue('attendance_late_grace_seconds'); ?>" placeholder="默认60"></div></div>
