@@ -399,6 +399,53 @@ class appLinkFeishu {
         return ['ok' => false, 'message' => json_encode($data, JSON_UNESCAPED_UNICODE)];
     }
 
+    public function getAttendanceShift($shiftId) {
+        $tenantToken = $this->getTenantAccessToken();
+        if ($tenantToken === '') {
+            return ['ok' => false, 'message' => '无法获取 tenant_access_token'];
+        }
+        $endpoint = $this->endpoint('attendanceShiftGet');
+        if ($endpoint === '') {
+            return ['ok' => false, 'message' => '飞书 attendanceShiftGet endpoint 未在 config.php 中配置'];
+        }
+        $shiftId = rawurlencode(trim((string)$shiftId));
+        $url = strpos($endpoint, '{shift_id}') !== false ? str_replace('{shift_id}', $shiftId, $endpoint) : rtrim($endpoint, '/') . '/' . $shiftId;
+        $data = $this->requestFeishu($url, 'GET', $tenantToken, null, 10, 2);
+        if (($data['status_code'] ?? 0) >= 200 && ($data['status_code'] ?? 0) < 300 && intval($data['response']['code'] ?? -1) === 0) {
+            return ['ok' => true, 'data' => $data['response']['data'] ?? []];
+        }
+        return ['ok' => false, 'message' => json_encode($data, JSON_UNESCAPED_UNICODE)];
+    }
+
+    public function queryAttendanceUserDailyShifts($userIds, $dateFrom, $dateTo) {
+        $tenantToken = $this->getTenantAccessToken();
+        if ($tenantToken === '') {
+            return ['ok' => false, 'message' => '无法获取 tenant_access_token'];
+        }
+        $endpoint = $this->endpoint('attendanceUserDailyShiftsQuery');
+        if ($endpoint === '') {
+            return ['ok' => false, 'message' => '飞书 attendanceUserDailyShiftsQuery endpoint 未在 config.php 中配置'];
+        }
+        $employeeType = Settings::get('feishu_employee_id_type', 'employee_no');
+        if (!in_array($employeeType, ['employee_id', 'employee_no'], true)) {
+            $employeeType = 'employee_no';
+        }
+        $userIds = array_values(array_filter(array_map('strval', is_array($userIds) ? $userIds : [])));
+        $from = intval(date('Ymd', strtotime((string)$dateFrom)));
+        $to = intval(date('Ymd', strtotime((string)$dateTo)));
+        $url = $this->appendQuery($endpoint, ['employee_type' => $employeeType]);
+        $body = [
+            'user_ids' => $userIds,
+            'check_date_from' => $from,
+            'check_date_to' => $to
+        ];
+        $data = $this->requestFeishu($url, 'POST', $tenantToken, $body, 15, 2);
+        if (($data['status_code'] ?? 0) >= 200 && ($data['status_code'] ?? 0) < 300 && intval($data['response']['code'] ?? -1) === 0) {
+            return ['ok' => true, 'data' => $data['response']['data'] ?? []];
+        }
+        return ['ok' => false, 'message' => json_encode($data, JSON_UNESCAPED_UNICODE)];
+    }
+
     public function listAttendanceGroupUsers($groupId) {
         $tenantToken = $this->getTenantAccessToken();
         if ($tenantToken === '') {
@@ -1049,6 +1096,8 @@ class appLinkFeishu {
             'attendanceUserFlowGet' => 'https://open.feishu.cn/open-apis/attendance/v1/user_flows/{user_flow_id}',
             'attendanceGroupsList' => 'https://open.feishu.cn/open-apis/attendance/v1/groups',
             'attendanceGroupGet' => 'https://open.feishu.cn/open-apis/attendance/v1/groups/{group_id}',
+            'attendanceShiftGet' => 'https://open.feishu.cn/open-apis/attendance/v1/shifts/{shift_id}',
+            'attendanceUserDailyShiftsQuery' => 'https://open.feishu.cn/open-apis/attendance/v1/user_daily_shifts/query',
             'attendanceGroupListUser' => 'https://open.feishu.cn/open-apis/attendance/v1/groups/{group_id}/list_user'
         ];
         return $defaults[$key] ?? '';

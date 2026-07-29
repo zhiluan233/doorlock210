@@ -541,6 +541,10 @@ class AttendanceModuleService {
         $from = strtotime($dateCursor . ' 00:00:00');
         $to = strtotime($dateCursor . ' 23:59:59') + 1;
         $feishu = new appLinkFeishu(true);
+        $scheduleResp = self::syncDailySchedulesForUsers($feishu, $batch, $dateCursor, $dateCursor);
+        if (empty($scheduleResp['ok'])) {
+            return ['ok' => false, 'message' => $scheduleResp['message'] ?? '查询飞书每日班表失败'];
+        }
         $resp = $feishu->queryAttendanceUserFlows($batch, $from, $to);
         if (empty($resp['ok'])) {
             return ['ok' => false, 'message' => $resp['message'] ?? '查询飞书打卡流水失败'];
@@ -566,6 +570,7 @@ class AttendanceModuleService {
         }
         $payload['offset'] = $offset + count($batch);
         $payload['fetched'] = intval($payload['fetched'] ?? 0) + $count;
+        $payload['daily_schedules'] = intval($payload['daily_schedules'] ?? 0) + intval($scheduleResp['count'] ?? 0);
         self::updateJob(intval($job['id']), [
             'total_count' => count($userIds),
             'processed_count' => min(count($userIds), $payload['offset']),
@@ -688,6 +693,7 @@ class AttendanceModuleService {
             }
             $detailResp = $feishu->getAttendanceGroup($groupId);
             $detail = !empty($detailResp['ok']) && is_array($detailResp['data'] ?? null) ? ($detailResp['data']['group'] ?? $detailResp['data']) : $group;
+            $detail = self::hydrateAttendanceGroupShifts($feishu, $detail);
             $localGroupId = self::upsertAttendanceGroup($groupId, $detail);
             if ($localGroupId > 0) {
                 $usersResp = $feishu->listAttendanceGroupUsers($groupId);
@@ -699,6 +705,9 @@ class AttendanceModuleService {
             usleep(50000);
         }
         Settings::set('attendance_last_group_sync_at', (string)time());
+        if ($count > 0) {
+            self::enqueueJob('recalculate_date', 'group_sync_done', date('Y-m-d'), date('Y-m-d'), ['offset' => 0]);
+        }
         return ['ok' => true, 'done' => true, 'message' => '飞书考勤组同步完成：' . $count . ' 个'];
     }
 
@@ -1182,6 +1191,9 @@ class AttendanceModuleService {
         if (!$employee) {
             $employee = self::employeeByPersonKey($personKey);
         }
+        if ($notify && $employee) {
+            self::ensureDailyScheduleForEmployeeDate($employee, $date);
+        }
 
         $safePerson = Database::escape($personKey);
         $safeDate = Database::escape($date);
@@ -1229,7 +1241,7 @@ class AttendanceModuleService {
             return intval($a['effective_time']) <=> intval($b['effective_time']);
         });
 
-        $group = self::groupForEmployee($employee, $personKey);
+        $group = self::groupForEmployee($employee, $personKey, $date);
         $rule = self::ruleSnapshot($group, $interval);
         $invalidStats = self::invalidAttendanceStats($badges, $faces, $pairs, $group, $date, $interval);
         $sequence = 0;
@@ -1289,12 +1301,32 @@ class AttendanceModuleService {
 
     private static function invalidAttendanceStats($badges, $faces, $pairs, $group, $date, $interval)
     {
+        if (array_key_exists('need_punch', $group) && intval($group['need_punch']) === 0) {
+            return [
+                'invalid_badge_count' => count($badges),
+                'invalid_face_count' => count($faces),
+                'invalid_total' => count($badges) + count($faces),
+                'work_start_valid' => 0,
+                'work_end_valid' => 0,
+                'is_late' => 0,
+                'is_early_leave' => 0,
+                'is_full_absent' => 0,
+                'invalid_late_count' => 0,
+                'invalid_early_leave_count' => 0,
+                'invalid_late_face_count' => 0,
+                'invalid_late_badge_count' => 0,
+                'invalid_early_leave_face_count' => 0,
+                'invalid_early_leave_badge_count' => 0,
+                'invalid_late_related' => 0,
+                'invalid_early_leave_related' => 0
+            ];
+        }
         $first = count($pairs) > 0 ? intval($pairs[0]['effective_time']) : 0;
         $last = count($pairs) > 0 ? intval($pairs[count($pairs) - 1]['effective_time']) : 0;
         $startText = $group['start_time'] ?? Settings::get('attendance_default_start_time', '09:30');
         $endText = $group['end_time'] ?? Settings::get('attendance_default_end_time', '18:30');
-        $scheduledStart = strtotime($date . ' ' . $startText . ':00');
-        $scheduledEnd = strtotime($date . ' ' . $endText . ':00');
+        $scheduledStart = self::scheduledTimestamp($date, $startText);
+        $scheduledEnd = self::scheduledTimestamp($date, $endText);
         $grace = max(0, min(3600, Settings::getInt('attendance_late_grace_seconds', 60)));
         $now = time();
 
@@ -1648,13 +1680,16 @@ class AttendanceModuleService {
     {
         $personKey = self::personKeyFromRecord($row);
         $employee = self::employeeByPersonKey($personKey);
-        $group = self::groupForEmployee($employee, $personKey);
         $punchTime = intval($row['punch_time'] ?? 0);
         $date = date('Y-m-d', $punchTime > 0 ? $punchTime : time());
+        $group = self::groupForEmployee($employee, $personKey, $date);
+        if (array_key_exists('need_punch', $group) && intval($group['need_punch']) === 0) {
+            return null;
+        }
         $startText = $group['start_time'] ?? Settings::get('attendance_default_start_time', '09:30');
         $endText = $group['end_time'] ?? Settings::get('attendance_default_end_time', '18:30');
-        $scheduledStart = strtotime($date . ' ' . $startText . ':00');
-        $scheduledEnd = strtotime($date . ' ' . $endText . ':00');
+        $scheduledStart = self::scheduledTimestamp($date, $startText);
+        $scheduledEnd = self::scheduledTimestamp($date, $endText);
         $phase = '';
         if ($scheduledStart > 0 && $punchTime <= $scheduledStart) {
             $phase = '上班';
@@ -1900,8 +1935,8 @@ class AttendanceModuleService {
         $last = count($pairs) > 0 ? intval($pairs[count($pairs) - 1]['effective_time']) : 0;
         $startText = $group['start_time'] ?? Settings::get('attendance_default_start_time', '09:30');
         $endText = $group['end_time'] ?? Settings::get('attendance_default_end_time', '18:30');
-        $scheduledStart = strtotime($date . ' ' . $startText . ':00');
-        $scheduledEnd = strtotime($date . ' ' . $endText . ':00');
+        $scheduledStart = self::scheduledTimestamp($date, $startText);
+        $scheduledEnd = self::scheduledTimestamp($date, $endText);
         $grace = max(0, min(3600, Settings::getInt('attendance_late_grace_seconds', 60)));
         $now = time();
         $lateMinutes = 0;
@@ -1910,11 +1945,21 @@ class AttendanceModuleService {
         $isLate = intval($invalidStats['is_late'] ?? (($first > 0 && $scheduledStart > 0 && $first > $scheduledStart + $grace) ? 1 : 0));
         $isEarlyLeave = intval($invalidStats['is_early_leave'] ?? (($first > 0 && $scheduledEnd > 0 && $now > $scheduledEnd && $last < $scheduledEnd) ? 1 : 0));
         $isFullAbsent = intval($invalidStats['is_full_absent'] ?? (($first <= 0 && intval($invalidStats['invalid_total'] ?? 0) === 0) ? 1 : 0));
+        $needPunch = !array_key_exists('need_punch', $group) || intval($group['need_punch']) === 1;
+        if (!$needPunch) {
+            $scheduledStart = 0;
+            $scheduledEnd = 0;
+            $workStartValid = 0;
+            $workEndValid = 0;
+            $isLate = 0;
+            $isEarlyLeave = 0;
+            $isFullAbsent = 0;
+        }
         if ($isLate) {
             $lateMinutes = intval(ceil(($first - $scheduledStart) / 60));
         }
-        $status = self::legacyDailyStatus($first, $isLate, $isEarlyLeave);
-        $statusFields = self::dailyStatusFields($workStartValid, $workEndValid, $isLate, $isEarlyLeave, $isFullAbsent, $invalidStats);
+        $status = $needPunch ? self::legacyDailyStatus($first, $isLate, $isEarlyLeave) : 'no_need';
+        $statusFields = $needPunch ? self::dailyStatusFields($workStartValid, $workEndValid, $isLate, $isEarlyLeave, $isFullAbsent, $invalidStats) : ['no_need' => '无需考勤'];
         $statusFlags = implode(',', array_keys($statusFields));
         $statusText = implode('、', array_values($statusFields));
         $oaStatus = Settings::getBool('attendance_oa_push_enabled') ? 'pending' : 'skipped';
@@ -1959,6 +2004,12 @@ class AttendanceModuleService {
             'raw_trace' => json_encode([
                 'source_record_ids' => array_map(function($row) { return intval($row['id']); }, $records),
                 'feishu_badge_compare' => self::feishuBadgeComparison($records),
+                'daily_schedule' => [
+                    'need_punch' => $needPunch ? 1 : 0,
+                    'daily_schedule_id' => intval($group['daily_schedule_id'] ?? 0),
+                    'shift_id' => $group['shift_id'] ?? '',
+                    'shift_name' => $group['shift_name'] ?? ''
+                ],
                 'invalid_stats' => $invalidStats,
                 'pairs' => array_map(function($pair) {
                     return [
@@ -2319,8 +2370,315 @@ class AttendanceModuleService {
         Database::update('attendance_groups', ['member_count' => $count, 'updated_at' => time()], ['id' => $groupId]);
     }
 
-    private static function groupForEmployee($employee, $personKey)
+    private static function syncDailySchedulesForUsers($feishu, $userIds, $dateFrom, $dateTo)
     {
+        $userIds = array_values(array_filter(array_map('strval', is_array($userIds) ? $userIds : [])));
+        if (count($userIds) === 0) {
+            return ['ok' => true, 'count' => 0, 'message' => '没有可同步的每日班表人员'];
+        }
+        if (!method_exists($feishu, 'queryAttendanceUserDailyShifts')) {
+            return ['ok' => false, 'message' => '飞书每日班表接口未实现'];
+        }
+
+        $resp = $feishu->queryAttendanceUserDailyShifts($userIds, $dateFrom, $dateTo);
+        if (empty($resp['ok'])) {
+            return ['ok' => false, 'message' => $resp['message'] ?? '查询飞书每日班表失败'];
+        }
+        $rows = $resp['data']['user_daily_shifts'] ?? ($resp['data']['items'] ?? ($resp['data']['records'] ?? []));
+        if (!is_array($rows)) {
+            $rows = [];
+        }
+        $count = 0;
+        foreach ($rows as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            if (self::upsertDailySchedule($feishu, $row)) {
+                $count++;
+            }
+        }
+        Settings::set('attendance_last_daily_schedule_sync_at', (string)time());
+        return ['ok' => true, 'count' => $count, 'message' => '飞书每日班表同步完成：' . $count . ' 条'];
+    }
+
+    private static function ensureDailyScheduleForEmployeeDate($employee, $date)
+    {
+        $personKey = self::personKeyFromEmployee($employee);
+        if ($personKey === '' || self::dailyScheduleForPerson($personKey, $employee, $date)) {
+            return true;
+        }
+        $userId = self::feishuAttendanceUserIdFromEmployee($employee);
+        if ($userId === '') {
+            return false;
+        }
+        $feishu = new appLinkFeishu(true);
+        $resp = self::syncDailySchedulesForUsers($feishu, [$userId], $date, $date);
+        return !empty($resp['ok']);
+    }
+
+    private static function upsertDailySchedule($feishu, $row)
+    {
+        global $conn;
+
+        $workDate = self::dailyShiftWorkDate($row);
+        $userId = trim((string)($row['user_id'] ?? ($row['employee_id'] ?? ($row['employee_no'] ?? ''))));
+        if ($workDate === '' || $userId === '') {
+            return false;
+        }
+        $employeeType = Settings::get('feishu_employee_id_type', 'employee_no');
+        if (!in_array($employeeType, ['employee_id', 'employee_no'], true)) {
+            $employeeType = 'employee_no';
+        }
+        $employee = self::employeeByFeishuId($userId, $employeeType);
+        $personKey = $employee ? self::personKeyFromEmployee($employee) : ($employeeType === 'employee_id' ? 'user:' . $userId : 'no:' . $userId);
+        if ($personKey === '') {
+            return false;
+        }
+
+        $feishuGroupId = trim((string)($row['group_id'] ?? ''));
+        $shiftId = trim((string)($row['shift_id'] ?? ''));
+        $needPunch = (!self::isZeroFeishuId($feishuGroupId) || !self::isZeroFeishuId($shiftId)) ? 1 : 0;
+        $group = self::attendanceGroupByFeishuId($feishuGroupId);
+        $groupName = trim((string)($row['group_name'] ?? ($group['name'] ?? '')));
+        $shiftName = trim((string)($row['shift_name'] ?? ''));
+        $startTime = '';
+        $endTime = '';
+
+        if (!self::isZeroFeishuId($shiftId)) {
+            $shift = self::attendanceShiftByFeishuId($shiftId);
+            if (!$shift && method_exists($feishu, 'getAttendanceShift')) {
+                $resp = $feishu->getAttendanceShift($shiftId);
+                if (!empty($resp['ok']) && is_array($resp['data'] ?? null)) {
+                    $shiftData = $resp['data']['shift'] ?? $resp['data'];
+                    if (is_array($shiftData)) {
+                        $shiftData['shift_id'] = $shiftData['shift_id'] ?? $shiftId;
+                        self::upsertAttendanceShift($shiftId, $shiftData);
+                        $shift = self::attendanceShiftByFeishuId($shiftId);
+                    }
+                }
+            }
+            if ($shift) {
+                $shiftName = $shiftName !== '' ? $shiftName : ($shift['shift_name'] ?? '');
+                $startTime = self::normalizeTime($shift['start_time'] ?? '');
+                $endTime = self::normalizeTime($shift['end_time'] ?? '');
+            }
+        }
+
+        if ($needPunch === 1) {
+            if ($startTime === '') {
+                $startTime = self::timeTextFromValue($row['start_time'] ?? '') ?: self::normalizeTime($group['start_time'] ?? '') ?: Settings::get('attendance_default_start_time', '09:30');
+            }
+            if ($endTime === '') {
+                $endTime = self::timeTextFromValue($row['end_time'] ?? '') ?: self::normalizeTime($group['end_time'] ?? '') ?: Settings::get('attendance_default_end_time', '18:30');
+            }
+            if ($groupName === '') {
+                $groupName = Settings::get('attendance_default_group_name', '默认考勤组');
+            }
+        } else {
+            $groupName = $groupName !== '' ? $groupName : '无需考勤';
+        }
+
+        $now = time();
+        $data = [
+            'person_key' => $personKey,
+            'employee_open_id' => $employee['open_id'] ?? self::personKeyPart($personKey, 'open'),
+            'employee_user_id' => $employee['user_id'] ?? ($employeeType === 'employee_id' ? $userId : ''),
+            'employee_no' => $employee['employee_id'] ?? ($employeeType === 'employee_no' ? $userId : ''),
+            'employee_name' => $employee['name'] ?? ($row['employee_name'] ?? ''),
+            'work_date' => $workDate,
+            'feishu_group_id' => self::isZeroFeishuId($feishuGroupId) ? '' : $feishuGroupId,
+            'group_name' => $groupName,
+            'shift_id' => self::isZeroFeishuId($shiftId) ? '' : $shiftId,
+            'shift_name' => $shiftName,
+            'start_time' => $needPunch === 1 ? $startTime : '',
+            'end_time' => $needPunch === 1 ? $endTime : '',
+            'need_punch' => $needPunch,
+            'schedule_source' => 'feishu',
+            'synced_at' => $now,
+            'raw_payload' => json_encode($row, JSON_UNESCAPED_UNICODE),
+            'created_at' => $now,
+            'updated_at' => $now
+        ];
+
+        $columns = [];
+        $values = [];
+        foreach ($data as $key => $value) {
+            $columns[] = "`" . Database::escape($key) . "`";
+            $values[] = "'" . Database::escape((string)$value) . "'";
+        }
+        $updates = [];
+        foreach ($data as $key => $value) {
+            if ($key !== 'created_at') {
+                $updates[] = "`" . Database::escape($key) . "`=VALUES(`" . Database::escape($key) . "`)";
+            }
+        }
+        mysqli_query($conn, "INSERT INTO `attendance_daily_schedules` (" . implode(',', $columns) . ") VALUES (" . implode(',', $values) . ") ON DUPLICATE KEY UPDATE " . implode(',', $updates));
+        return mysqli_error($conn) === '';
+    }
+
+    private static function upsertAttendanceShift($shiftId, $shift)
+    {
+        global $conn;
+
+        $shiftId = trim((string)$shiftId);
+        if (self::isZeroFeishuId($shiftId) || !is_array($shift)) {
+            return false;
+        }
+        $times = self::timesFromResolvedShifts([$shift]);
+        $now = time();
+        $data = [
+            'shift_key' => 'feishu:' . $shiftId,
+            'feishu_shift_id' => $shiftId,
+            'shift_name' => $shift['shift_name'] ?? ($shift['name'] ?? $shiftId),
+            'start_time' => $times['start'],
+            'end_time' => $times['end'],
+            'raw_payload' => json_encode($shift, JSON_UNESCAPED_UNICODE),
+            'created_at' => $now,
+            'updated_at' => $now
+        ];
+        $columns = [];
+        $values = [];
+        foreach ($data as $key => $value) {
+            $columns[] = "`" . Database::escape($key) . "`";
+            $values[] = "'" . Database::escape((string)$value) . "'";
+        }
+        $updates = [];
+        foreach ($data as $key => $value) {
+            if ($key !== 'created_at') {
+                $updates[] = "`" . Database::escape($key) . "`=VALUES(`" . Database::escape($key) . "`)";
+            }
+        }
+        mysqli_query($conn, "INSERT INTO `attendance_shifts` (" . implode(',', $columns) . ") VALUES (" . implode(',', $values) . ") ON DUPLICATE KEY UPDATE " . implode(',', $updates));
+        return mysqli_error($conn) === '';
+    }
+
+    private static function dailyScheduleForPerson($personKey, $employee, $date)
+    {
+        $personKeys = [trim((string)$personKey)];
+        if ($employee) {
+            foreach ([
+                self::personKeyFromEmployee($employee),
+                !empty($employee['open_id']) ? 'open:' . $employee['open_id'] : '',
+                !empty($employee['employee_id']) ? 'no:' . $employee['employee_id'] : '',
+                !empty($employee['user_id']) ? 'user:' . $employee['user_id'] : ''
+            ] as $key) {
+                $key = trim((string)$key);
+                if ($key !== '') {
+                    $personKeys[] = $key;
+                }
+            }
+        }
+        $personKeys = array_values(array_unique(array_filter($personKeys)));
+        if (count($personKeys) === 0) {
+            return null;
+        }
+        $safeDate = Database::escape(self::normalizeDate($date, date('Y-m-d')));
+        $safeKeys = array_map(function($key) { return "'" . Database::escape($key) . "'"; }, $personKeys);
+        $row = Database::querySingleLine('attendance_daily_schedules', "SELECT * FROM `attendance_daily_schedules` WHERE `work_date`='{$safeDate}' AND `person_key` IN (" . implode(',', $safeKeys) . ") ORDER BY `need_punch` DESC, `id` DESC LIMIT 1", true);
+        return $row ?: null;
+    }
+
+    private static function groupFromDailySchedule($schedule)
+    {
+        $group = self::attendanceGroupByFeishuId($schedule['feishu_group_id'] ?? '');
+        $needPunch = intval($schedule['need_punch'] ?? 1) === 1;
+        $startTime = self::normalizeTime($schedule['start_time'] ?? '') ?: self::normalizeTime($group['start_time'] ?? '');
+        $endTime = self::normalizeTime($schedule['end_time'] ?? '') ?: self::normalizeTime($group['end_time'] ?? '');
+        if ($needPunch && $startTime === '') {
+            $startTime = Settings::get('attendance_default_start_time', '09:30');
+        }
+        if ($needPunch && $endTime === '') {
+            $endTime = Settings::get('attendance_default_end_time', '18:30');
+        }
+        return [
+            'id' => intval($group['id'] ?? 0),
+            'name' => $schedule['group_name'] ?: ($group['name'] ?? ($needPunch ? Settings::get('attendance_default_group_name', '默认考勤组') : '无需考勤')),
+            'start_time' => $needPunch ? $startTime : '',
+            'end_time' => $needPunch ? $endTime : '',
+            'need_punch' => $needPunch ? 1 : 0,
+            'daily_schedule_id' => intval($schedule['id'] ?? 0),
+            'shift_id' => $schedule['shift_id'] ?? '',
+            'shift_name' => $schedule['shift_name'] ?? '',
+            'schedule_source' => $schedule['schedule_source'] ?? 'feishu'
+        ];
+    }
+
+    private static function attendanceGroupByFeishuId($groupId)
+    {
+        $groupId = trim((string)$groupId);
+        if (self::isZeroFeishuId($groupId)) {
+            return null;
+        }
+        $safe = Database::escape($groupId);
+        $row = Database::querySingleLine('attendance_groups', "SELECT * FROM `attendance_groups` WHERE `feishu_group_id`='{$safe}' LIMIT 1", true);
+        return $row ?: null;
+    }
+
+    private static function attendanceShiftByFeishuId($shiftId)
+    {
+        $shiftId = trim((string)$shiftId);
+        if (self::isZeroFeishuId($shiftId)) {
+            return null;
+        }
+        $safe = Database::escape($shiftId);
+        $row = Database::querySingleLine('attendance_shifts', "SELECT * FROM `attendance_shifts` WHERE `feishu_shift_id`='{$safe}' LIMIT 1", true);
+        return $row ?: null;
+    }
+
+    private static function dailyShiftWorkDate($row)
+    {
+        foreach (['work_date', 'check_date', 'date'] as $key) {
+            if (!empty($row[$key])) {
+                $value = trim((string)$row[$key]);
+                if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $value) && strtotime($value) !== false) {
+                    return date('Y-m-d', strtotime($value));
+                }
+                if (preg_match('/^\d{8}$/', $value)) {
+                    $year = intval(substr($value, 0, 4));
+                    $month = intval(substr($value, 4, 2));
+                    $day = intval(substr($value, 6, 2));
+                    if (checkdate($month, $day, $year)) {
+                        return sprintf('%04d-%02d-%02d', $year, $month, $day);
+                    }
+                }
+            }
+        }
+        $monthText = preg_replace('/\D+/', '', (string)($row['month'] ?? ''));
+        $day = intval($row['day_no'] ?? ($row['day'] ?? 0));
+        if (strlen($monthText) === 6 && $day > 0) {
+            $year = intval(substr($monthText, 0, 4));
+            $month = intval(substr($monthText, 4, 2));
+            if (checkdate($month, $day, $year)) {
+                return sprintf('%04d-%02d-%02d', $year, $month, $day);
+            }
+        }
+        return '';
+    }
+
+    private static function isZeroFeishuId($id)
+    {
+        $id = trim((string)$id);
+        return $id === '' || $id === '0';
+    }
+
+    private static function feishuAttendanceUserIdFromEmployee($employee)
+    {
+        $employeeType = Settings::get('feishu_employee_id_type', 'employee_no');
+        if ($employeeType === 'employee_id') {
+            return trim((string)($employee['user_id'] ?? ''));
+        }
+        return trim((string)($employee['employee_id'] ?? ''));
+    }
+
+    private static function groupForEmployee($employee, $personKey, $date = '')
+    {
+        $date = self::normalizeDate($date, '');
+        if ($date !== '') {
+            $schedule = self::dailyScheduleForPerson($personKey, $employee, $date);
+            if ($schedule) {
+                return self::groupFromDailySchedule($schedule);
+            }
+        }
         $where = '';
         if ($employee) {
             $openId = Database::escape($employee['open_id'] ?? '');
@@ -2335,13 +2693,15 @@ class AttendanceModuleService {
         }
         $row = Database::querySingleLine('attendance_groups', "SELECT `g`.* FROM `attendance_groups` g INNER JOIN `attendance_group_members` m ON m.`group_id`=g.`id` WHERE g.`enabled`=1 AND ({$where}) ORDER BY g.`id` ASC LIMIT 1", true);
         if ($row) {
+            $row['need_punch'] = 1;
             return $row;
         }
         return [
             'id' => 0,
             'name' => Settings::get('attendance_default_group_name', '默认考勤组'),
             'start_time' => Settings::get('attendance_default_start_time', '09:30'),
-            'end_time' => Settings::get('attendance_default_end_time', '18:30')
+            'end_time' => Settings::get('attendance_default_end_time', '18:30'),
+            'need_punch' => 1
         ];
     }
 
@@ -2618,12 +2978,172 @@ class AttendanceModuleService {
 
     private static function extractGroupTimes($detail)
     {
-        $start = self::firstTimeText($detail, ['free_start_time', 'on_time', 'start_time', 'begin_time']);
-        $end = self::firstTimeText($detail, ['free_end_time', 'off_time', 'end_time', 'finish_time']);
+        $shiftTimes = self::timesFromResolvedShifts($detail['resolved_shifts'] ?? []);
+        if ($shiftTimes['start'] !== '' && $shiftTimes['end'] !== '') {
+            return $shiftTimes;
+        }
+
+        $freeCfg = is_array($detail['free_punch_cfg'] ?? null) ? $detail['free_punch_cfg'] : [];
+        $start = self::firstTimeText($freeCfg, ['free_start_time', 'on_time', 'start_time', 'begin_time']);
+        $end = self::firstTimeText($freeCfg, ['free_end_time', 'off_time', 'end_time', 'finish_time']);
+        if ($start !== '' && $end !== '') {
+            return ['start' => $start, 'end' => $end];
+        }
+
+        $start = self::firstTimeText($detail, ['on_time', 'start_time', 'begin_time', 'free_start_time']);
+        $end = self::firstTimeText($detail, ['off_time', 'end_time', 'finish_time', 'free_end_time']);
         return [
             'start' => $start ?: Settings::get('attendance_default_start_time', '09:30'),
             'end' => $end ?: Settings::get('attendance_default_end_time', '18:30')
         ];
+    }
+
+    private static function hydrateAttendanceGroupShifts($feishu, $detail)
+    {
+        if (!is_array($detail)) {
+            return $detail;
+        }
+        if (!empty($detail['resolved_shifts']) && is_array($detail['resolved_shifts'])) {
+            return $detail;
+        }
+        $shiftIds = self::attendanceGroupShiftIds($detail);
+        if (count($shiftIds) === 0) {
+            return $detail;
+        }
+        $resolved = [];
+        foreach ($shiftIds as $shiftId) {
+            if (!method_exists($feishu, 'getAttendanceShift')) {
+                break;
+            }
+            $resp = $feishu->getAttendanceShift($shiftId);
+            if (!empty($resp['ok']) && is_array($resp['data'] ?? null)) {
+                $shift = $resp['data']['shift'] ?? $resp['data'];
+                if (is_array($shift)) {
+                    $shift['shift_id'] = $shift['shift_id'] ?? $shiftId;
+                    self::upsertAttendanceShift($shiftId, $shift);
+                    $resolved[] = $shift;
+                }
+            }
+            usleep(30000);
+            if (count($resolved) >= 10) {
+                break;
+            }
+        }
+        if (count($resolved) > 0) {
+            $detail['resolved_shifts'] = $resolved;
+        }
+        return $detail;
+    }
+
+    private static function attendanceGroupShiftIds($detail)
+    {
+        $ids = [];
+        foreach (['punch_day_shift_ids', 'shift_ids', 'day_shift_ids'] as $key) {
+            if (!empty($detail[$key]) && is_array($detail[$key])) {
+                foreach ($detail[$key] as $id) {
+                    $id = trim((string)$id);
+                    if ($id !== '') {
+                        $ids[] = $id;
+                    }
+                }
+            }
+        }
+        foreach (['shift_id', 'default_shift_id', 'punch_day_shift_id'] as $key) {
+            if (!empty($detail[$key]) && is_scalar($detail[$key])) {
+                $ids[] = trim((string)$detail[$key]);
+            }
+        }
+        if (count($ids) === 0) {
+            $ids = self::recursiveShiftIds($detail);
+        }
+        $ids = array_filter($ids, function($id) {
+            return !self::isZeroFeishuId($id);
+        });
+        return array_slice(array_values(array_unique($ids)), 0, 10);
+    }
+
+    private static function recursiveShiftIds($value)
+    {
+        $ids = [];
+        if (!is_array($value)) {
+            return $ids;
+        }
+        foreach ($value as $key => $item) {
+            $key = (string)$key;
+            if (in_array($key, ['shift_id', 'shiftId'], true) && is_scalar($item)) {
+                $id = trim((string)$item);
+                if ($id !== '') {
+                    $ids[] = $id;
+                }
+                continue;
+            }
+            if (in_array($key, ['shift_ids', 'shiftIds', 'punch_day_shift_ids'], true) && is_array($item)) {
+                foreach ($item as $id) {
+                    $id = trim((string)$id);
+                    if ($id !== '') {
+                        $ids[] = $id;
+                    }
+                }
+                continue;
+            }
+            if (is_array($item)) {
+                $ids = array_merge($ids, self::recursiveShiftIds($item));
+            }
+        }
+        return $ids;
+    }
+
+    private static function timesFromResolvedShifts($shifts)
+    {
+        if (!is_array($shifts) || count($shifts) === 0) {
+            return ['start' => '', 'end' => ''];
+        }
+        $starts = [];
+        $ends = [];
+        foreach ($shifts as $shift) {
+            if (!is_array($shift)) {
+                continue;
+            }
+            $rules = $shift['punch_time_rule'] ?? ($shift['punch_time_rules'] ?? []);
+            if (is_array($rules)) {
+                if (self::isAssocArray($rules)) {
+                    $rules = [$rules];
+                }
+                foreach ($rules as $rule) {
+                    if (!is_array($rule)) {
+                        continue;
+                    }
+                    $start = self::timeTextFromValue($rule['on_time'] ?? ($rule['start_time'] ?? ''));
+                    $end = self::timeTextFromValue($rule['off_time'] ?? ($rule['end_time'] ?? ''));
+                    if ($start !== '') {
+                        $starts[] = $start;
+                    }
+                    if ($end !== '') {
+                        $ends[] = $end;
+                    }
+                }
+            }
+            $start = self::firstTimeText($shift, ['on_time', 'start_time', 'begin_time']);
+            $end = self::firstTimeText($shift, ['off_time', 'end_time', 'finish_time']);
+            if ($start !== '') {
+                $starts[] = $start;
+            }
+            if ($end !== '') {
+                $ends[] = $end;
+            }
+        }
+        return [
+            'start' => self::minTimeText($starts),
+            'end' => self::maxTimeText($ends)
+        ];
+    }
+
+    private static function isAssocArray($value)
+    {
+        if (!is_array($value) || count($value) === 0) {
+            return false;
+        }
+        return array_keys($value) !== range(0, count($value) - 1);
     }
 
     private static function firstTimeText($value, $keys)
@@ -2632,8 +3152,11 @@ class AttendanceModuleService {
             return '';
         }
         foreach ($keys as $key) {
-            if (isset($value[$key]) && preg_match('/^\d{1,2}:\d{2}$/', (string)$value[$key])) {
-                return self::normalizeTime((string)$value[$key]);
+            if (isset($value[$key])) {
+                $time = self::timeTextFromValue($value[$key]);
+                if ($time !== '') {
+                    return $time;
+                }
             }
         }
         foreach ($value as $item) {
@@ -2645,6 +3168,55 @@ class AttendanceModuleService {
             }
         }
         return '';
+    }
+
+    private static function timeTextFromValue($value)
+    {
+        if (!is_scalar($value)) {
+            return '';
+        }
+        $text = trim((string)$value);
+        if ($text === '') {
+            return '';
+        }
+        if (preg_match('/(\d{1,2}):(\d{2})/', $text, $m)) {
+            return self::normalizeTime($m[1] . ':' . $m[2]);
+        }
+        if (!is_numeric($text)) {
+            return '';
+        }
+        $num = intval($text);
+        if (preg_match('/^\d{3,4}$/', $text)) {
+            $hour = intval(floor($num / 100));
+            $minute = $num % 100;
+            if ($hour <= 47 && $minute <= 59) {
+                return str_pad((string)$hour, 2, '0', STR_PAD_LEFT) . ':' . str_pad((string)$minute, 2, '0', STR_PAD_LEFT);
+            }
+        }
+        if ($num >= 0 && $num <= 2879) {
+            return str_pad((string)intval(floor($num / 60)), 2, '0', STR_PAD_LEFT) . ':' . str_pad((string)($num % 60), 2, '0', STR_PAD_LEFT);
+        }
+        return '';
+    }
+
+    private static function minTimeText($times)
+    {
+        $times = array_values(array_filter(array_map([__CLASS__, 'normalizeTime'], $times)));
+        if (count($times) === 0) {
+            return '';
+        }
+        sort($times);
+        return $times[0];
+    }
+
+    private static function maxTimeText($times)
+    {
+        $times = array_values(array_filter(array_map([__CLASS__, 'normalizeTime'], $times)));
+        if (count($times) === 0) {
+            return '';
+        }
+        rsort($times);
+        return $times[0];
     }
 
     private static function ruleSnapshot($group, $interval)
@@ -2690,10 +3262,24 @@ class AttendanceModuleService {
         }
         $hour = intval($m[1]);
         $minute = intval($m[2]);
-        if ($hour < 0 || $hour > 23 || $minute < 0 || $minute > 59) {
+        if ($hour < 0 || $hour > 47 || $minute < 0 || $minute > 59) {
             return '';
         }
         return str_pad((string)$hour, 2, '0', STR_PAD_LEFT) . ':' . str_pad((string)$minute, 2, '0', STR_PAD_LEFT);
+    }
+
+    private static function scheduledTimestamp($date, $timeText)
+    {
+        $timeText = self::normalizeTime($timeText);
+        if ($timeText === '') {
+            return 0;
+        }
+        $base = strtotime(self::normalizeDate($date, date('Y-m-d')) . ' 00:00:00');
+        if ($base === false) {
+            return 0;
+        }
+        $parts = explode(':', $timeText);
+        return intval($base) + intval($parts[0] ?? 0) * 3600 + intval($parts[1] ?? 0) * 60;
     }
 
     private static function parseTimestamp($value)
@@ -2807,6 +3393,7 @@ class AttendanceModuleService {
             'early_leave' => '早退',
             'missing_checkout' => '缺少下班有效考勤',
             'full_absent' => '完全缺勤',
+            'no_need' => '无需考勤',
             'work_start_valid' => '上班有效',
             'work_end_valid' => '下班有效',
             'only_face' => '只刷脸',

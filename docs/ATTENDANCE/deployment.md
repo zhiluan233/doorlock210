@@ -41,6 +41,8 @@ php /home/210official/doorlock/attendance_worker.php
         'attendanceUserFlowGet' => 'https://open.feishu.cn/open-apis/attendance/v1/user_flows/{user_flow_id}',
         'attendanceGroupsList' => 'https://open.feishu.cn/open-apis/attendance/v1/groups',
         'attendanceGroupGet' => 'https://open.feishu.cn/open-apis/attendance/v1/groups/{group_id}',
+        'attendanceShiftGet' => 'https://open.feishu.cn/open-apis/attendance/v1/shifts/{shift_id}',
+        'attendanceUserDailyShiftsQuery' => 'https://open.feishu.cn/open-apis/attendance/v1/user_daily_shifts/query',
         'attendanceGroupListUser' => 'https://open.feishu.cn/open-apis/attendance/v1/groups/{group_id}/list_user'
     ]
 ]
@@ -74,7 +76,8 @@ AMT 凭证也继续放在 `config.php` 的 `oa.appId` 和 `oa.appSecret`。
 
 - `attendance:task`：写入打卡数据，用于原有工牌流水导入。
 - `attendance:task:readonly`：导出打卡数据，用于批量查询打卡流水和获取单条流水。
-- `attendance:rule:readonly` 或“导出打卡管理规则”：读取考勤组和考勤组成员。
+- `attendance:rule:readonly` 或“导出打卡管理规则”：读取考勤组、考勤组成员和班次详情。
+- 每日班表查询所需权限：按飞书开放平台“查询班表信息”接口要求开通，并确保数据权限范围覆盖所有需要计算考勤的员工。
 - `contact:user:readonly`、`contact:department:readonly`：已有通讯录同步需要。
 - `im:message`：已有刷卡机器人卡片提醒需要。
 
@@ -112,6 +115,8 @@ https://你的域名/?action=feishuWebhook
 ## 故障排查
 
 - 看不到飞书流水：检查 `attendance:task:readonly`、应用数据权限范围和 `attendanceUserFlowsQuery` endpoint。
+- 考勤组时间全部相同：检查 `attendanceShiftGet` endpoint、班次详情读取权限，以及 `attendance_shifts` 是否写入了 `start_time/end_time`。
+- 节假日或特殊日被算缺勤：检查 `attendanceUserDailyShiftsQuery` endpoint、每日班表读取权限，以及 `attendance_daily_schedules` 当天是否存在 `need_punch=0` 记录。
 - 事件不进系统：检查事件订阅 URL、Token、Encrypt Key 和事件类型；用户打卡成功事件如果缺少点位，系统会按 `record_id` 补查单条流水。
 - 免工牌点位不生效：确认配置的是飞书 `location_name` 的前缀，不是设备名。
 - 日报缺少工牌证据：确认本地 `logs` 有员工开门成功记录；全量同步会回填历史 `logs`，如果本地历史缺失，会使用飞书 `工牌-` 流水作为历史工牌证据参与计算。

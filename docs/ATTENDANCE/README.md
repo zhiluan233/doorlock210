@@ -19,7 +19,9 @@
 | 飞书假勤流水 | `attendance_source_records` | 通过事件订阅实时写入，也可通过全量任务批量拉取；飞书历史 `工牌-` 流水可补齐本地缺失的工牌证据。 |
 | 有效考勤 | `attendance_effective_records` | 每个员工每天按时间顺序配对生成。 |
 | 日报 | `attendance_daily_reports` | 用于后台查询、导出和 AMT 推送。 |
-| 飞书考勤组 | `attendance_groups` / `attendance_group_members` | 从飞书假勤考勤组拉取，用于上下班时间和成员归属。 |
+| 飞书考勤组 | `attendance_groups` / `attendance_group_members` | 从飞书假勤考勤组拉取，用于展示组配置和成员归属。 |
+| 飞书班次 | `attendance_shifts` | 从飞书班次详情拉取上下班时间，修正考勤组默认时间回退问题。 |
+| 每日班表 | `attendance_daily_schedules` | 从飞书每日班表拉取“人员-日期-考勤组-班次”，日报计算优先使用该表。 |
 | 异步任务 | `attendance_sync_jobs` | 存放全量流水、单条流水、重算、考勤组同步任务。 |
 | 有效提醒 | `attendance_effective_message_queue` | 存放有效考勤飞书卡片提醒，按 `pair_hash` 去重并失败重试。 |
 
@@ -46,6 +48,10 @@
 
 ## 日报规则
 
+- 日报优先使用 `attendance_daily_schedules` 中的飞书每日班表；没有每日班表缓存时，才回退到考勤组成员关系和默认时间。
+- 飞书每日班表返回 `group_id=0` 且 `shift_id=0` 时，系统按当天“无需考勤”处理，不标记迟到、早退、缺勤，也不发送补刷提醒。
+- 考勤组列表展示的时间来自班次详情中的 `punch_time_rule.on_time/off_time`；自由班制则回退到组内自由打卡时间。
+- 跨天班次按 `24:00` 以后的小时计算，例如 `26:00` 会落到次日 02:00。
 - 当天首次有效考勤晚于应上班时间 + 迟到宽限秒数，即标记迟到。
 - 默认宽限为 60 秒，即晚 1 分钟开始迟到。
 - 当天最后一次有效考勤作为下班时间。
@@ -109,11 +115,18 @@ Excel 导出默认不输出 `raw_trace` JSON 原文；如果导出字段配置�
 - 刷卡链路只同步写 `logs` 和本地考勤源表，不等待飞书或 AMT。
 - 飞书事件只入库源流水并提交重算任务。
 - 飞书打卡成功事件如果自带 `location_name`，直接使用事件字段；如果事件缺少点位但有 `record_id`，会异步调用“查询打卡流水”补齐后再参与计算。
-- 计划全量同步只处理当天，避免自动改写封存日报；历史日期需要管理员手动指定范围重算或同步。
+- 计划全量同步只处理当天，并在同一批员工同步流水前先同步当天每日班表，避免节假日、特殊日、临时调班落回默认时间。
+- 历史日期需要管理员手动指定范围重算或同步；手动全量同步同样会按日期批量拉取每日班表。
 - 全量同步和日报重算通过 `attendance_worker.php` 异步处理，不堵塞 Web 请求。
 - `attendance_worker.php` 有文件锁，避免多进程重复跑任务。
 - `cron.php` 本身也有全局文件锁，适合每分钟由 PHP CLI 调用。
-- 飞书批量查询按 50 人一批，符合官方批量查询打卡流水的单批上限和 50 次/秒频率限制。
+- 飞书批量查询按 50 人一批，符合官方批量查询打卡流水、每日班表的单批上限和 50 次/秒频率限制。
+
+## 飞书考勤日历边界
+
+飞书日历 API 不直接提供法定工作日、节假日查询；考勤模块也不应自行维护另一套法定节假日表。固定班制、排班制、自由班制的工作日、休息日、法定节假日、特殊打卡日、无需打卡日，都应以飞书假勤每日班表为准。
+
+如果每日班表接口返回缺失，系统会回退到本地考勤组规则；这只能作为兜底，不作为最终考勤依据。部署时必须为应用开通每日班表读取所需的数据权限，并确保应用数据范围覆盖所有考勤员工。
 
 ## 免工牌点位
 
@@ -138,3 +151,6 @@ Excel 导出默认不输出 `raw_trace` JSON 原文；如果导出字段配置�
 - 飞书用户打卡成功事件：https://open.feishu.cn/document/server-docs/attendance-v1/event/user-attendance-records-event
 - 飞书查询所有考勤组：https://open.feishu.cn/open-apis/attendance/v1/groups
 - 飞书查询考勤组成员：https://open.feishu.cn/document/attendance-v1/group/list_user
+- 飞书按 ID 查询班次：https://open.feishu.cn/document/server-docs/attendance-v1/shift/get
+- 飞书查询班表信息：https://open.feishu.cn/open-apis/attendance/v1/user_daily_shifts/query
+- 飞书日历常见问题：https://open.feishu.cn/document/server-docs/calendar-v4/calendar-faq

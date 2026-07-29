@@ -11,7 +11,7 @@ namespace anim210System;
 
 class Migrator {
 
-    const SCHEMA_VERSION = '20260729_attendance_invalid_relation';
+    const SCHEMA_VERSION = '20260729_attendance_daily_schedule';
 
     public static function ensure()
     {
@@ -320,6 +320,21 @@ class Migrator {
             KEY `idx_attendance_group_feishu` (`feishu_group_id`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4", $errors);
 
+        self::exec("CREATE TABLE IF NOT EXISTS `attendance_shifts` (
+            `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+            `shift_key` varchar(191) NOT NULL DEFAULT '',
+            `feishu_shift_id` varchar(128) NOT NULL DEFAULT '',
+            `shift_name` varchar(255) NOT NULL DEFAULT '',
+            `start_time` varchar(5) NOT NULL DEFAULT '',
+            `end_time` varchar(5) NOT NULL DEFAULT '',
+            `raw_payload` mediumtext,
+            `created_at` int unsigned NOT NULL DEFAULT 0,
+            `updated_at` int unsigned NOT NULL DEFAULT 0,
+            PRIMARY KEY (`id`),
+            UNIQUE KEY `uniq_attendance_shift_key` (`shift_key`),
+            KEY `idx_attendance_shift_feishu` (`feishu_shift_id`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4", $errors);
+
         self::exec("CREATE TABLE IF NOT EXISTS `attendance_group_members` (
             `id` bigint unsigned NOT NULL AUTO_INCREMENT,
             `group_id` bigint unsigned NOT NULL DEFAULT 0,
@@ -333,6 +348,32 @@ class Migrator {
             KEY `idx_attendance_group_member_open` (`employee_open_id`),
             KEY `idx_attendance_group_member_user` (`employee_user_id`),
             KEY `idx_attendance_group_member_no` (`employee_no`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4", $errors);
+
+        self::exec("CREATE TABLE IF NOT EXISTS `attendance_daily_schedules` (
+            `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+            `person_key` varchar(191) NOT NULL DEFAULT '',
+            `employee_open_id` varchar(128) NOT NULL DEFAULT '',
+            `employee_user_id` varchar(128) NOT NULL DEFAULT '',
+            `employee_no` varchar(128) NOT NULL DEFAULT '',
+            `employee_name` varchar(255) NOT NULL DEFAULT '',
+            `work_date` date NOT NULL,
+            `feishu_group_id` varchar(128) NOT NULL DEFAULT '',
+            `group_name` varchar(255) NOT NULL DEFAULT '',
+            `shift_id` varchar(128) NOT NULL DEFAULT '',
+            `shift_name` varchar(255) NOT NULL DEFAULT '',
+            `start_time` varchar(5) NOT NULL DEFAULT '',
+            `end_time` varchar(5) NOT NULL DEFAULT '',
+            `need_punch` tinyint(1) NOT NULL DEFAULT 1,
+            `schedule_source` varchar(32) NOT NULL DEFAULT 'feishu',
+            `synced_at` int unsigned NOT NULL DEFAULT 0,
+            `raw_payload` mediumtext,
+            `created_at` int unsigned NOT NULL DEFAULT 0,
+            `updated_at` int unsigned NOT NULL DEFAULT 0,
+            PRIMARY KEY (`id`),
+            UNIQUE KEY `uniq_attendance_daily_schedule` (`person_key`, `work_date`),
+            KEY `idx_attendance_daily_schedule_date` (`work_date`, `need_punch`),
+            KEY `idx_attendance_daily_schedule_group` (`feishu_group_id`, `work_date`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4", $errors);
 
         self::exec("CREATE TABLE IF NOT EXISTS `attendance_sync_jobs` (
