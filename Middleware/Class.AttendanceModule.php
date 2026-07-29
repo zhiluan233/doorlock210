@@ -212,11 +212,34 @@ class AttendanceModuleService {
     {
         return [
             'schedule' => self::scheduleFullSyncIfDue(),
+            'today_recalculate' => self::scheduleTodayRelationRecalculateIfNeeded(),
             'worker' => self::ensureWorkerRunning(),
             'repair_locations' => self::repairMissingLocationNames(500),
             'message' => self::processEffectiveMessageQueue(Settings::getInt('attendance_effective_message_batch_size', 50)),
+            'incomplete_message' => self::processIncompleteMessageQueue(Settings::getInt('attendance_incomplete_message_batch_size', 50)),
             'oa' => self::processOaQueue(Settings::getInt('attendance_oa_batch_size', 100))
         ];
+    }
+
+    private static function scheduleTodayRelationRecalculateIfNeeded()
+    {
+        if (!self::enabled()) {
+            return ['ok' => true, 'scheduled' => false, 'message' => '考勤模块未启用'];
+        }
+        $version = '20260729_invalid_relation_v2';
+        if (Settings::get('attendance_report_relation_fix_version', '') === $version) {
+            return ['ok' => true, 'scheduled' => false, 'message' => '今日日报关联字段已修正'];
+        }
+        $today = date('Y-m-d');
+        $job = self::enqueueJob('recalculate_date', 'auto_today_relation_fix', $today, $today, [
+            'offset' => 0,
+            'reason' => 'refresh_invalid_attendance_relation'
+        ]);
+        if (!empty($job['ok'])) {
+            Settings::set('attendance_report_relation_fix_version', $version);
+            return ['ok' => true, 'scheduled' => true, 'job_id' => intval($job['job_id'] ?? 0), 'message' => '已提交今日日报关联字段重算'];
+        }
+        return ['ok' => false, 'scheduled' => false, 'message' => $job['message'] ?? '提交今日日报重算失败'];
     }
 
     public static function ensureWorkerRunning()
@@ -339,7 +362,7 @@ class AttendanceModuleService {
     public static function reportSummary($filters)
     {
         $where = self::reportWhere($filters);
-        $row = Database::querySingleLine('attendance_daily_reports', "SELECT COUNT(*) AS `total`, SUM(CASE WHEN `status`='normal' THEN 1 ELSE 0 END) AS `normal_total`, SUM(`is_late`) AS `late_total`, SUM(`is_early_leave`) AS `early_leave_total`, SUM(`is_full_absent`) AS `full_absent_total`, SUM(`work_start_valid`) AS `work_start_valid_total`, SUM(`work_end_valid`) AS `work_end_valid_total`, SUM(`invalid_total`) AS `invalid_total`, SUM(`invalid_face_count`) AS `invalid_face_total`, SUM(`invalid_badge_count`) AS `invalid_badge_total`, SUM(`invalid_late_related`) AS `invalid_late_related_total`, SUM(`invalid_early_leave_related`) AS `invalid_early_leave_related_total`, SUM(`effective_count`) AS `effective_total` FROM `attendance_daily_reports` {$where}", true);
+        $row = Database::querySingleLine('attendance_daily_reports', "SELECT COUNT(*) AS `total`, SUM(CASE WHEN `status`='normal' THEN 1 ELSE 0 END) AS `normal_total`, SUM(`is_late`) AS `late_total`, SUM(`is_early_leave`) AS `early_leave_total`, SUM(`is_full_absent`) AS `full_absent_total`, SUM(`work_start_valid`) AS `work_start_valid_total`, SUM(`work_end_valid`) AS `work_end_valid_total`, SUM(`invalid_total`) AS `invalid_total`, SUM(`invalid_face_count`) AS `invalid_face_total`, SUM(`invalid_badge_count`) AS `invalid_badge_total`, SUM(`invalid_late_count`) AS `invalid_late_count_total`, SUM(`invalid_early_leave_count`) AS `invalid_early_leave_count_total`, SUM(`invalid_late_face_count`) AS `invalid_late_face_total`, SUM(`invalid_late_badge_count`) AS `invalid_late_badge_total`, SUM(`invalid_early_leave_face_count`) AS `invalid_early_leave_face_total`, SUM(`invalid_early_leave_badge_count`) AS `invalid_early_leave_badge_total`, SUM(`invalid_late_related`) AS `invalid_late_related_total`, SUM(`invalid_early_leave_related`) AS `invalid_early_leave_related_total`, SUM(`effective_count`) AS `effective_total` FROM `attendance_daily_reports` {$where}", true);
         return is_array($row) ? $row : [];
     }
 
@@ -382,10 +405,14 @@ class AttendanceModuleService {
             'invalid_face_count' => '只刷脸次数',
             'invalid_badge_count' => '只刷卡次数',
             'invalid_total' => '无效考勤次数',
-            'invalid_late_count' => '迟到前无效次数',
-            'invalid_early_leave_count' => '下班无效次数',
-            'invalid_late_related' => '因无效考勤迟到',
-            'invalid_early_leave_related' => '因无效考勤早退',
+            'invalid_late_count' => '上班时间及以前无效次数',
+            'invalid_late_face_count' => '上班时间及以前只刷脸次数',
+            'invalid_late_badge_count' => '上班时间及以前只刷卡次数',
+            'invalid_early_leave_count' => '下班后无效次数',
+            'invalid_early_leave_face_count' => '下班后只刷脸次数',
+            'invalid_early_leave_badge_count' => '下班后只刷卡次数',
+            'invalid_late_related' => '上班单边验证导致迟到',
+            'invalid_early_leave_related' => '下班单边验证导致早退',
             'late_minutes' => '迟到分钟',
             'updated_at' => '更新时间',
             'trace' => '溯源摘要'
@@ -1271,14 +1298,22 @@ class AttendanceModuleService {
         $grace = max(0, min(3600, Settings::getInt('attendance_late_grace_seconds', 60)));
         $now = time();
 
-        $invalidTimes = [];
-        foreach (array_merge($badges, $faces) as $record) {
+        $invalidRows = [];
+        foreach ($badges as $record) {
             $time = intval($record['punch_time'] ?? 0);
             if ($time > 0) {
-                $invalidTimes[] = $time;
+                $invalidRows[] = ['time' => $time, 'kind' => 'badge'];
             }
         }
-        sort($invalidTimes);
+        foreach ($faces as $record) {
+            $time = intval($record['punch_time'] ?? 0);
+            if ($time > 0) {
+                $invalidRows[] = ['time' => $time, 'kind' => 'face'];
+            }
+        }
+        usort($invalidRows, function($a, $b) {
+            return intval($a['time']) <=> intval($b['time']);
+        });
 
         $invalidBadgeCount = count($badges);
         $invalidFaceCount = count($faces);
@@ -1291,12 +1326,29 @@ class AttendanceModuleService {
 
         $invalidLateCount = 0;
         $invalidEarlyLeaveCount = 0;
-        foreach ($invalidTimes as $time) {
-            if ($isLate && $first > 0 && $time <= $first) {
+        $invalidLateFaceCount = 0;
+        $invalidLateBadgeCount = 0;
+        $invalidEarlyLeaveFaceCount = 0;
+        $invalidEarlyLeaveBadgeCount = 0;
+        $startValidCutoff = $scheduledStart > 0 ? $scheduledStart : 0;
+        foreach ($invalidRows as $row) {
+            $time = intval($row['time'] ?? 0);
+            $kind = (string)($row['kind'] ?? '');
+            if ($isLate && $startValidCutoff > 0 && $time <= $startValidCutoff) {
                 $invalidLateCount++;
+                if ($kind === 'face') {
+                    $invalidLateFaceCount++;
+                } elseif ($kind === 'badge') {
+                    $invalidLateBadgeCount++;
+                }
             }
-            if ($isEarlyLeave && $scheduledEnd > 0 && $time >= max($last, $scheduledEnd - $grace)) {
+            if ($isEarlyLeave && $scheduledEnd > 0 && $time >= $scheduledEnd) {
                 $invalidEarlyLeaveCount++;
+                if ($kind === 'face') {
+                    $invalidEarlyLeaveFaceCount++;
+                } elseif ($kind === 'badge') {
+                    $invalidEarlyLeaveBadgeCount++;
+                }
             }
         }
 
@@ -1311,6 +1363,10 @@ class AttendanceModuleService {
             'is_full_absent' => $isFullAbsent,
             'invalid_late_count' => $invalidLateCount,
             'invalid_early_leave_count' => $invalidEarlyLeaveCount,
+            'invalid_late_face_count' => $invalidLateFaceCount,
+            'invalid_late_badge_count' => $invalidLateBadgeCount,
+            'invalid_early_leave_face_count' => $invalidEarlyLeaveFaceCount,
+            'invalid_early_leave_badge_count' => $invalidEarlyLeaveBadgeCount,
             'invalid_late_related' => ($isLate && $invalidLateCount > 0) ? 1 : 0,
             'invalid_early_leave_related' => ($isEarlyLeave && $invalidEarlyLeaveCount > 0) ? 1 : 0
         ];
@@ -1378,6 +1434,12 @@ class AttendanceModuleService {
         $result = Database::insert('attendance_effective_records', $data);
         if ($result === true && $notify) {
             self::enqueueEffectiveMessage($pair);
+        }
+        if ($result === true) {
+            self::markIncompleteMessageSkippedBySourceIds([
+                intval($pair['badge_record_id'] ?? 0),
+                intval($pair['face_record_id'] ?? 0)
+            ], '已完成双验证考勤');
         }
     }
 
@@ -1525,6 +1587,225 @@ class AttendanceModuleService {
         mysqli_query($conn, "UPDATE `attendance_effective_message_queue` SET `message_status`='{$status}', `message_next_retry`=0, `message_response`='{$response}', `updated_at`={$now} WHERE `id` IN (" . implode(',', $ids) . ")");
     }
 
+    private static function processIncompleteMessageQueue($limit = 50)
+    {
+        if (!Settings::getBool('attendance_incomplete_message_enabled')) {
+            return ['total' => 0, 'sent' => 0, 'failed' => 0, 'message' => '双验证补刷提醒未启用'];
+        }
+        $limit = max(1, min(200, intval($limit)));
+        $interval = max(60, min(3600, Settings::getInt('attendance_pair_interval_seconds', 300)));
+        $lead = max(30, min($interval - 1, Settings::getInt('attendance_incomplete_message_lead_seconds', 120)));
+        $now = time();
+        $todayStart = strtotime(date('Y-m-d'));
+        $duePunchTime = $now - max(0, $interval - $lead);
+        $rows = self::fetchRows('attendance_source_records', "SELECT * FROM `attendance_source_records` WHERE `warning_status` IN ('pending','failed') AND `warning_next_retry`<={$now} AND `punch_time`>={$todayStart} AND `punch_time`<={$duePunchTime} AND `source_kind` IN ('badge','feishu_badge','face') ORDER BY `punch_time` ASC, `id` ASC LIMIT {$limit}");
+        if (count($rows) === 0) {
+            return ['total' => 0, 'sent' => 0, 'failed' => 0];
+        }
+
+        $feishu = new appLinkFeishu(true);
+        $sent = 0;
+        $failed = 0;
+        foreach ($rows as $row) {
+            $punchTime = intval($row['punch_time'] ?? 0);
+            if (self::isHistoricalPunchTime($punchTime)) {
+                self::markIncompleteMessages([$row], 'skipped', 0, '历史补刷提醒已跳过');
+                continue;
+            }
+            if ($punchTime + $interval < $now) {
+                self::markIncompleteMessages([$row], 'skipped', 0, '双验证补刷窗口已结束');
+                continue;
+            }
+            if (self::sourceRecordAlreadyEffective($row) || self::sourceRecordHasCounterpart($row, $interval)) {
+                self::markIncompleteMessages([$row], 'skipped', 0, '已完成双验证考勤');
+                continue;
+            }
+            $messageRow = self::buildIncompleteMessageRow($row, $interval, $lead);
+            if (!$messageRow) {
+                self::markIncompleteMessages([$row], 'skipped', 0, '非上班/下班边界时段，不发送补刷提醒');
+                continue;
+            }
+            if (trim((string)($messageRow['employee_open_id'] ?? '')) === '') {
+                self::markIncompleteMessages([$row], 'failed', null, '缺少飞书 open_id');
+                $failed++;
+                continue;
+            }
+            $uuid = substr('inc_' . intval($row['id']) . '_' . intval($row['punch_time']), 0, 50);
+            $resp = $feishu->sendInteractiveMessage($messageRow['employee_open_id'], self::buildIncompleteMessageCard($messageRow), $uuid);
+            if (!empty($resp['ok'])) {
+                self::markIncompleteMessages([$row], 'sent', 0, json_encode($resp['data'], JSON_UNESCAPED_UNICODE));
+                $sent++;
+            } else {
+                self::markIncompleteMessages([$row], 'failed', null, $resp['message'] ?? '飞书补刷提醒发送失败');
+                $failed++;
+            }
+            usleep(50000);
+        }
+        return ['total' => count($rows), 'sent' => $sent, 'failed' => $failed];
+    }
+
+    private static function buildIncompleteMessageRow($row, $interval, $lead)
+    {
+        $personKey = self::personKeyFromRecord($row);
+        $employee = self::employeeByPersonKey($personKey);
+        $group = self::groupForEmployee($employee, $personKey);
+        $punchTime = intval($row['punch_time'] ?? 0);
+        $date = date('Y-m-d', $punchTime > 0 ? $punchTime : time());
+        $startText = $group['start_time'] ?? Settings::get('attendance_default_start_time', '09:30');
+        $endText = $group['end_time'] ?? Settings::get('attendance_default_end_time', '18:30');
+        $scheduledStart = strtotime($date . ' ' . $startText . ':00');
+        $scheduledEnd = strtotime($date . ' ' . $endText . ':00');
+        $phase = '';
+        if ($scheduledStart > 0 && $punchTime <= $scheduledStart) {
+            $phase = '上班';
+        } elseif ($scheduledEnd > 0 && $punchTime >= $scheduledEnd) {
+            $phase = '下班';
+        } else {
+            return null;
+        }
+        $kind = self::sourceKindRole($row);
+        $doneMethod = $kind === 'badge' ? '刷卡' : '刷脸';
+        $missingMethod = $kind === 'badge' ? '刷脸' : '刷卡';
+        $deadline = $punchTime + intval($interval);
+        $openId = trim((string)($row['employee_open_id'] ?? ''));
+        $userId = trim((string)($row['employee_user_id'] ?? ''));
+        $employeeNo = trim((string)($row['employee_no'] ?? ''));
+        $employeeName = trim((string)($row['employee_name'] ?? ''));
+        return [
+            'source_record_id' => intval($row['id'] ?? 0),
+            'source_kind' => $row['source_kind'] ?? '',
+            'person_key' => $personKey,
+            'employee_open_id' => $openId !== '' ? $openId : ($employee['open_id'] ?? ''),
+            'employee_user_id' => $userId !== '' ? $userId : ($employee['user_id'] ?? ''),
+            'employee_no' => $employeeNo !== '' ? $employeeNo : ($employee['employee_id'] ?? ''),
+            'employee_name' => $employeeName !== '' ? $employeeName : ($employee['name'] ?? ''),
+            'work_date' => $date,
+            'effective_time' => $punchTime,
+            'punch_time' => $punchTime,
+            'deadline_time' => $deadline,
+            'lead_seconds' => intval($lead),
+            'interval_seconds' => intval($interval),
+            'phase' => $phase,
+            'done_method' => $doneMethod,
+            'missing_method' => $missingMethod,
+            'group_name' => $group['name'] ?? Settings::get('attendance_default_group_name', '默认考勤组'),
+            'location_name' => $row['location_name'] ?? '',
+            'device_name' => $row['device_name'] ?? ''
+        ];
+    }
+
+    private static function sourceKindRole($row)
+    {
+        $kind = (string)($row['source_kind'] ?? '');
+        return in_array($kind, ['badge', 'feishu_badge'], true) ? 'badge' : 'face';
+    }
+
+    private static function sourceRecordAlreadyEffective($row)
+    {
+        $id = intval($row['id'] ?? 0);
+        if ($id <= 0) {
+            return false;
+        }
+        $found = Database::querySingleLine('attendance_effective_records', "SELECT `id` FROM `attendance_effective_records` WHERE `badge_record_id`={$id} OR `face_record_id`={$id} LIMIT 1", true);
+        return $found ? true : false;
+    }
+
+    private static function sourceRecordHasCounterpart($row, $interval)
+    {
+        $personKey = self::personKeyFromRecord($row);
+        if ($personKey === '') {
+            return false;
+        }
+        $time = intval($row['punch_time'] ?? 0);
+        if ($time <= 0) {
+            return false;
+        }
+        $from = $time - intval($interval);
+        $to = $time + intval($interval);
+        $safePerson = Database::escape($personKey);
+        $kindSql = self::sourceKindRole($row) === 'badge' ? "`source_kind`='face'" : "`source_kind` IN ('badge','feishu_badge')";
+        $sql = "SELECT `id` FROM `attendance_source_records` WHERE `id`<>" . intval($row['id'] ?? 0) . " AND `punch_time` BETWEEN {$from} AND {$to} AND {$kindSql} AND (CONCAT('open:', `employee_open_id`)='{$safePerson}' OR CONCAT('no:', `employee_no`)='{$safePerson}' OR CONCAT('user:', `employee_user_id`)='{$safePerson}') LIMIT 1";
+        $found = Database::querySingleLine('attendance_source_records', $sql, true);
+        return $found ? true : false;
+    }
+
+    private static function markIncompleteMessageSkippedBySourceIds($ids, $response)
+    {
+        $ids = array_values(array_filter(array_map('intval', $ids)));
+        if (count($ids) === 0) {
+            return;
+        }
+        global $conn;
+        $now = time();
+        $response = Database::escape(substr((string)$response, 0, 60000));
+        mysqli_query($conn, "UPDATE `attendance_source_records` SET `warning_status`='skipped', `warning_next_retry`=0, `warning_response`='{$response}', `updated_at`={$now} WHERE `id` IN (" . implode(',', $ids) . ") AND `warning_status` IN ('pending','failed')");
+    }
+
+    private static function markIncompleteMessages($rows, $status, $nextRetry, $response)
+    {
+        global $conn;
+
+        if (count($rows) === 0) {
+            return;
+        }
+        $now = time();
+        $response = Database::escape(substr((string)$response, 0, 60000));
+        $status = Database::escape($status);
+        if ($status === 'failed') {
+            foreach ($rows as $row) {
+                $attempts = intval($row['warning_attempts'] ?? 0) + 1;
+                $retryAt = $now + self::retryDelay($attempts);
+                $id = intval($row['id']);
+                mysqli_query($conn, "UPDATE `attendance_source_records` SET `warning_status`='{$status}', `warning_attempts`={$attempts}, `warning_next_retry`={$retryAt}, `warning_response`='{$response}', `updated_at`={$now} WHERE `id`={$id}");
+            }
+            return;
+        }
+        $sentAtSql = $status === 'sent' ? ", `warning_sent_at`={$now}" : '';
+        $ids = array_map(function($row) { return intval($row['id']); }, $rows);
+        mysqli_query($conn, "UPDATE `attendance_source_records` SET `warning_status`='{$status}', `warning_next_retry`=0{$sentAtSql}, `warning_response`='{$response}', `updated_at`={$now} WHERE `id` IN (" . implode(',', $ids) . ")");
+    }
+
+    private static function buildIncompleteMessageCard($row)
+    {
+        $titleText = Settings::get('attendance_incomplete_message_template', '双验证考勤提醒');
+        if ($titleText === '') {
+            $titleText = '双验证考勤提醒';
+        }
+        $template = Settings::get('attendance_incomplete_message_card_template', '');
+        if (trim($template) === '') {
+            $template = "**考勤提醒** 还未完成双验证考勤\n**已完成** {done_method}\n**待完成** {missing_method}\n**截止时间** {deadline_datetime}\n请在截止前及时补{missing_method}。";
+        }
+        $rendered = self::renderEffectiveMessageTemplate($template, $row);
+        $customCard = json_decode($rendered, true);
+        if (json_last_error() === JSON_ERROR_NONE && is_array($customCard)) {
+            $customCard['config'] = $customCard['config'] ?? ['wide_screen_mode' => true];
+            $customCard['header'] = [
+                'template' => 'red',
+                'title' => [
+                    'tag' => 'plain_text',
+                    'content' => self::renderEffectiveMessageTemplate($titleText, $row)
+                ]
+            ];
+            return $customCard;
+        }
+        return [
+            'config' => ['wide_screen_mode' => true],
+            'header' => [
+                'template' => 'red',
+                'title' => [
+                    'tag' => 'plain_text',
+                    'content' => self::renderEffectiveMessageTemplate($titleText, $row)
+                ]
+            ],
+            'elements' => [
+                [
+                    'tag' => 'markdown',
+                    'content' => $rendered
+                ]
+            ]
+        ];
+    }
+
     private static function buildEffectiveMessageCard($row)
     {
         $titleText = Settings::get('attendance_effective_message_template', '有效考勤');
@@ -1571,6 +1852,8 @@ class AttendanceModuleService {
         $effectiveTime = intval($row['effective_time'] ?? time());
         $badgeTime = intval($row['badge_time'] ?? 0);
         $faceTime = intval($row['face_time'] ?? 0);
+        $punchTime = intval($row['punch_time'] ?? $effectiveTime);
+        $deadlineTime = intval($row['deadline_time'] ?? 0);
         $location = trim((string)($row['location_name'] ?? ''));
         if ($location === '') {
             $location = trim((string)($row['device_name'] ?? ''));
@@ -1578,6 +1861,7 @@ class AttendanceModuleService {
         if ($location === '') {
             $location = '-';
         }
+        $remainingSeconds = $deadlineTime > 0 ? max(0, $deadlineTime - time()) : 0;
         $replacements = [
             '{time}' => date('H:i', $effectiveTime),
             '{date}' => date('Y年m月d日', $effectiveTime),
@@ -1594,6 +1878,15 @@ class AttendanceModuleService {
             '{face_time}' => $faceTime > 0 ? date('H:i:s', $faceTime) : '-',
             '{face_datetime}' => $faceTime > 0 ? date('Y-m-d H:i:s', $faceTime) : '-',
             '{interval_seconds}' => (string)intval($row['interval_seconds'] ?? 0),
+            '{punch_time}' => $punchTime > 0 ? date('H:i:s', $punchTime) : '-',
+            '{punch_datetime}' => $punchTime > 0 ? date('Y-m-d H:i:s', $punchTime) : '-',
+            '{deadline_time}' => $deadlineTime > 0 ? date('H:i:s', $deadlineTime) : '-',
+            '{deadline_datetime}' => $deadlineTime > 0 ? date('Y-m-d H:i:s', $deadlineTime) : '-',
+            '{remaining_seconds}' => (string)$remainingSeconds,
+            '{remaining_minutes}' => (string)intval(ceil($remainingSeconds / 60)),
+            '{phase}' => (string)($row['phase'] ?? ''),
+            '{done_method}' => (string)($row['done_method'] ?? ''),
+            '{missing_method}' => (string)($row['missing_method'] ?? ''),
             '{pair_hash}' => (string)($row['pair_hash'] ?? '')
         ];
         return strtr((string)$template, $replacements);
@@ -1655,6 +1948,10 @@ class AttendanceModuleService {
             'invalid_total' => intval($invalidStats['invalid_total'] ?? 0),
             'invalid_late_count' => intval($invalidStats['invalid_late_count'] ?? 0),
             'invalid_early_leave_count' => intval($invalidStats['invalid_early_leave_count'] ?? 0),
+            'invalid_late_face_count' => intval($invalidStats['invalid_late_face_count'] ?? 0),
+            'invalid_late_badge_count' => intval($invalidStats['invalid_late_badge_count'] ?? 0),
+            'invalid_early_leave_face_count' => intval($invalidStats['invalid_early_leave_face_count'] ?? 0),
+            'invalid_early_leave_badge_count' => intval($invalidStats['invalid_early_leave_badge_count'] ?? 0),
             'invalid_late_related' => intval($invalidStats['invalid_late_related'] ?? 0),
             'invalid_early_leave_related' => intval($invalidStats['invalid_early_leave_related'] ?? 0),
             'source_updated_at' => $now,
@@ -1738,10 +2035,10 @@ class AttendanceModuleService {
             $fields['only_badge'] = '只刷卡 ' . $invalidBadge . ' 次';
         }
         if (intval($invalidStats['invalid_late_related'] ?? 0) === 1) {
-            $fields['invalid_late_related'] = '因无效考勤迟到';
+            $fields['invalid_late_related'] = '上班时间及以前单边验证导致迟到（刷脸' . intval($invalidStats['invalid_late_face_count'] ?? 0) . ' / 刷卡' . intval($invalidStats['invalid_late_badge_count'] ?? 0) . '）';
         }
         if (intval($invalidStats['invalid_early_leave_related'] ?? 0) === 1) {
-            $fields['invalid_early_leave_related'] = '因无效考勤早退';
+            $fields['invalid_early_leave_related'] = '下班单边验证导致早退（刷脸' . intval($invalidStats['invalid_early_leave_face_count'] ?? 0) . ' / 刷卡' . intval($invalidStats['invalid_early_leave_badge_count'] ?? 0) . '）';
         }
         if (count($fields) === 0) {
             $fields['normal'] = '正常';
@@ -2465,7 +2762,7 @@ class AttendanceModuleService {
 
     private static function exportFields()
     {
-        $configured = Settings::get('attendance_export_fields', 'work_date,employee_name,employee_no,group_name,scheduled_start,scheduled_end,first_effective_at,last_effective_at,effective_count,status_text,work_start_valid,work_end_valid,is_late,is_early_leave,is_full_absent,invalid_face_count,invalid_badge_count,invalid_late_count,invalid_early_leave_count,late_minutes');
+        $configured = Settings::get('attendance_export_fields', 'work_date,employee_name,employee_no,group_name,scheduled_start,scheduled_end,first_effective_at,last_effective_at,effective_count,status_text,work_start_valid,work_end_valid,is_late,is_early_leave,is_full_absent,invalid_face_count,invalid_badge_count,invalid_late_face_count,invalid_late_badge_count,invalid_early_leave_face_count,invalid_early_leave_badge_count,late_minutes');
         $fields = array_filter(array_map('trim', explode(',', $configured)));
         return count($fields) > 0 ? $fields : ['work_date','employee_name','employee_no','status'];
     }
@@ -2514,8 +2811,8 @@ class AttendanceModuleService {
             'work_end_valid' => '下班有效',
             'only_face' => '只刷脸',
             'only_badge' => '只刷卡',
-            'invalid_late_related' => '因无效考勤迟到',
-            'invalid_early_leave_related' => '因无效考勤早退'
+            'invalid_late_related' => '上班时间及以前单边验证导致迟到',
+            'invalid_early_leave_related' => '下班单边验证导致早退'
         ];
         return $map[$status] ?? ($status ?: '-');
     }
@@ -2531,10 +2828,10 @@ class AttendanceModuleService {
             $parts[] = '只刷卡 ' . $invalidBadge . ' 次';
         }
         if (intval($row['invalid_late_related'] ?? 0) === 1) {
-            $parts[] = '迟到前无效 ' . intval($row['invalid_late_count'] ?? 0) . ' 次';
+            $parts[] = '上班时间及以前单边验证 ' . intval($row['invalid_late_count'] ?? 0) . ' 次（刷脸' . intval($row['invalid_late_face_count'] ?? 0) . ' / 刷卡' . intval($row['invalid_late_badge_count'] ?? 0) . '）';
         }
         if (intval($row['invalid_early_leave_related'] ?? 0) === 1) {
-            $parts[] = '下班无效 ' . intval($row['invalid_early_leave_count'] ?? 0) . ' 次';
+            $parts[] = '下班后单边验证 ' . intval($row['invalid_early_leave_count'] ?? 0) . ' 次（刷脸' . intval($row['invalid_early_leave_face_count'] ?? 0) . ' / 刷卡' . intval($row['invalid_early_leave_badge_count'] ?? 0) . '）';
         }
         return implode('；', $parts);
     }

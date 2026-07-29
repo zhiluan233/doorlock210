@@ -66,7 +66,9 @@
 - `is_full_absent`：没有有效考勤，也没有只刷脸/只刷卡的无效考勤。
 - `invalid_face_count`：只刷脸次数，即未在配对窗口内找到工牌的飞书人脸流水。
 - `invalid_badge_count`：只刷卡次数，即未在配对窗口内找到人脸的工牌流水。
-- `invalid_late_related` / `invalid_early_leave_related`：迟到或早退当天存在对应时段无效考勤，便于导出统计“因无效考勤迟到/早退”。
+- `invalid_late_face_count` / `invalid_late_badge_count`：上班时间及以前的只刷脸/只刷卡次数；如果首次有效考勤迟到，则标记为上班单边验证导致迟到。
+- `invalid_early_leave_face_count` / `invalid_early_leave_badge_count`：下班时间及以后的只刷脸/只刷卡次数；如果最后有效考勤早于下班时间，则标记为下班单边验证导致早退。
+- `invalid_late_related` / `invalid_early_leave_related`：迟到或早退当天存在上述边界时段无效考勤，便于导出统计。
 
 Excel 导出默认不输出 `raw_trace` JSON 原文；如果导出字段配置里保留 `trace`，系统只输出人可读的溯源摘要。
 
@@ -84,6 +86,23 @@ Excel 导出默认不输出 `raw_trace` JSON 原文；如果导出字段配置�
 - `{badge_time}` / `{badge_datetime}`
 - `{face_time}` / `{face_datetime}`
 - `{interval_seconds}` / `{pair_hash}`
+
+## 双验证补刷提醒
+
+后台路径：`系统设置 -> P0考勤模块 -> 补刷提醒`。
+
+当员工只完成刷脸或刷卡，且记录发生在考勤组上班时间及以前、下班时间及以后时，系统会在配对截止前发送红色飞书卡片提醒。例如配对间隔为 300 秒、提前秒数为 120 秒，则单边记录产生 180 秒后仍未配对时提醒员工及时补刷。中间时段的单边记录不会提醒。
+
+补刷提醒失败会进入重试；如果已经生成有效考勤、出现可配对的另一条流水、超过配对截止时间，系统会跳过该提醒。
+
+卡片支持 Markdown 或飞书卡片 JSON，头部颜色固定为红色，变量包括有效提醒变量以及：
+
+- `{phase}`：上班或下班。
+- `{done_method}`：已完成的方式，刷脸或刷卡。
+- `{missing_method}`：待完成的方式，刷脸或刷卡。
+- `{punch_time}` / `{punch_datetime}`
+- `{deadline_time}` / `{deadline_datetime}`
+- `{remaining_seconds}` / `{remaining_minutes}`
 
 ## 并发设计
 

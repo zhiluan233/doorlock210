@@ -966,6 +966,7 @@ class PostHandler {
 							'attendance_full_sync_enabled', 'attendance_full_sync_times', 'attendance_full_sync_window_days', 'attendance_full_sync_batch_size',
 							'attendance_recalculate_batch_size', 'attendance_oa_push_enabled', 'attendance_oa_push_path', 'attendance_oa_batch_size', 'attendance_export_fields',
 							'attendance_effective_message_enabled', 'attendance_effective_message_template', 'attendance_effective_message_card_template', 'attendance_effective_message_batch_size',
+							'attendance_incomplete_message_enabled', 'attendance_incomplete_message_template', 'attendance_incomplete_message_card_template', 'attendance_incomplete_message_lead_seconds', 'attendance_incomplete_message_batch_size',
 							'feishu_event_enabled',
 							'feishu_contact_sync_enabled', 'feishu_contact_sync_daily_time', 'feishu_contact_sync_release_missing',
 							'feishu_oauth_enabled', 'feishu_oauth_redirect_uri', 'feishu_oauth_scope', 'feishu_oauth_prompt',
@@ -979,7 +980,7 @@ class PostHandler {
 								$data[$key] = $_POST[$key];
 							}
 						}
-						foreach (['oa_attendance_enabled','feishu_attendance_enabled','card_as_attendance_enabled','feishu_message_enabled','attendance_module_enabled','attendance_full_sync_enabled','attendance_oa_push_enabled','attendance_effective_message_enabled','feishu_event_enabled','feishu_contact_sync_enabled','feishu_contact_sync_release_missing','feishu_oauth_enabled','remote_open_enabled'] as $boolKey) {
+						foreach (['oa_attendance_enabled','feishu_attendance_enabled','card_as_attendance_enabled','feishu_message_enabled','attendance_module_enabled','attendance_full_sync_enabled','attendance_oa_push_enabled','attendance_effective_message_enabled','attendance_incomplete_message_enabled','feishu_event_enabled','feishu_contact_sync_enabled','feishu_contact_sync_release_missing','feishu_oauth_enabled','remote_open_enabled'] as $boolKey) {
 							if (!isset($data[$boolKey])) {
 								$data[$boolKey] = 'false';
 							}
@@ -1030,6 +1031,8 @@ class PostHandler {
 							'attendance_recalculate_batch_size' => [50, 500, '考勤日报重算单批人数应为 50-500'],
 							'attendance_oa_batch_size' => [1, 500, '考勤 AMT 推送批量应为 1-500'],
 							'attendance_effective_message_batch_size' => [1, 200, '有效考勤提醒批量应为 1-200'],
+							'attendance_incomplete_message_lead_seconds' => [30, 1800, '双验证补刷提醒提前秒数应为 30-1800'],
+							'attendance_incomplete_message_batch_size' => [1, 200, '双验证补刷提醒批量应为 1-200'],
 							'remote_open_timeout' => [1, 30, '远程开门超时秒数应为 1-30'],
 							'device_card_sync_batch_size' => [1, 1000, '端侧卡库单轮下发条数应为 1-1000'],
 							'device_card_sync_interval_ms' => [0, 2000, '端侧卡库下发间隔应为 0-2000 毫秒'],

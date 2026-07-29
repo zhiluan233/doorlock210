@@ -76,6 +76,27 @@ function attendanceNumber($value) {
 	return number_format(intval($value));
 }
 
+function attendanceInvalidBreakdown($row, $kind) {
+	$totalKey = $kind === 'face' ? 'invalid_face_count' : 'invalid_badge_count';
+	$lateKey = $kind === 'face' ? 'invalid_late_face_count' : 'invalid_late_badge_count';
+	$earlyKey = $kind === 'face' ? 'invalid_early_leave_face_count' : 'invalid_early_leave_badge_count';
+	$total = intval($row[$totalKey] ?? 0);
+	$late = intval($row[$lateKey] ?? 0);
+	$early = intval($row[$earlyKey] ?? 0);
+	$html = '<strong>' . attendanceNumber($total) . '</strong>';
+	if ($late > 0 || $early > 0) {
+		$html .= '<div class="attendance-breakdown">';
+		if ($late > 0) {
+			$html .= '<span>上班关联 ' . attendanceNumber($late) . '</span>';
+		}
+		if ($early > 0) {
+			$html .= '<span>下班关联 ' . attendanceNumber($early) . '</span>';
+		}
+		$html .= '</div>';
+	}
+	return $html;
+}
+
 $today = date('Y-m-d');
 $dateFrom = attendanceDateParam('date_from', $today);
 $dateTo = attendanceDateParam('date_to', $dateFrom);
@@ -199,6 +220,15 @@ $totalPages = max(1, intval(ceil(max(0, $total) / $pageSize)));
 		white-space: normal;
 		line-height: 1.6;
 	}
+	.attendance-breakdown {
+		margin-top: 4px;
+		color: #b54708;
+		font-size: 12px;
+		line-height: 1.5;
+	}
+	.attendance-breakdown span {
+		display: block;
+	}
 	.attendance-empty {
 		text-align: center;
 		color: #98a2b3;
@@ -258,6 +288,8 @@ $totalPages = max(1, intval(ceil(max(0, $total) / $pageSize)));
 		<div class="attendance-card"><span>完全缺勤</span><strong><?php echo attendanceNumber($summary['full_absent_total'] ?? 0); ?></strong></div>
 		<div class="attendance-card"><span>只刷脸</span><strong><?php echo attendanceNumber($summary['invalid_face_total'] ?? 0); ?></strong></div>
 		<div class="attendance-card"><span>只刷卡</span><strong><?php echo attendanceNumber($summary['invalid_badge_total'] ?? 0); ?></strong></div>
+		<div class="attendance-card"><span>上班单边迟到</span><strong><?php echo attendanceNumber($summary['invalid_late_related_total'] ?? 0); ?></strong></div>
+		<div class="attendance-card"><span>下班单边早退</span><strong><?php echo attendanceNumber($summary['invalid_early_leave_related_total'] ?? 0); ?></strong></div>
 		<div class="attendance-card"><span>有效考勤</span><strong><?php echo attendanceNumber($summary['effective_total'] ?? 0); ?></strong></div>
 	</div>
 
@@ -279,8 +311,8 @@ $totalPages = max(1, intval(ceil(max(0, $total) / $pageSize)));
 					<option value="full_absent" <?php echo $status === 'full_absent' ? 'selected' : ''; ?>>完全缺勤</option>
 					<option value="only_face" <?php echo $status === 'only_face' ? 'selected' : ''; ?>>只刷脸</option>
 					<option value="only_badge" <?php echo $status === 'only_badge' ? 'selected' : ''; ?>>只刷卡</option>
-					<option value="invalid_late_related" <?php echo $status === 'invalid_late_related' ? 'selected' : ''; ?>>因无效考勤迟到</option>
-					<option value="invalid_early_leave_related" <?php echo $status === 'invalid_early_leave_related' ? 'selected' : ''; ?>>因无效考勤早退</option>
+					<option value="invalid_late_related" <?php echo $status === 'invalid_late_related' ? 'selected' : ''; ?>>上班单边迟到</option>
+					<option value="invalid_early_leave_related" <?php echo $status === 'invalid_early_leave_related' ? 'selected' : ''; ?>>下班单边早退</option>
 					<option value="missing_checkout" <?php echo $status === 'missing_checkout' ? 'selected' : ''; ?>>缺少下班</option>
 				</select>
 			</div>
@@ -332,8 +364,8 @@ $totalPages = max(1, intval(ceil(max(0, $total) / $pageSize)));
 					<td><?php echo attendanceH(attendanceShortTime($row['last_effective_at'] ?? 0)); ?></td>
 					<td><?php echo attendanceNumber($row['effective_count'] ?? 0); ?></td>
 					<td class="attendance-status-text"><span class="attendance-status <?php echo attendanceH($rowStatus); ?>"><?php echo attendanceH(AttendanceModuleService::reportStatusText($row)); ?></span></td>
-					<td><?php echo attendanceNumber($row['invalid_face_count'] ?? 0); ?></td>
-					<td><?php echo attendanceNumber($row['invalid_badge_count'] ?? 0); ?></td>
+					<td><?php echo attendanceInvalidBreakdown($row, 'face'); ?></td>
+					<td><?php echo attendanceInvalidBreakdown($row, 'badge'); ?></td>
 					<td><?php echo attendanceNumber($row['late_minutes'] ?? 0); ?></td>
 					<td><button type="button" class="btn btn-xs btn-default" onclick="showAttendanceTrace(<?php echo intval($row['id']); ?>)">溯源</button></td>
 				</tr>
