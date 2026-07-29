@@ -172,6 +172,7 @@ class OperationLog {
             'syncFeishuMember' => '同步飞书通讯录',
             'syncAttendanceFlows' => '同步飞书考勤流水',
             'syncAttendanceGroups' => '同步飞书考勤组',
+            'recalculateAttendanceReports' => '重算考勤日报',
             'exportAttendanceReports' => '导出考勤日报',
             'attendanceTrace' => '查看考勤溯源',
             'editPassPermission' => '修改通行权限',
@@ -272,6 +273,9 @@ class OperationLog {
                 break;
             case 'syncAttendanceGroups':
                 $descriptor['detail'] = '手动同步飞书考勤组';
+                break;
+            case 'recalculateAttendanceReports':
+                $descriptor['detail'] = '手动重算考勤日报：' . self::limit((string)($_POST['date_from'] ?? ''), 10) . ' 至 ' . self::limit((string)($_POST['date_to'] ?? ''), 10);
                 break;
             case 'exportAttendanceReports':
                 $descriptor['detail'] = '导出考勤日报：' . self::limit((string)($_POST['date_from'] ?? ''), 10) . ' 至 ' . self::limit((string)($_POST['date_to'] ?? ''), 10);

@@ -42,7 +42,7 @@ function attendanceKeywordParam() {
 
 function attendanceStatusParam() {
 	$status = trim((string)($_GET['status'] ?? 'all'));
-	return in_array($status, ['all', 'normal', 'late', 'absent', 'missing_checkout'], true) ? $status : 'all';
+	return in_array($status, ['all', 'normal', 'late', 'early_leave', 'absent', 'full_absent', 'work_start_valid', 'work_end_valid', 'only_face', 'only_badge', 'invalid_late_related', 'invalid_early_leave_related', 'missing_checkout'], true) ? $status : 'all';
 }
 
 function attendanceFetchRows($table, $sql) {
@@ -180,6 +180,7 @@ $totalPages = max(1, intval(ceil(max(0, $total) / $pageSize)));
 		color: #027a48;
 	}
 	.attendance-status.late,
+	.attendance-status.early_leave,
 	.attendance-status.missing_checkout {
 		background: #fff7ed;
 		color: #b54708;
@@ -192,6 +193,11 @@ $totalPages = max(1, intval(ceil(max(0, $total) / $pageSize)));
 		display: grid;
 		grid-template-columns: 1fr 1fr;
 		gap: 16px;
+	}
+	.attendance-status-text {
+		max-width: 280px;
+		white-space: normal;
+		line-height: 1.6;
 	}
 	.attendance-empty {
 		text-align: center;
@@ -245,8 +251,13 @@ $totalPages = max(1, intval(ceil(max(0, $total) / $pageSize)));
 
 	<div class="attendance-grid">
 		<div class="attendance-card"><span>日报人数</span><strong><?php echo attendanceNumber($summary['total'] ?? 0); ?></strong></div>
-		<div class="attendance-card"><span>正常</span><strong><?php echo attendanceNumber($summary['normal_total'] ?? 0); ?></strong></div>
+		<div class="attendance-card"><span>上班有效</span><strong><?php echo attendanceNumber($summary['work_start_valid_total'] ?? 0); ?></strong></div>
+		<div class="attendance-card"><span>下班有效</span><strong><?php echo attendanceNumber($summary['work_end_valid_total'] ?? 0); ?></strong></div>
 		<div class="attendance-card"><span>迟到</span><strong><?php echo attendanceNumber($summary['late_total'] ?? 0); ?></strong></div>
+		<div class="attendance-card"><span>早退</span><strong><?php echo attendanceNumber($summary['early_leave_total'] ?? 0); ?></strong></div>
+		<div class="attendance-card"><span>完全缺勤</span><strong><?php echo attendanceNumber($summary['full_absent_total'] ?? 0); ?></strong></div>
+		<div class="attendance-card"><span>只刷脸</span><strong><?php echo attendanceNumber($summary['invalid_face_total'] ?? 0); ?></strong></div>
+		<div class="attendance-card"><span>只刷卡</span><strong><?php echo attendanceNumber($summary['invalid_badge_total'] ?? 0); ?></strong></div>
 		<div class="attendance-card"><span>有效考勤</span><strong><?php echo attendanceNumber($summary['effective_total'] ?? 0); ?></strong></div>
 	</div>
 
@@ -260,8 +271,16 @@ $totalPages = max(1, intval(ceil(max(0, $total) / $pageSize)));
 				<select class="form-control" name="status">
 					<option value="all" <?php echo $status === 'all' ? 'selected' : ''; ?>>全部状态</option>
 					<option value="normal" <?php echo $status === 'normal' ? 'selected' : ''; ?>>正常</option>
+					<option value="work_start_valid" <?php echo $status === 'work_start_valid' ? 'selected' : ''; ?>>上班有效</option>
+					<option value="work_end_valid" <?php echo $status === 'work_end_valid' ? 'selected' : ''; ?>>下班有效</option>
 					<option value="late" <?php echo $status === 'late' ? 'selected' : ''; ?>>迟到</option>
+					<option value="early_leave" <?php echo $status === 'early_leave' ? 'selected' : ''; ?>>早退</option>
 					<option value="absent" <?php echo $status === 'absent' ? 'selected' : ''; ?>>缺勤</option>
+					<option value="full_absent" <?php echo $status === 'full_absent' ? 'selected' : ''; ?>>完全缺勤</option>
+					<option value="only_face" <?php echo $status === 'only_face' ? 'selected' : ''; ?>>只刷脸</option>
+					<option value="only_badge" <?php echo $status === 'only_badge' ? 'selected' : ''; ?>>只刷卡</option>
+					<option value="invalid_late_related" <?php echo $status === 'invalid_late_related' ? 'selected' : ''; ?>>因无效考勤迟到</option>
+					<option value="invalid_early_leave_related" <?php echo $status === 'invalid_early_leave_related' ? 'selected' : ''; ?>>因无效考勤早退</option>
 					<option value="missing_checkout" <?php echo $status === 'missing_checkout' ? 'selected' : ''; ?>>缺少下班</option>
 				</select>
 			</div>
@@ -270,6 +289,7 @@ $totalPages = max(1, intval(ceil(max(0, $total) / $pageSize)));
 			<button class="btn btn-default" type="button" onclick="submitAttendanceExport()">导出Excel</button>
 			<?php if ($isAdmin) { ?>
 				<button class="btn btn-warning" type="button" onclick="syncAttendanceFlows()">同步流水</button>
+				<button class="btn btn-default" type="button" onclick="recalculateAttendanceReports()">重算日报</button>
 				<button class="btn btn-default" type="button" onclick="syncAttendanceGroups()">同步考勤组</button>
 			<?php } ?>
 		</form>
@@ -293,7 +313,9 @@ $totalPages = max(1, intval(ceil(max(0, $total) / $pageSize)));
 					<th>首次有效</th>
 					<th>最后有效</th>
 					<th>有效次数</th>
-					<th>状态</th>
+					<th>状态明细</th>
+					<th>只刷脸</th>
+					<th>只刷卡</th>
 					<th>迟到分钟</th>
 					<th>操作</th>
 				</tr>
@@ -309,13 +331,15 @@ $totalPages = max(1, intval(ceil(max(0, $total) / $pageSize)));
 					<td><?php echo attendanceH(attendanceShortTime($row['first_effective_at'] ?? 0)); ?></td>
 					<td><?php echo attendanceH(attendanceShortTime($row['last_effective_at'] ?? 0)); ?></td>
 					<td><?php echo attendanceNumber($row['effective_count'] ?? 0); ?></td>
-					<td><span class="attendance-status <?php echo attendanceH($rowStatus); ?>"><?php echo attendanceH(AttendanceModuleService::statusText($rowStatus)); ?></span></td>
+					<td class="attendance-status-text"><span class="attendance-status <?php echo attendanceH($rowStatus); ?>"><?php echo attendanceH(AttendanceModuleService::reportStatusText($row)); ?></span></td>
+					<td><?php echo attendanceNumber($row['invalid_face_count'] ?? 0); ?></td>
+					<td><?php echo attendanceNumber($row['invalid_badge_count'] ?? 0); ?></td>
 					<td><?php echo attendanceNumber($row['late_minutes'] ?? 0); ?></td>
 					<td><button type="button" class="btn btn-xs btn-default" onclick="showAttendanceTrace(<?php echo intval($row['id']); ?>)">溯源</button></td>
 				</tr>
 				<?php } ?>
 				<?php if (count($rows) === 0) { ?>
-				<tr><td colspan="11"><div class="attendance-empty">没有符合条件的考勤日报</div></td></tr>
+				<tr><td colspan="13"><div class="attendance-empty">没有符合条件的考勤日报</div></td></tr>
 				<?php } ?>
 			</tbody>
 		</table>
@@ -402,6 +426,26 @@ function syncAttendanceGroups() {
 			error: function(xhr) {
 				layui.layer.msg('提交失败：' + xhr.responseText);
 			}
+		});
+	});
+}
+function recalculateAttendanceReports() {
+	layui.use('layer', function() {
+		layui.layer.confirm('将按当前筛选日期范围重算考勤日报。昨天及以前属于封存日报，只会通过这类手动任务更新。确认继续？', function(index) {
+			layui.layer.close(index);
+			$.ajax({
+				type: 'POST',
+				url: '?action=recalculateAttendanceReports&page=panel&module=attendance&csrf=' + attendanceCsrf,
+				dataType: 'json',
+				data: {date_from: '<?php echo attendanceH($dateFrom); ?>', date_to: '<?php echo attendanceH($dateTo); ?>'},
+				success: function(resp) {
+					layui.layer.msg(resp.message || '已提交日报重算');
+					setTimeout(function(){ location.reload(); }, 800);
+				},
+				error: function(xhr) {
+					layui.layer.msg('提交失败：' + xhr.responseText);
+				}
+			});
 		});
 	});
 }

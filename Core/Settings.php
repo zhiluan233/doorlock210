@@ -52,7 +52,7 @@ class Settings {
             'attendance_oa_push_enabled' => 'false',
             'attendance_oa_push_path' => '/open/user/v1/attendanceEffective/upload',
             'attendance_oa_batch_size' => '100',
-            'attendance_export_fields' => 'work_date,employee_name,employee_no,group_name,scheduled_start,scheduled_end,first_effective_at,last_effective_at,effective_count,status,late_minutes,trace',
+            'attendance_export_fields' => 'work_date,employee_name,employee_no,group_name,scheduled_start,scheduled_end,first_effective_at,last_effective_at,effective_count,status_text,work_start_valid,work_end_valid,is_late,is_early_leave,is_full_absent,invalid_face_count,invalid_badge_count,invalid_late_count,invalid_early_leave_count,late_minutes',
             'attendance_effective_message_enabled' => 'false',
             'attendance_effective_message_template' => '有效考勤',
             'attendance_effective_message_card_template' => "**考勤结果** 有效考勤\n**考勤时间** {datetime}\n**考勤点位** {location}\n**工牌时间** {badge_datetime}\n**人脸时间** {face_datetime}",

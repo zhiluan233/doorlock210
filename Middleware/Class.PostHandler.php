@@ -819,6 +819,20 @@ class PostHandler {
 					Header("HTTP/1.1 400 Bad Request");
 					exit(json_encode($result, JSON_UNESCAPED_UNICODE));
 				break;
+				case "recalculateAttendanceReports":
+					$this->requireAdminUser();
+					Header("Content-Type: application/json; charset=utf-8");
+					if (!class_exists(__NAMESPACE__ . '\\AttendanceModuleService')) {
+						Header("HTTP/1.1 500 Internal Error");
+						exit(json_encode(['ok' => false, 'message' => '考勤模块未加载'], JSON_UNESCAPED_UNICODE));
+					}
+					$result = AttendanceModuleService::enqueueManualReportRecalculate($_POST['date_from'] ?? date('Y-m-d'), $_POST['date_to'] ?? date('Y-m-d'), 'manual_report_recalculate');
+					if (!empty($result['ok'])) {
+						exit(json_encode($result, JSON_UNESCAPED_UNICODE));
+					}
+					Header("HTTP/1.1 400 Bad Request");
+					exit(json_encode($result, JSON_UNESCAPED_UNICODE));
+				break;
 				case "exportAttendanceReports":
 					$this->requirePanelReader();
 					if (!class_exists(__NAMESPACE__ . '\\AttendanceModuleService')) {

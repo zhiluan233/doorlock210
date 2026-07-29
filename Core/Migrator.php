@@ -11,7 +11,7 @@ namespace anim210System;
 
 class Migrator {
 
-    const SCHEMA_VERSION = '20260728_attendance_notice';
+    const SCHEMA_VERSION = '20260729_attendance_report_status';
 
     public static function ensure()
     {
@@ -259,6 +259,20 @@ class Migrator {
             `effective_count` int unsigned NOT NULL DEFAULT 0,
             `late_minutes` int unsigned NOT NULL DEFAULT 0,
             `status` varchar(32) NOT NULL DEFAULT 'absent',
+            `status_flags` varchar(255) NOT NULL DEFAULT '',
+            `status_text` varchar(255) NOT NULL DEFAULT '',
+            `work_start_valid` tinyint(1) NOT NULL DEFAULT 0,
+            `work_end_valid` tinyint(1) NOT NULL DEFAULT 0,
+            `is_late` tinyint(1) NOT NULL DEFAULT 0,
+            `is_early_leave` tinyint(1) NOT NULL DEFAULT 0,
+            `is_full_absent` tinyint(1) NOT NULL DEFAULT 0,
+            `invalid_face_count` int unsigned NOT NULL DEFAULT 0,
+            `invalid_badge_count` int unsigned NOT NULL DEFAULT 0,
+            `invalid_total` int unsigned NOT NULL DEFAULT 0,
+            `invalid_late_count` int unsigned NOT NULL DEFAULT 0,
+            `invalid_early_leave_count` int unsigned NOT NULL DEFAULT 0,
+            `invalid_late_related` tinyint(1) NOT NULL DEFAULT 0,
+            `invalid_early_leave_related` tinyint(1) NOT NULL DEFAULT 0,
             `source_updated_at` int unsigned NOT NULL DEFAULT 0,
             `calculated_at` int unsigned NOT NULL DEFAULT 0,
             `raw_trace` mediumtext,
@@ -272,6 +286,7 @@ class Migrator {
             UNIQUE KEY `uniq_attendance_daily_report` (`report_hash`),
             KEY `idx_attendance_daily_person_date` (`person_key`, `work_date`),
             KEY `idx_attendance_daily_date_status` (`work_date`, `status`),
+            KEY `idx_attendance_daily_flags` (`work_date`, `is_late`, `is_early_leave`, `is_full_absent`),
             KEY `idx_attendance_daily_oa` (`oa_status`, `oa_next_retry`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4", $errors);
 
@@ -494,6 +509,20 @@ class Migrator {
         self::addColumn('access_role_members', 'member_kind', "varchar(20) NOT NULL DEFAULT 'employee'", $errors);
         self::addColumn('attendance_effective_records', 'location_name', "varchar(255) NOT NULL DEFAULT ''", $errors);
         self::addColumn('attendance_effective_records', 'device_name', "varchar(255) NOT NULL DEFAULT ''", $errors);
+        self::addColumn('attendance_daily_reports', 'status_flags', "varchar(255) NOT NULL DEFAULT ''", $errors);
+        self::addColumn('attendance_daily_reports', 'status_text', "varchar(255) NOT NULL DEFAULT ''", $errors);
+        self::addColumn('attendance_daily_reports', 'work_start_valid', "tinyint(1) NOT NULL DEFAULT 0", $errors);
+        self::addColumn('attendance_daily_reports', 'work_end_valid', "tinyint(1) NOT NULL DEFAULT 0", $errors);
+        self::addColumn('attendance_daily_reports', 'is_late', "tinyint(1) NOT NULL DEFAULT 0", $errors);
+        self::addColumn('attendance_daily_reports', 'is_early_leave', "tinyint(1) NOT NULL DEFAULT 0", $errors);
+        self::addColumn('attendance_daily_reports', 'is_full_absent', "tinyint(1) NOT NULL DEFAULT 0", $errors);
+        self::addColumn('attendance_daily_reports', 'invalid_face_count', "int unsigned NOT NULL DEFAULT 0", $errors);
+        self::addColumn('attendance_daily_reports', 'invalid_badge_count', "int unsigned NOT NULL DEFAULT 0", $errors);
+        self::addColumn('attendance_daily_reports', 'invalid_total', "int unsigned NOT NULL DEFAULT 0", $errors);
+        self::addColumn('attendance_daily_reports', 'invalid_late_count', "int unsigned NOT NULL DEFAULT 0", $errors);
+        self::addColumn('attendance_daily_reports', 'invalid_early_leave_count', "int unsigned NOT NULL DEFAULT 0", $errors);
+        self::addColumn('attendance_daily_reports', 'invalid_late_related', "tinyint(1) NOT NULL DEFAULT 0", $errors);
+        self::addColumn('attendance_daily_reports', 'invalid_early_leave_related', "tinyint(1) NOT NULL DEFAULT 0", $errors);
         self::addColumn('device_card_bindings', 'valid_to', "int unsigned NOT NULL DEFAULT 0", $errors);
         self::addColumn('device_card_sync_jobs', 'valid_to', "int unsigned NOT NULL DEFAULT 0", $errors);
 
@@ -538,6 +567,7 @@ class Migrator {
         self::addIndex('access_roles', 'idx_access_role_builtin', ['builtin_key'], $errors);
         self::addIndex('access_roles', 'idx_access_role_expires_at', ['expires_at'], $errors);
         self::addIndex('access_role_members', 'idx_access_role_member_kind', ['member_kind'], $errors);
+        self::addIndex('attendance_daily_reports', 'idx_attendance_daily_flags', ['work_date', 'is_late', 'is_early_leave', 'is_full_absent'], $errors);
 
         self::seedDefaults();
         self::normalizeRuntimeSettings($errors);

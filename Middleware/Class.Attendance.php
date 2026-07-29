@@ -441,6 +441,10 @@ class AttendanceService {
         $sent = 0;
         $failed = 0;
         foreach ($rows as $row) {
+            if (self::isHistoricalPunchTime($row['punch_time'] ?? 0)) {
+                self::markRowsSkipped([$row], 'message', '历史刷卡提醒已跳过');
+                continue;
+            }
             $resp = $feishu->sendInteractiveMessage($row['employee_open_id'], self::buildSwipeMessageCard($row), $row['event_hash']);
             if ($resp['ok']) {
                 self::markRowsSent([$row], 'message', json_encode($resp['data'], JSON_UNESCAPED_UNICODE));
@@ -838,7 +842,7 @@ class AttendanceService {
         $limit = max(1, intval($limit));
         $now = time();
         $target = mysqli_real_escape_string($conn, $target);
-        $where = "`need_{$target}`=1 AND `{$target}_status`<>'sent' AND `{$target}_next_retry` <= {$now}";
+        $where = "`need_{$target}`=1 AND `{$target}_status` IN ('pending','failed') AND `{$target}_next_retry` <= {$now}";
         if ($eventHash !== '') {
             $eventHash = mysqli_real_escape_string($conn, $eventHash);
             $where .= " AND `event_hash`='{$eventHash}'";
@@ -860,7 +864,7 @@ class AttendanceService {
 
         $now = time();
         $target = mysqli_real_escape_string($conn, $target);
-        $sql = "SELECT `id` FROM `attendance_queue` WHERE `need_{$target}`=1 AND `{$target}_status`<>'sent' AND `{$target}_next_retry` <= {$now} LIMIT 1";
+        $sql = "SELECT `id` FROM `attendance_queue` WHERE `need_{$target}`=1 AND `{$target}_status` IN ('pending','failed') AND `{$target}_next_retry` <= {$now} LIMIT 1";
         $rs = Database::query('attendance_queue', $sql, '', true);
         if ($rs && mysqli_fetch_assoc($rs)) {
             return true;
@@ -876,6 +880,11 @@ class AttendanceService {
     private static function markRowsFailed($rows, $target, $response)
     {
         self::markRows($rows, $target, 'failed', null, $response);
+    }
+
+    private static function markRowsSkipped($rows, $target, $response)
+    {
+        self::markRows($rows, $target, 'skipped', 0, $response);
     }
 
     private static function markRows($rows, $target, $status, $nextRetry, $response)
@@ -914,6 +923,12 @@ class AttendanceService {
         $max = max($base, Settings::getInt('queue_retry_max_seconds', 3600));
         $delay = $base * pow(2, min(6, max(0, $attempts - 1)));
         return min($max, intval($delay));
+    }
+
+    private static function isHistoricalPunchTime($timestamp)
+    {
+        $timestamp = intval($timestamp);
+        return $timestamp > 0 && $timestamp < strtotime(date('Y-m-d'));
     }
 
     private static function postJson($url, $body = null, $headers = [], $timeout = 10)
