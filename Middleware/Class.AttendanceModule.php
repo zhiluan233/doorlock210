@@ -859,6 +859,7 @@ class AttendanceModuleService {
             'employee_no' => $data['employee_no'] ?? '',
             'employee_name' => $data['employee_name'] ?? '',
             'card_id' => $data['card_id'] ?? '',
+            'flow_type' => intval($data['flow_type'] ?? -1),
             'punch_time' => intval($data['punch_time'] ?? 0),
             'punch_date' => $data['punch_date'] ?? date('Y-m-d', intval($data['punch_time'] ?? time())),
             'location_name' => $data['location_name'] ?? '',
@@ -896,6 +897,7 @@ class AttendanceModuleService {
             "`employee_no`=IF(VALUES(`employee_no`)='', `employee_no`, VALUES(`employee_no`))",
             "`employee_name`=IF(VALUES(`employee_name`)='', `employee_name`, VALUES(`employee_name`))",
             "`card_id`=IF(VALUES(`card_id`)='', `card_id`, VALUES(`card_id`))",
+            "`flow_type`=IF(VALUES(`flow_type`)=-1, `flow_type`, VALUES(`flow_type`))",
             "`location_name`=IF(VALUES(`location_name`)='', `location_name`, VALUES(`location_name`))",
             "`device_name`=IF(VALUES(`device_name`)='', `device_name`, VALUES(`device_name`))",
             "`raw_payload`=VALUES(`raw_payload`)",
@@ -945,6 +947,7 @@ class AttendanceModuleService {
         } else {
             $sourceKind = 'face';
         }
+        $flowType = self::extractFeishuFlowType($record);
         return self::upsertSourceRecord([
             'source' => 'feishu',
             'source_kind' => $sourceKind,
@@ -955,6 +958,7 @@ class AttendanceModuleService {
             'employee_no' => $employee['employee_id'] ?? ($identity['type'] === 'employee_no' ? $userId : trim((string)($record['employee_no'] ?? ''))),
             'employee_name' => $employee['name'] ?? ($record['employee_name'] ?? ''),
             'card_id' => '',
+            'flow_type' => $flowType,
             'punch_time' => $checkTime,
             'punch_date' => date('Y-m-d', $checkTime),
             'location_name' => $location,
@@ -1018,6 +1022,27 @@ class AttendanceModuleService {
             }
         }
         return ['type' => $preferredType, 'value' => '', 'employee' => null];
+    }
+
+    private static function extractFeishuFlowType($record)
+    {
+        if (!is_array($record)) {
+            return -1;
+        }
+        foreach (['type', 'record_type', 'flow_type', 'check_type'] as $key) {
+            if (isset($record[$key]) && is_numeric($record[$key])) {
+                return intval($record[$key]);
+            }
+        }
+        foreach (['record', 'user_flow', 'flow', 'data'] as $key) {
+            if (isset($record[$key]) && is_array($record[$key])) {
+                $type = self::extractFeishuFlowType($record[$key]);
+                if ($type >= 0) {
+                    return $type;
+                }
+            }
+        }
+        return -1;
     }
 
     private static function flowRecordsFromQueryResult($resultRow)
@@ -1200,11 +1225,13 @@ class AttendanceModuleService {
         mysqli_query($conn, "DELETE FROM `attendance_effective_records` WHERE `person_key`='{$safePerson}' AND `work_date`='{$safeDate}'");
         $records = self::fetchRows('attendance_source_records', "SELECT * FROM `attendance_source_records` WHERE `punch_date`='{$safeDate}' AND (CONCAT('open:', `employee_open_id`)='{$safePerson}' OR CONCAT('no:', `employee_no`)='{$safePerson}' OR CONCAT('user:', `employee_user_id`)='{$safePerson}') ORDER BY `punch_time` ASC, `id` ASC");
 
+        $group = self::groupForEmployee($employee, $personKey, $date);
         $interval = max(60, min(3600, Settings::getInt('attendance_pair_interval_seconds', 300)));
         $badges = [];
         $faces = [];
         $pairs = [];
         foreach ($records as $record) {
+            $record = self::normalizeSourceRecordRuntimeFields($record);
             $sourceKind = (string)($record['source_kind'] ?? '');
             if ($sourceKind === 'badge_shadow') {
                 $sourceKind = 'feishu_badge';
@@ -1212,8 +1239,8 @@ class AttendanceModuleService {
             if ($sourceKind === 'feishu_badge' && self::hasLocalBadgeMatch($records, $record)) {
                 continue;
             }
-            if ($sourceKind === 'exempt_face') {
-                $pairs[] = self::buildExemptPair($personKey, $date, $record);
+            if (self::sourceRecordBypassesDoubleCheck($record, $group)) {
+                $pairs[] = self::buildDirectPair($personKey, $date, $record, self::directBypassReason($record, $group));
                 continue;
             }
             $kind = in_array($sourceKind, ['badge', 'feishu_badge'], true) ? 'badge' : 'face';
@@ -1241,7 +1268,6 @@ class AttendanceModuleService {
             return intval($a['effective_time']) <=> intval($b['effective_time']);
         });
 
-        $group = self::groupForEmployee($employee, $personKey, $date);
         $rule = self::ruleSnapshot($group, $interval);
         $invalidStats = self::invalidAttendanceStats($badges, $faces, $pairs, $group, $date, $interval);
         $sequence = 0;
@@ -1434,8 +1460,18 @@ class AttendanceModuleService {
 
     private static function buildExemptPair($personKey, $date, $record)
     {
+        return self::buildDirectPair($personKey, $date, $record, 'location');
+    }
+
+    private static function buildDirectPair($personKey, $date, $record, $reason = 'direct')
+    {
         $time = intval($record['punch_time']);
-        $pairHash = hash('sha256', implode('|', [$personKey, $date, 'exempt', $record['id']]));
+        $reason = trim((string)$reason);
+        if ($reason === '') {
+            $reason = 'direct';
+        }
+        $role = self::sourceKindRole($record);
+        $pairHash = hash('sha256', implode('|', [$personKey, $date, $reason, $record['id']]));
         return [
             'pair_hash' => $pairHash,
             'person_key' => $personKey,
@@ -1445,14 +1481,16 @@ class AttendanceModuleService {
             'employee_name' => $record['employee_name'] ?? '',
             'work_date' => $date,
             'effective_time' => $time,
-            'badge_record_id' => 0,
-            'face_record_id' => intval($record['id']),
-            'badge_time' => 0,
-            'face_time' => $time,
+            'badge_record_id' => $role === 'badge' ? intval($record['id']) : 0,
+            'face_record_id' => $role === 'badge' ? 0 : intval($record['id']),
+            'badge_time' => $role === 'badge' ? $time : 0,
+            'face_time' => $role === 'badge' ? 0 : $time,
             'interval_seconds' => 0,
-            'status' => 'exempt',
+            'status' => $reason === 'location' ? 'exempt' : 'direct',
             'location_name' => $record['location_name'] ?? '',
-            'device_name' => $record['device_name'] ?? ''
+            'device_name' => $record['device_name'] ?? '',
+            'direct_reason' => $reason,
+            'suppress_message' => 1
         ];
     }
 
@@ -1463,8 +1501,9 @@ class AttendanceModuleService {
             'created_at' => $now,
             'updated_at' => $now
         ]);
+        unset($data['direct_reason'], $data['suppress_message']);
         $result = Database::insert('attendance_effective_records', $data);
-        if ($result === true && $notify) {
+        if ($result === true && $notify && empty($pair['suppress_message'])) {
             self::enqueueEffectiveMessage($pair);
         }
         if ($result === true) {
@@ -1562,6 +1601,10 @@ class AttendanceModuleService {
                 self::markEffectiveMessageSkipped([$row], '历史有效考勤提醒已跳过');
                 continue;
             }
+            if (in_array((string)($row['status_text'] ?? ''), ['direct', 'exempt'], true)) {
+                self::markEffectiveMessageSkipped([$row], '直接有效考勤不发送有效提醒');
+                continue;
+            }
             if (trim((string)($row['employee_open_id'] ?? '')) === '') {
                 self::markEffectiveMessageFailed([$row], '缺少飞书 open_id');
                 $failed++;
@@ -1639,6 +1682,7 @@ class AttendanceModuleService {
         $sent = 0;
         $failed = 0;
         foreach ($rows as $row) {
+            $row = self::normalizeSourceRecordRuntimeFields($row);
             $punchTime = intval($row['punch_time'] ?? 0);
             if (self::isHistoricalPunchTime($punchTime)) {
                 self::markIncompleteMessages([$row], 'skipped', 0, '历史补刷提醒已跳过');
@@ -1652,9 +1696,20 @@ class AttendanceModuleService {
                 self::markIncompleteMessages([$row], 'skipped', 0, '已完成双验证考勤');
                 continue;
             }
+            $personKey = self::personKeyFromRecord($row);
+            $employee = self::employeeByPersonKey($personKey);
+            $group = self::groupForEmployee($employee, $personKey, date('Y-m-d', $punchTime > 0 ? $punchTime : time()));
+            if (self::sourceRecordBypassesDoubleCheck($row, $group)) {
+                self::markIncompleteMessages([$row], 'skipped', 0, '该流水无需双验证提醒');
+                continue;
+            }
             $messageRow = self::buildIncompleteMessageRow($row, $interval, $lead);
             if (!$messageRow) {
                 self::markIncompleteMessages([$row], 'skipped', 0, '非上班/下班边界时段，不发送补刷提醒');
+                continue;
+            }
+            if (self::incompleteReminderWindowAlreadyHandled($row, $messageRow, $interval)) {
+                self::markIncompleteMessages([$row], 'skipped', 0, '同一窗口已有补刷提醒');
                 continue;
             }
             if (trim((string)($messageRow['employee_open_id'] ?? '')) === '') {
@@ -1735,6 +1790,123 @@ class AttendanceModuleService {
         return in_array($kind, ['badge', 'feishu_badge'], true) ? 'badge' : 'face';
     }
 
+    private static function normalizeSourceRecordRuntimeFields($row)
+    {
+        if (!is_array($row)) {
+            return [];
+        }
+        $flowType = intval($row['flow_type'] ?? -1);
+        if ($flowType < 0) {
+            $raw = self::decodePayload($row['raw_payload'] ?? '');
+            $flowType = self::extractFeishuFlowType($raw);
+            if ($flowType >= 0 && intval($row['id'] ?? 0) > 0) {
+                Database::update('attendance_source_records', [
+                    'flow_type' => $flowType,
+                    'updated_at' => time()
+                ], ['id' => intval($row['id'])]);
+            }
+        }
+        $row['flow_type'] = $flowType;
+        return $row;
+    }
+
+    private static function sourceRecordBypassesDoubleCheck($record, $group)
+    {
+        $record = self::normalizeSourceRecordRuntimeFields($record);
+        if (array_key_exists('need_punch', $group) && intval($group['need_punch']) === 0) {
+            return false;
+        }
+        if ((string)($record['source_kind'] ?? '') === 'exempt_face') {
+            return true;
+        }
+        if (self::isExemptFaceLocation($record['location_name'] ?? '')) {
+            return true;
+        }
+        if ((string)($record['source'] ?? '') !== 'feishu') {
+            return false;
+        }
+        if (self::groupBypassesDoubleCheck($group)) {
+            return true;
+        }
+        return self::flowTypeBypassesDoubleCheck(intval($record['flow_type'] ?? -1));
+    }
+
+    private static function directBypassReason($record, $group)
+    {
+        $record = self::normalizeSourceRecordRuntimeFields($record);
+        if ((string)($record['source'] ?? '') === 'feishu' && self::groupBypassesDoubleCheck($group)) {
+            return 'group';
+        }
+        if ((string)($record['source'] ?? '') === 'feishu' && self::flowTypeBypassesDoubleCheck(intval($record['flow_type'] ?? -1))) {
+            return 'type';
+        }
+        if ((string)($record['source_kind'] ?? '') === 'exempt_face' || self::isExemptFaceLocation($record['location_name'] ?? '')) {
+            return 'location';
+        }
+        return 'direct';
+    }
+
+    private static function groupBypassesDoubleCheck($group)
+    {
+        $configured = self::settingList('attendance_direct_success_group_keys');
+        if (count($configured) === 0 || !is_array($group)) {
+            return false;
+        }
+        $keys = [];
+        foreach (['feishu_group_id', 'group_key', 'name'] as $key) {
+            $value = trim((string)($group[$key] ?? ''));
+            if ($value !== '') {
+                $keys[] = $value;
+            }
+        }
+        $feishuGroupId = trim((string)($group['feishu_group_id'] ?? ''));
+        if ($feishuGroupId !== '') {
+            $keys[] = 'feishu:' . $feishuGroupId;
+        }
+        $keys = array_values(array_unique($keys));
+        foreach ($keys as $key) {
+            if (in_array($key, $configured, true)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static function flowTypeBypassesDoubleCheck($flowType)
+    {
+        $flowType = intval($flowType);
+        if ($flowType < 0) {
+            return false;
+        }
+        return in_array((string)$flowType, self::settingList('attendance_direct_success_flow_types'), true);
+    }
+
+    private static function settingList($key)
+    {
+        $value = Settings::get($key, '');
+        if (is_array($value)) {
+            $items = $value;
+        } else {
+            $decoded = json_decode((string)$value, true);
+            if (is_array($decoded)) {
+                $items = $decoded;
+            } else {
+                $items = preg_split('/[,\n;\s]+/', (string)$value);
+            }
+        }
+        $out = [];
+        foreach ($items as $item) {
+            if (is_array($item)) {
+                continue;
+            }
+            $item = trim((string)$item);
+            if ($item !== '') {
+                $out[] = $item;
+            }
+        }
+        return array_values(array_unique($out));
+    }
+
     private static function sourceRecordAlreadyEffective($row)
     {
         $id = intval($row['id'] ?? 0);
@@ -1762,6 +1934,38 @@ class AttendanceModuleService {
         $sql = "SELECT `id` FROM `attendance_source_records` WHERE `id`<>" . intval($row['id'] ?? 0) . " AND `punch_time` BETWEEN {$from} AND {$to} AND {$kindSql} AND (CONCAT('open:', `employee_open_id`)='{$safePerson}' OR CONCAT('no:', `employee_no`)='{$safePerson}' OR CONCAT('user:', `employee_user_id`)='{$safePerson}') LIMIT 1";
         $found = Database::querySingleLine('attendance_source_records', $sql, true);
         return $found ? true : false;
+    }
+
+    private static function incompleteReminderWindowAlreadyHandled($row, $messageRow, $interval)
+    {
+        $personKey = self::personKeyFromRecord($row);
+        if ($personKey === '') {
+            return false;
+        }
+        $time = intval($row['punch_time'] ?? 0);
+        if ($time <= 0) {
+            return false;
+        }
+        $from = max(0, $time - intval($interval));
+        $safePerson = Database::escape($personKey);
+        $phase = (string)($messageRow['phase'] ?? '');
+        $kindSql = self::sourceKindRole($row) === 'badge' ? "`source_kind` IN ('badge','feishu_badge')" : "`source_kind`='face'";
+        $sql = "SELECT * FROM `attendance_source_records` WHERE `id`<>" . intval($row['id'] ?? 0) . " AND `punch_time` BETWEEN {$from} AND {$time} AND {$kindSql} AND `warning_status` IN ('sent','failed') AND (CONCAT('open:', `employee_open_id`)='{$safePerson}' OR CONCAT('no:', `employee_no`)='{$safePerson}' OR CONCAT('user:', `employee_user_id`)='{$safePerson}') ORDER BY `punch_time` DESC, `id` DESC LIMIT 10";
+        $candidates = self::fetchRows('attendance_source_records', $sql);
+        if (count($candidates) === 0) {
+            return false;
+        }
+        foreach ($candidates as $candidate) {
+            $candidate = self::normalizeSourceRecordRuntimeFields($candidate);
+            $candidateRow = self::buildIncompleteMessageRow($candidate, $interval, 0);
+            if (!$candidateRow) {
+                continue;
+            }
+            if ((string)($candidateRow['phase'] ?? '') === $phase) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static function markIncompleteMessageSkippedBySourceIds($ids, $response)
@@ -2018,6 +2222,7 @@ class AttendanceModuleService {
                         'badge_time' => intval($pair['badge_time']),
                         'face_time' => intval($pair['face_time']),
                         'effective_time' => intval($pair['effective_time']),
+                        'direct_reason' => $pair['direct_reason'] ?? '',
                         'location_name' => $pair['location_name'] ?? '',
                         'device_name' => $pair['device_name'] ?? ''
                     ];
@@ -2592,6 +2797,8 @@ class AttendanceModuleService {
         }
         return [
             'id' => intval($group['id'] ?? 0),
+            'group_key' => $group['group_key'] ?? '',
+            'feishu_group_id' => $schedule['feishu_group_id'] ?? ($group['feishu_group_id'] ?? ''),
             'name' => $schedule['group_name'] ?: ($group['name'] ?? ($needPunch ? Settings::get('attendance_default_group_name', '默认考勤组') : '无需考勤')),
             'start_time' => $needPunch ? $startTime : '',
             'end_time' => $needPunch ? $endTime : '',
@@ -3228,6 +3435,8 @@ class AttendanceModuleService {
             'group_name' => $group['name'] ?? '',
             'start_time' => $group['start_time'] ?? '',
             'end_time' => $group['end_time'] ?? '',
+            'direct_success_flow_types' => self::settingList('attendance_direct_success_flow_types'),
+            'direct_success_group_keys' => self::settingList('attendance_direct_success_group_keys'),
             'effective_time_rule' => 'max(badge_time, face_time)'
         ];
     }
@@ -3388,6 +3597,7 @@ class AttendanceModuleService {
         $map = [
             'normal' => '正常',
             'exempt' => '免工牌有效',
+            'direct' => '飞书直接有效',
             'late' => '迟到',
             'absent' => '缺勤',
             'early_leave' => '早退',

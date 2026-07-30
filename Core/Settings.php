@@ -44,6 +44,8 @@ class Settings {
             'attendance_default_start_time' => '09:30',
             'attendance_default_end_time' => '18:30',
             'attendance_exempt_location_prefixes' => '',
+            'attendance_direct_success_flow_types' => '',
+            'attendance_direct_success_group_keys' => '',
             'attendance_full_sync_enabled' => 'true',
             'attendance_full_sync_times' => '13:00,13:30,14:00',
             'attendance_full_sync_window_days' => '2',

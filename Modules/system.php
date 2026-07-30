@@ -32,6 +32,44 @@ function settingValue($key) {
 	return htmlspecialchars(Settings::get($key, ''), ENT_QUOTES, 'UTF-8');
 }
 
+function settingListValues($key) {
+	$value = Settings::get($key, '');
+	$decoded = json_decode((string)$value, true);
+	$items = is_array($decoded) ? $decoded : preg_split('/[,\n;\s]+/', (string)$value);
+	$out = [];
+	foreach ($items as $item) {
+		if (is_array($item)) {
+			continue;
+		}
+		$item = trim((string)$item);
+		if ($item !== '') {
+			$out[] = $item;
+		}
+	}
+	return array_values(array_unique($out));
+}
+
+$attendanceDirectTypes = settingListValues('attendance_direct_success_flow_types');
+$attendanceDirectGroups = settingListValues('attendance_direct_success_group_keys');
+$attendanceGroups = [];
+$attendanceGroupRs = Database::query('attendance_groups', "SELECT * FROM `attendance_groups` WHERE `enabled`=1 ORDER BY `source` DESC, `name` ASC LIMIT 200", '', true);
+if ($attendanceGroupRs instanceof \mysqli_result) {
+	while ($groupRow = mysqli_fetch_assoc($attendanceGroupRs)) {
+		$attendanceGroups[] = $groupRow;
+	}
+	mysqli_free_result($attendanceGroupRs);
+}
+$attendanceTypeOptions = [
+	'0' => '0 用户自己打卡',
+	'1' => '1 管理员修改',
+	'2' => '2 用户补卡',
+	'3' => '3 系统自动生成',
+	'4' => '4 下班免打卡',
+	'5' => '5 考勤机打卡',
+	'6' => '6 极速打卡',
+	'7' => '7 开放平台导入'
+];
+
 ?>
 <div class="page-title">
 	<h3 class="breadcrumb-header">系统设置</h3>
@@ -93,7 +131,32 @@ function settingValue($key) {
 								<div class="layui-form-item"><label class="layui-form-label">默认考勤组</label><div class="layui-input-block"><input class="layui-input" name="attendance_default_group_name" value="<?php echo settingValue('attendance_default_group_name'); ?>"></div></div>
 								<div class="layui-form-item"><label class="layui-form-label">默认上班</label><div class="layui-input-block"><input class="layui-input" name="attendance_default_start_time" value="<?php echo settingValue('attendance_default_start_time'); ?>" placeholder="09:30"></div></div>
 								<div class="layui-form-item"><label class="layui-form-label">默认下班</label><div class="layui-input-block"><input class="layui-input" name="attendance_default_end_time" value="<?php echo settingValue('attendance_default_end_time'); ?>" placeholder="18:30"></div></div>
-								<div class="layui-form-item"><label class="layui-form-label">免工牌点位</label><div class="layui-input-block"><textarea class="layui-textarea" name="attendance_exempt_location_prefixes" rows="5" placeholder="飞书点位前缀，逗号、分号或换行分隔；命中后人脸打卡直接算有效考勤"><?php echo settingValue('attendance_exempt_location_prefixes'); ?></textarea></div></div>
+								<div class="layui-form-item"><label class="layui-form-label">直记点位</label><div class="layui-input-block"><textarea class="layui-textarea" name="attendance_exempt_location_prefixes" rows="5" placeholder="飞书 location_name 或考勤机点位前缀，逗号、分号或换行分隔；命中后直接算有效考勤"><?php echo settingValue('attendance_exempt_location_prefixes'); ?></textarea></div></div>
+								<div class="layui-form-item" pane>
+									<label class="layui-form-label">直记Type</label>
+									<div class="layui-input-block">
+										<?php foreach ($attendanceTypeOptions as $typeValue => $typeLabel) { ?>
+											<input type="checkbox" name="attendance_direct_success_flow_types[]" value="<?php echo htmlspecialchars($typeValue, ENT_QUOTES, 'UTF-8'); ?>" title="<?php echo htmlspecialchars($typeLabel, ENT_QUOTES, 'UTF-8'); ?>" <?php echo in_array($typeValue, $attendanceDirectTypes, true) ? 'checked' : ''; ?>>
+										<?php } ?>
+									</div>
+								</div>
+								<div class="layui-form-item" pane>
+									<label class="layui-form-label">直记考勤组</label>
+									<div class="layui-input-block" style="max-height:180px;overflow:auto;padding:8px 10px;">
+										<?php if (count($attendanceGroups) === 0) { ?>
+											<span class="text-muted">暂无已同步考勤组，请先在考勤板块同步。</span>
+										<?php } ?>
+										<?php foreach ($attendanceGroups as $groupRow) {
+											$groupKey = trim((string)($groupRow['feishu_group_id'] ?: $groupRow['group_key']));
+											if ($groupKey === '') { continue; }
+											$groupTitle = trim((string)($groupRow['name'] ?? $groupKey));
+											$groupMeta = trim((string)($groupRow['start_time'] ?? '')) . ' - ' . trim((string)($groupRow['end_time'] ?? '')) . ' / ' . intval($groupRow['member_count'] ?? 0) . '人';
+											$groupChecked = in_array($groupKey, $attendanceDirectGroups, true) || in_array('feishu:' . $groupKey, $attendanceDirectGroups, true);
+										?>
+											<input type="checkbox" name="attendance_direct_success_group_keys[]" value="<?php echo htmlspecialchars($groupKey, ENT_QUOTES, 'UTF-8'); ?>" title="<?php echo htmlspecialchars($groupTitle . '（' . $groupMeta . '）', ENT_QUOTES, 'UTF-8'); ?>" <?php echo $groupChecked ? 'checked' : ''; ?>>
+										<?php } ?>
+									</div>
+								</div>
 								<div class="layui-form-item"><label class="layui-form-label">有效提醒</label><div class="layui-input-block"><input type="checkbox" name="attendance_effective_message_enabled" value="true" lay-skin="switch" <?php echo checked('attendance_effective_message_enabled'); ?>></div></div>
 								<div class="layui-form-item"><label class="layui-form-label">提醒标题</label><div class="layui-input-block"><input class="layui-input" name="attendance_effective_message_template" value="<?php echo settingValue('attendance_effective_message_template'); ?>" placeholder="有效考勤"></div></div>
 								<div class="layui-form-item"><label class="layui-form-label">提醒卡片</label><div class="layui-input-block"><textarea class="layui-textarea" name="attendance_effective_message_card_template" rows="7" placeholder="支持 Markdown；也可填写飞书卡片 JSON，变量：{time} {date} {datetime} {name} {location} {badge_datetime} {face_datetime} {interval_seconds} {group} {employee_no}"><?php echo settingValue('attendance_effective_message_card_template'); ?></textarea></div></div>

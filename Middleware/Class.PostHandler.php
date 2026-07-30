@@ -963,6 +963,7 @@ class PostHandler {
 							'feishu_message_enabled', 'feishu_message_template', 'feishu_message_card_template', 'feishu_message_batch_size',
 							'attendance_module_enabled', 'attendance_pair_interval_seconds', 'attendance_late_grace_seconds',
 							'attendance_default_group_name', 'attendance_default_start_time', 'attendance_default_end_time', 'attendance_exempt_location_prefixes',
+							'attendance_direct_success_flow_types', 'attendance_direct_success_group_keys',
 							'attendance_full_sync_enabled', 'attendance_full_sync_times', 'attendance_full_sync_window_days', 'attendance_full_sync_batch_size',
 							'attendance_recalculate_batch_size', 'attendance_oa_push_enabled', 'attendance_oa_push_path', 'attendance_oa_batch_size', 'attendance_export_fields',
 							'attendance_effective_message_enabled', 'attendance_effective_message_template', 'attendance_effective_message_card_template', 'attendance_effective_message_batch_size',
@@ -980,10 +981,42 @@ class PostHandler {
 								$data[$key] = $_POST[$key];
 							}
 						}
+						foreach (['attendance_direct_success_flow_types', 'attendance_direct_success_group_keys'] as $listKey) {
+							if (!isset($data[$listKey])) {
+								$data[$listKey] = '';
+							} elseif (is_array($data[$listKey])) {
+								$clean = [];
+								foreach ($data[$listKey] as $item) {
+									$item = trim((string)$item);
+									if ($item !== '' && !in_array($item, $clean, true)) {
+										$clean[] = $item;
+									}
+								}
+								$data[$listKey] = $clean;
+							}
+						}
 						foreach (['oa_attendance_enabled','feishu_attendance_enabled','card_as_attendance_enabled','feishu_message_enabled','attendance_module_enabled','attendance_full_sync_enabled','attendance_oa_push_enabled','attendance_effective_message_enabled','attendance_incomplete_message_enabled','feishu_event_enabled','feishu_contact_sync_enabled','feishu_contact_sync_release_missing','feishu_oauth_enabled','remote_open_enabled'] as $boolKey) {
 							if (!isset($data[$boolKey])) {
 								$data[$boolKey] = 'false';
 							}
+						}
+						if (isset($data['attendance_direct_success_flow_types'])) {
+							$types = is_array($data['attendance_direct_success_flow_types']) ? $data['attendance_direct_success_flow_types'] : preg_split('/[,\n;\s]+/', (string)$data['attendance_direct_success_flow_types']);
+							$cleanTypes = [];
+							foreach ($types as $type) {
+								$type = trim((string)$type);
+								if ($type === '') {
+									continue;
+								}
+								if (!preg_match('/^[0-7]$/', $type)) {
+									Header("HTTP/1.1 400 Bad Request");
+									exit("飞书流水 Type 只能选择 0-7");
+								}
+								if (!in_array($type, $cleanTypes, true)) {
+									$cleanTypes[] = $type;
+								}
+							}
+							$data['attendance_direct_success_flow_types'] = $cleanTypes;
 						}
 						if (isset($data['feishu_contact_sync_daily_time']) && !preg_match('/^\d{2}:\d{2}$/', $data['feishu_contact_sync_daily_time'])) {
 							Header("HTTP/1.1 400 Bad Request");

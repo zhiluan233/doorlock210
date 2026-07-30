@@ -58,6 +58,8 @@ AMT 凭证也继续放在 `config.php` 的 `oa.appId` 和 `oa.appSecret`。
 - `配对间隔秒`：默认 300 秒。
 - `迟到宽限秒`：默认 60 秒。
 - `免工牌点位`：异地分子公司、外部人脸点位前缀。
+- `直记Type`：飞书流水 `type` 白名单，命中后直接记有效考勤，不进行双验证，也不推送有效考勤成功提醒。
+- `直记考勤组`：完全依赖飞书假勤的考勤组白名单，命中后该组任意飞书流水直接记有效考勤；优先级高于 Type 设置。
 - `有效提醒`：有效考勤生成后向员工推送飞书卡片消息，失败进入重试队列。
 - `提醒标题` / `提醒卡片` / `提醒批量`：配置有效考勤提醒的卡片标题、Markdown 或飞书卡片 JSON、单轮发送数量。
 - `补刷提醒`：单边刷脸/刷卡在配对截止前仍未完成双验证时，向员工推送红色飞书卡片；仅上班时间及以前、下班时间及以后触发。
@@ -119,6 +121,8 @@ https://你的域名/?action=feishuWebhook
 - 节假日或特殊日被算缺勤：检查 `attendanceUserDailyShiftsQuery` endpoint、每日班表读取权限，以及 `attendance_daily_schedules` 当天是否存在 `need_punch=0` 记录。
 - 事件不进系统：检查事件订阅 URL、Token、Encrypt Key 和事件类型；用户打卡成功事件如果缺少点位，系统会按 `record_id` 补查单条流水。
 - 免工牌点位不生效：确认配置的是飞书 `location_name` 的前缀，不是设备名。
+- 直记考勤组不生效：先同步考勤组，再在系统设置中勾选；如果日报使用每日班表，确认 `attendance_daily_schedules.feishu_group_id` 已写入。
+- 直记Type不生效：检查 `attendance_source_records.flow_type` 是否已写入；历史 raw 中有 `type` 的记录会在重算时逐步回填。
 - 日报缺少工牌证据：确认本地 `logs` 有员工开门成功记录；全量同步会回填历史 `logs`，如果本地历史缺失，会使用飞书 `工牌-` 流水作为历史工牌证据参与计算。
 - 历史日报没有自动变化：这是按天封存策略；请在考勤管理页手动指定日期范围重算。
 - 点位显示为 `-`：系统会按批次从飞书流水 `raw_payload` 回填 `location_name`；GPS 点位读取 `location_name`，考勤机流水只有 `device_id` 时显示为 `考勤机-{device_id}`。

@@ -11,7 +11,7 @@ namespace anim210System;
 
 class Migrator {
 
-    const SCHEMA_VERSION = '20260729_attendance_daily_schedule';
+    const SCHEMA_VERSION = '20260730_attendance_bypass_rules';
 
     public static function ensure()
     {
@@ -165,6 +165,7 @@ class Migrator {
             `employee_no` varchar(128) NOT NULL DEFAULT '',
             `employee_name` varchar(255) NOT NULL DEFAULT '',
             `card_id` varchar(64) NOT NULL DEFAULT '',
+            `flow_type` int NOT NULL DEFAULT -1,
             `punch_time` int unsigned NOT NULL DEFAULT 0,
             `punch_date` date NOT NULL,
             `location_name` varchar(255) NOT NULL DEFAULT '',
@@ -182,6 +183,7 @@ class Migrator {
             KEY `idx_attendance_source_open_time` (`employee_open_id`, `punch_time`),
             KEY `idx_attendance_source_no_time` (`employee_no`, `punch_time`),
             KEY `idx_attendance_source_date_kind` (`punch_date`, `source_kind`),
+            KEY `idx_attendance_source_flow_type` (`punch_date`, `flow_type`),
             KEY `idx_attendance_source_warning` (`warning_status`, `warning_next_retry`, `punch_time`),
             KEY `idx_attendance_source_event` (`event_id`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4", $errors);
@@ -558,6 +560,7 @@ class Migrator {
         self::addColumn('access_roles', 'builtin_key', "varchar(64) NOT NULL DEFAULT ''", $errors);
         self::addColumn('access_roles', 'expires_at', "int unsigned NOT NULL DEFAULT 0", $errors);
         self::addColumn('access_role_members', 'member_kind', "varchar(20) NOT NULL DEFAULT 'employee'", $errors);
+        self::addColumn('attendance_source_records', 'flow_type', "int NOT NULL DEFAULT -1 AFTER `card_id`", $errors);
         self::addColumn('attendance_source_records', 'warning_status', "varchar(20) NOT NULL DEFAULT 'pending'", $errors);
         self::addColumn('attendance_source_records', 'warning_attempts', "int unsigned NOT NULL DEFAULT 0", $errors);
         self::addColumn('attendance_source_records', 'warning_next_retry', "int unsigned NOT NULL DEFAULT 0", $errors);
@@ -628,6 +631,7 @@ class Migrator {
         self::addIndex('access_roles', 'idx_access_role_expires_at', ['expires_at'], $errors);
         self::addIndex('access_role_members', 'idx_access_role_member_kind', ['member_kind'], $errors);
         self::addIndex('attendance_source_records', 'idx_attendance_source_warning', ['warning_status', 'warning_next_retry', 'punch_time'], $errors);
+        self::addIndex('attendance_source_records', 'idx_attendance_source_flow_type', ['punch_date', 'flow_type'], $errors);
         self::addIndex('attendance_daily_reports', 'idx_attendance_daily_flags', ['work_date', 'is_late', 'is_early_leave', 'is_full_absent'], $errors);
 
         self::seedDefaults();
