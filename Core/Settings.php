@@ -39,6 +39,7 @@ class Settings {
 
             'attendance_module_enabled' => 'false',
             'attendance_pair_interval_seconds' => '300',
+            'attendance_pair_effective_time_rule' => 'latest',
             'attendance_late_grace_seconds' => '60',
             'attendance_default_group_name' => '默认考勤组',
             'attendance_default_start_time' => '09:30',

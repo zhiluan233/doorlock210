@@ -1434,7 +1434,7 @@ class AttendanceModuleService {
     {
         $badgeTime = intval($badge['punch_time']);
         $faceTime = intval($face['punch_time']);
-        $effectiveTime = max($badgeTime, $faceTime);
+        $effectiveTime = self::pairEffectiveTime($badgeTime, $faceTime);
         $pairHash = hash('sha256', implode('|', [$personKey, $date, $badge['id'], $face['id']]));
         $locationName = self::effectiveLocationName($badge, $face);
         $deviceName = self::effectiveDeviceName($badge, $face);
@@ -1456,6 +1456,27 @@ class AttendanceModuleService {
             'location_name' => $locationName,
             'device_name' => $deviceName
         ];
+    }
+
+    private static function pairEffectiveTime($badgeTime, $faceTime)
+    {
+        $badgeTime = intval($badgeTime);
+        $faceTime = intval($faceTime);
+        if (self::pairEffectiveTimeRule() === 'earliest') {
+            return min($badgeTime, $faceTime);
+        }
+        return max($badgeTime, $faceTime);
+    }
+
+    private static function pairEffectiveTimeRule()
+    {
+        $rule = Settings::get('attendance_pair_effective_time_rule', 'latest');
+        return $rule === 'earliest' ? 'earliest' : 'latest';
+    }
+
+    private static function pairEffectiveTimeRuleText()
+    {
+        return self::pairEffectiveTimeRule() === 'earliest' ? 'min(badge_time, face_time)' : 'max(badge_time, face_time)';
     }
 
     private static function buildExemptPair($personKey, $date, $record)
@@ -3437,7 +3458,8 @@ class AttendanceModuleService {
             'end_time' => $group['end_time'] ?? '',
             'direct_success_flow_types' => self::settingList('attendance_direct_success_flow_types'),
             'direct_success_group_keys' => self::settingList('attendance_direct_success_group_keys'),
-            'effective_time_rule' => 'max(badge_time, face_time)'
+            'effective_time_rule' => self::pairEffectiveTimeRuleText(),
+            'effective_time_rule_mode' => self::pairEffectiveTimeRule()
         ];
     }
 

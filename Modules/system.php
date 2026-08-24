@@ -127,6 +127,15 @@ $attendanceTypeOptions = [
 								<h5>考勤模块</h5>
 								<div class="layui-form-item"><label class="layui-form-label">启用模块</label><div class="layui-input-block"><input type="checkbox" name="attendance_module_enabled" value="true" lay-skin="switch" <?php echo checked('attendance_module_enabled'); ?>></div></div>
 								<div class="layui-form-item"><label class="layui-form-label">配对间隔秒</label><div class="layui-input-block"><input class="layui-input" name="attendance_pair_interval_seconds" value="<?php echo settingValue('attendance_pair_interval_seconds'); ?>" placeholder="默认300"></div></div>
+								<div class="layui-form-item">
+									<label class="layui-form-label">有效时间</label>
+									<div class="layui-input-block">
+										<select name="attendance_pair_effective_time_rule">
+											<option value="latest" <?php echo Settings::get('attendance_pair_effective_time_rule', 'latest') === 'latest' ? 'selected' : ''; ?>>最后一次认证</option>
+											<option value="earliest" <?php echo Settings::get('attendance_pair_effective_time_rule', 'latest') === 'earliest' ? 'selected' : ''; ?>>最早一次认证</option>
+										</select>
+									</div>
+								</div>
 								<div class="layui-form-item"><label class="layui-form-label">迟到宽限秒</label><div class="layui-input-block"><input class="layui-input" name="attendance_late_grace_seconds" value="<?php echo settingValue('attendance_late_grace_seconds'); ?>" placeholder="默认60"></div></div>
 								<div class="layui-form-item"><label class="layui-form-label">默认考勤组</label><div class="layui-input-block"><input class="layui-input" name="attendance_default_group_name" value="<?php echo settingValue('attendance_default_group_name'); ?>"></div></div>
 								<div class="layui-form-item"><label class="layui-form-label">默认上班</label><div class="layui-input-block"><input class="layui-input" name="attendance_default_start_time" value="<?php echo settingValue('attendance_default_start_time'); ?>" placeholder="09:30"></div></div>

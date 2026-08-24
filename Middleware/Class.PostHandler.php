@@ -961,7 +961,7 @@ class PostHandler {
 							'feishu_attendance_enabled', 'card_as_attendance_enabled', 'feishu_attendance_mode',
 							'feishu_employee_id_type', 'feishu_attendance_batch_size', 'feishu_attendance_cron_max_batches', 'feishu_attendance_batch_interval_ms',
 							'feishu_message_enabled', 'feishu_message_template', 'feishu_message_card_template', 'feishu_message_batch_size',
-							'attendance_module_enabled', 'attendance_pair_interval_seconds', 'attendance_late_grace_seconds',
+							'attendance_module_enabled', 'attendance_pair_interval_seconds', 'attendance_pair_effective_time_rule', 'attendance_late_grace_seconds',
 							'attendance_default_group_name', 'attendance_default_start_time', 'attendance_default_end_time', 'attendance_exempt_location_prefixes',
 							'attendance_direct_success_flow_types', 'attendance_direct_success_group_keys',
 							'attendance_full_sync_enabled', 'attendance_full_sync_times', 'attendance_full_sync_window_days', 'attendance_full_sync_batch_size',
@@ -1025,6 +1025,10 @@ class PostHandler {
 						if (isset($data['feishu_attendance_mode']) && !in_array($data['feishu_attendance_mode'], ['flow', 'custom'], true)) {
 							Header("HTTP/1.1 400 Bad Request");
 							exit("飞书考勤推送模式不合法");
+						}
+						if (isset($data['attendance_pair_effective_time_rule']) && !in_array($data['attendance_pair_effective_time_rule'], ['latest', 'earliest'], true)) {
+							Header("HTTP/1.1 400 Bad Request");
+							exit("双认证有效时间规则不合法");
 						}
 						if (isset($data['feishu_oauth_prompt']) && !in_array($data['feishu_oauth_prompt'], ['', 'consent'], true)) {
 							Header("HTTP/1.1 400 Bad Request");

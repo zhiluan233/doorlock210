@@ -11,7 +11,7 @@ namespace anim210System;
 
 class Migrator {
 
-    const SCHEMA_VERSION = '20260730_attendance_bypass_rules';
+    const SCHEMA_VERSION = '20260824_attendance_pair_effective_time_rule';
 
     public static function ensure()
     {
