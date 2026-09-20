@@ -947,6 +947,97 @@ class PostHandler {
 						exit("你没有足够的权限这么做");
 					}
 				break;
+				case "saveFocusCardSettings":
+						$this->requireAdminUser();
+						$enabled = $this->truthy($_POST['focus_card_alert_enabled'] ?? 'false');
+						$urgentApp = $this->truthy($_POST['focus_card_urgent_app_enabled'] ?? 'false');
+						$urgentSms = $this->truthy($_POST['focus_card_urgent_sms_enabled'] ?? 'false');
+						$urgentPhone = $this->truthy($_POST['focus_card_urgent_phone_enabled'] ?? 'false');
+
+						$cardInput = json_decode((string)($_POST['focus_card_numbers'] ?? '[]'), true);
+						if (!is_array($cardInput)) {
+							Header("HTTP/1.1 400 Bad Request");
+							exit("重点卡号格式错误");
+						}
+						$cards = [];
+						foreach ($cardInput as $cardId) {
+							$cardId = trim((string)$cardId);
+							if (!preg_match('/^\d{1,10}$/', $cardId)) {
+								Header("HTTP/1.1 400 Bad Request");
+								exit("重点卡号必须是1-10位数字");
+							}
+							$cardId = AttendanceService::normalizeCardNumber($cardId);
+							if (!in_array($cardId, $cards, true)) {
+								$cards[] = $cardId;
+							}
+						}
+						if (count($cards) > 500) {
+							Header("HTTP/1.1 400 Bad Request");
+							exit("重点卡号最多设置500张");
+						}
+
+						$recipientInput = json_decode((string)($_POST['focus_card_recipient_open_ids'] ?? '[]'), true);
+						if (!is_array($recipientInput)) {
+							Header("HTTP/1.1 400 Bad Request");
+							exit("飞书接收人格式错误");
+						}
+						$recipientIds = [];
+						foreach ($recipientInput as $openId) {
+							$openId = trim((string)$openId);
+							if ($openId === '' || in_array($openId, $recipientIds, true)) {
+								continue;
+							}
+							$employee = Database::querySingleLine('employee', ['open_id' => $openId]);
+							if (!$employee) {
+								Header("HTTP/1.1 400 Bad Request");
+								exit("飞书接收人不存在或已从通讯录删除：" . $openId);
+							}
+							$recipientIds[] = $openId;
+						}
+						if (count($recipientIds) > 200) {
+							Header("HTTP/1.1 400 Bad Request");
+							exit("飞书接收人最多设置200人");
+						}
+
+						$batchSize = $_POST['focus_card_message_batch_size'] ?? '50';
+						if (!is_numeric($batchSize) || intval($batchSize) < 1 || intval($batchSize) > 200) {
+							Header("HTTP/1.1 400 Bad Request");
+							exit("重点卡片队列批量应为1-200");
+						}
+						if ($enabled && count($cards) === 0) {
+							Header("HTTP/1.1 400 Bad Request");
+							exit("启用重点关注提醒前请至少添加一张卡片");
+						}
+						if ($enabled && count($recipientIds) === 0) {
+							Header("HTTP/1.1 400 Bad Request");
+							exit("启用重点关注提醒前请至少添加一个飞书接收人");
+						}
+						if ($enabled && !$urgentApp && !$urgentSms && !$urgentPhone) {
+							Header("HTTP/1.1 400 Bad Request");
+							exit("启用重点关注提醒前请至少选择一种加急方式");
+						}
+
+						$focusSettings = [
+							'focus_card_alert_enabled' => $enabled ? 'true' : 'false',
+							'focus_card_numbers' => $cards,
+							'focus_card_recipient_open_ids' => $recipientIds,
+							'focus_card_urgent_app_enabled' => $urgentApp ? 'true' : 'false',
+							'focus_card_urgent_sms_enabled' => $urgentSms ? 'true' : 'false',
+							'focus_card_urgent_phone_enabled' => $urgentPhone ? 'true' : 'false',
+							'focus_card_message_batch_size' => (string)intval($batchSize)
+						];
+						global $conn;
+						mysqli_begin_transaction($conn);
+						$result = Settings::setMany($focusSettings);
+						if ($result === true) {
+							mysqli_commit($conn);
+							exit("重点关注卡片设置已保存");
+						}
+						mysqli_rollback($conn);
+						Settings::invalidate();
+						Header("HTTP/1.1 500 Internal Error");
+						exit("重点关注卡片设置保存失败：" . $result);
+				break;
 				case "saveSystemSettings":
 					$um = new anim210System\UserCheck();
 					if($um->isLogged()) {

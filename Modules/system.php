@@ -70,11 +70,110 @@ $attendanceTypeOptions = [
 	'7' => '7 开放平台导入'
 ];
 
+$focusCardNumbers = settingListValues('focus_card_numbers');
+$focusRecipientIds = settingListValues('focus_card_recipient_open_ids');
+$focusRecipientOptions = [];
+$focusRecipientNames = [];
+$focusRecipientRs = Database::query('employee', "SELECT `open_id`, `name`, `realname`, `employee_id`, `department_name`, `status` FROM `employee` WHERE `open_id`<>'' ORDER BY `status` DESC, `name` ASC", '', true);
+if ($focusRecipientRs instanceof \mysqli_result) {
+	while ($employeeRow = mysqli_fetch_assoc($focusRecipientRs)) {
+		$openId = trim((string)($employeeRow['open_id'] ?? ''));
+		if ($openId === '') {
+			continue;
+		}
+		$name = trim((string)($employeeRow['name'] ?? ''));
+		if ($name === '') {
+			$name = trim((string)($employeeRow['realname'] ?? ''));
+		}
+		if ($name === '') {
+			$name = $openId;
+		}
+		$parts = [];
+		if (!empty($employeeRow['employee_id'])) {
+			$parts[] = $employeeRow['employee_id'];
+		}
+		if (!empty($employeeRow['department_name'])) {
+			$parts[] = $employeeRow['department_name'];
+		}
+		if (($employeeRow['status'] ?? '') !== 'true') {
+			$parts[] = '已停用';
+		}
+		$label = $name . (count($parts) > 0 ? '（' . implode(' / ', $parts) . '）' : '');
+		$focusRecipientOptions[] = ['open_id' => $openId, 'name' => $name, 'label' => $label];
+		$focusRecipientNames[$openId] = $name;
+	}
+	mysqli_free_result($focusRecipientRs);
+}
+$focusSelectedRecipients = [];
+foreach ($focusRecipientIds as $openId) {
+	$focusSelectedRecipients[] = ['open_id' => $openId, 'name' => $focusRecipientNames[$openId] ?? $openId];
+}
+
 ?>
+<style>
+.focus-setting-list{min-height:42px;margin:0 0 18px 110px;padding:8px;border:1px solid #e6e6e6;background:#fafafa;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.focus-setting-tag{display:inline-flex;align-items:center;gap:7px;padding:5px 9px;background:#fff;border:1px solid #d9d9d9;border-radius:3px;line-height:20px}
+.focus-setting-tag button{border:0;background:transparent;color:#d93025;cursor:pointer;padding:0;font-size:16px;line-height:18px}
+.focus-setting-empty{color:#999}
+@media (max-width:768px){.focus-setting-list{margin-left:0}.layui-input-block[style*="display:flex"]{margin-left:0!important;flex-wrap:wrap}.layui-input-block[style*="display:flex"] .layui-form-select{flex:1;min-width:220px}}
+</style>
 <div class="page-title">
 	<h3 class="breadcrumb-header">系统设置</h3>
 </div>
 <div id="main-wrapper">
+	<div class="row">
+		<div class="col-md-12">
+			<div class="panel panel-white">
+				<div class="panel-body" style="font-weight:400;overflow-x:auto;">
+					<h4 style="font-weight:400">重点关注卡片</h4>
+					<p class="text-muted">命中卡号后立即将红色卡片发送给全部接收人，并按所选方式加急；发送进度写入任务队列，失败后自动重试。</p><br>
+					<form class="layui-form layui-form-pane" id="focusCardForm">
+						<div class="layui-row layui-col-space20">
+							<div class="layui-col-md6">
+								<div class="layui-form-item"><label class="layui-form-label">启用提醒</label><div class="layui-input-block"><input type="checkbox" name="focus_card_alert_enabled" value="true" lay-skin="switch" <?php echo checked('focus_card_alert_enabled'); ?>></div></div>
+								<div class="layui-form-item">
+									<label class="layui-form-label">重点卡号</label>
+									<div class="layui-input-block" style="display:flex;gap:8px;">
+										<input class="layui-input" id="focusCardNumberInput" inputmode="numeric" maxlength="10" placeholder="输入1-10位数字卡号">
+										<button type="button" class="layui-btn layui-btn-primary" onclick="addFocusCard()">添加卡片</button>
+									</div>
+								</div>
+								<input type="hidden" name="focus_card_numbers" id="focusCardNumbersValue">
+								<div id="focusCardNumberList" class="focus-setting-list"></div>
+							</div>
+							<div class="layui-col-md6">
+								<div class="layui-form-item">
+									<label class="layui-form-label">飞书接收人</label>
+									<div class="layui-input-block" style="display:flex;gap:8px;">
+										<select id="focusRecipientPicker" lay-search>
+											<option value="">请选择飞书用户</option>
+											<?php foreach ($focusRecipientOptions as $recipientOption) { ?>
+												<option value="<?php echo htmlspecialchars($recipientOption['open_id'], ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars($recipientOption['label'], ENT_QUOTES, 'UTF-8'); ?></option>
+											<?php } ?>
+										</select>
+										<button type="button" class="layui-btn layui-btn-primary" onclick="addFocusRecipient()">添加接收人</button>
+									</div>
+								</div>
+								<input type="hidden" name="focus_card_recipient_open_ids" id="focusRecipientIdsValue">
+								<div id="focusRecipientList" class="focus-setting-list"></div>
+							</div>
+						</div>
+						<div class="layui-form-item" pane>
+							<label class="layui-form-label">加急方式</label>
+							<div class="layui-input-block">
+								<input type="checkbox" name="focus_card_urgent_app_enabled" value="true" title="应用内加急" <?php echo checked('focus_card_urgent_app_enabled'); ?>>
+								<input type="checkbox" name="focus_card_urgent_sms_enabled" value="true" title="短信加急" <?php echo checked('focus_card_urgent_sms_enabled'); ?>>
+								<input type="checkbox" name="focus_card_urgent_phone_enabled" value="true" title="电话加急" <?php echo checked('focus_card_urgent_phone_enabled'); ?>>
+							</div>
+						</div>
+						<div class="layui-form-item"><label class="layui-form-label">队列批量</label><div class="layui-input-block"><input class="layui-input" name="focus_card_message_batch_size" value="<?php echo settingValue('focus_card_message_batch_size'); ?>" placeholder="1-200"></div></div>
+						<p class="text-muted">短信和电话加急会消耗企业加急额度；三种方式可同时勾选。飞书应用需开通对应的应用内、短信、电话加急权限。</p>
+						<div class="layui-form-item"><button type="button" class="layui-btn" onclick="saveFocusCardSettings()">保存重点关注设置</button></div>
+					</form>
+				</div>
+			</div>
+		</div>
+	</div>
 	<div class="row">
 		<div class="col-md-12">
 			<div class="panel panel-white">
@@ -253,7 +352,101 @@ $attendanceTypeOptions = [
 <script src="asset/layui/layui.js"></script>
 <script>
 var csrf_token = "<?php echo $_SESSION['token']; ?>";
+var focusCardNumbers = <?php echo json_encode(array_values($focusCardNumbers), JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
+var focusRecipients = <?php echo json_encode(array_values($focusSelectedRecipients), JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
 layui.use(['layer', 'form'], function(){
+	var form = layui.form;
+	function renderFocusSettings() {
+		$('#focusCardNumbersValue').val(JSON.stringify(focusCardNumbers));
+		$('#focusRecipientIdsValue').val(JSON.stringify(focusRecipients.map(function(item){ return item.open_id; })));
+		var cardList = $('#focusCardNumberList').empty();
+		if (!focusCardNumbers.length) {
+			cardList.append($('<span class="focus-setting-empty">尚未添加重点卡号</span>'));
+		}
+		focusCardNumbers.forEach(function(cardId, index){
+			var tag = $('<span class="focus-setting-tag"></span>').append($('<span></span>').text(cardId));
+			tag.append($('<button type="button" title="移除">×</button>').on('click', function(){ window.removeFocusCard(index); }));
+			cardList.append(tag);
+		});
+		var recipientList = $('#focusRecipientList').empty();
+		if (!focusRecipients.length) {
+			recipientList.append($('<span class="focus-setting-empty">尚未添加飞书接收人</span>'));
+		}
+		focusRecipients.forEach(function(recipient, index){
+			var tag = $('<span class="focus-setting-tag"></span>').append($('<span></span>').text(recipient.name));
+			tag.append($('<button type="button" title="移除">×</button>').on('click', function(){ window.removeFocusRecipient(index); }));
+			recipientList.append(tag);
+		});
+	}
+	window.addFocusCard = function() {
+		var raw = $.trim($('#focusCardNumberInput').val());
+		if (!/^\d{1,10}$/.test(raw)) {
+			layui.layer.msg('卡号必须是1-10位数字');
+			return;
+		}
+		var cardId = raw.padStart(10, '0');
+		if (focusCardNumbers.indexOf(cardId) !== -1) {
+			layui.layer.msg('该卡号已经添加');
+			return;
+		}
+		focusCardNumbers.push(cardId);
+		$('#focusCardNumberInput').val('');
+		renderFocusSettings();
+	};
+	window.removeFocusCard = function(index) {
+		focusCardNumbers.splice(index, 1);
+		renderFocusSettings();
+	};
+	window.addFocusRecipient = function() {
+		var picker = $('#focusRecipientPicker');
+		var openId = $.trim(picker.val());
+		if (!openId) {
+			layui.layer.msg('请选择飞书接收人');
+			return;
+		}
+		if (focusRecipients.some(function(item){ return item.open_id === openId; })) {
+			layui.layer.msg('该接收人已经添加');
+			return;
+		}
+		if (focusRecipients.length >= 200) {
+			layui.layer.msg('接收人最多设置200人');
+			return;
+		}
+		var label = picker.find('option:selected').text();
+		var name = $.trim(label.replace(/（.*$/, '')) || openId;
+		focusRecipients.push({open_id: openId, name: name});
+		picker.val('');
+		form.render('select');
+		renderFocusSettings();
+	};
+	window.removeFocusRecipient = function(index) {
+		focusRecipients.splice(index, 1);
+		renderFocusSettings();
+	};
+	window.saveFocusCardSettings = function() {
+		renderFocusSettings();
+		var enabled = $('#focusCardForm input[name="focus_card_alert_enabled"]').is(':checked');
+		var hasUrgent = $('#focusCardForm input[name^="focus_card_urgent_"]:checked').length > 0;
+		if (enabled && !focusCardNumbers.length) {
+			layui.layer.msg('启用前请至少添加一个重点卡号');
+			return;
+		}
+		if (enabled && !focusRecipients.length) {
+			layui.layer.msg('启用前请至少添加一个飞书接收人');
+			return;
+		}
+		if (enabled && !hasUrgent) {
+			layui.layer.msg('启用前请至少选择一种加急方式');
+			return;
+		}
+		$.ajax({
+			type: 'POST',
+			url: '?action=saveFocusCardSettings&page=panel&module=system&csrf=' + csrf_token,
+			data: $('#focusCardForm').serialize(),
+			success: function(resp) { layui.layer.msg(resp); },
+			error: function(xhr) { layui.layer.msg('保存失败：' + xhr.responseText); }
+		});
+	};
 	window.saveSystemSettings = function() {
 		$.ajax({
 			type: 'POST',
@@ -267,5 +460,6 @@ layui.use(['layer', 'form'], function(){
 			}
 		});
 	}
+	renderFocusSettings();
 });
 </script>

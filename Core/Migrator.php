@@ -11,7 +11,7 @@ namespace anim210System;
 
 class Migrator {
 
-    const SCHEMA_VERSION = '20260824_attendance_pair_effective_time_rule';
+    const SCHEMA_VERSION = '20260920_focus_card_alert';
 
     public static function ensure()
     {
@@ -152,6 +152,36 @@ class Migrator {
             KEY `idx_feishu_retry` (`need_feishu`, `feishu_status`, `feishu_next_retry`),
             KEY `idx_message_retry` (`need_message`, `message_status`, `message_next_retry`),
             KEY `idx_employee_time` (`employee_open_id`, `punch_time`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4", $errors);
+
+        self::exec("CREATE TABLE IF NOT EXISTS `focus_card_message_queue` (
+            `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+            `event_hash` char(64) NOT NULL,
+            `recipient_open_id` varchar(128) NOT NULL DEFAULT '',
+            `recipient_name` varchar(255) NOT NULL DEFAULT '',
+            `card_id` varchar(64) NOT NULL DEFAULT '',
+            `subject_kind` varchar(20) NOT NULL DEFAULT '',
+            `subject_name` varchar(255) NOT NULL DEFAULT '',
+            `door_id` bigint unsigned NOT NULL DEFAULT 0,
+            `door_name` varchar(255) NOT NULL DEFAULT '',
+            `swipe_time` int unsigned NOT NULL DEFAULT 0,
+            `message_id` varchar(128) NOT NULL DEFAULT '',
+            `urgent_app_status` varchar(20) NOT NULL DEFAULT 'skipped',
+            `urgent_sms_status` varchar(20) NOT NULL DEFAULT 'skipped',
+            `urgent_phone_status` varchar(20) NOT NULL DEFAULT 'skipped',
+            `status` varchar(20) NOT NULL DEFAULT 'pending',
+            `attempts` int unsigned NOT NULL DEFAULT 0,
+            `next_retry` int unsigned NOT NULL DEFAULT 0,
+            `locked_at` int unsigned NOT NULL DEFAULT 0,
+            `response` mediumtext,
+            `sent_at` int unsigned NOT NULL DEFAULT 0,
+            `created_at` int unsigned NOT NULL DEFAULT 0,
+            `updated_at` int unsigned NOT NULL DEFAULT 0,
+            PRIMARY KEY (`id`),
+            UNIQUE KEY `uniq_focus_card_event_recipient` (`event_hash`, `recipient_open_id`),
+            KEY `idx_focus_card_retry` (`status`, `next_retry`, `id`),
+            KEY `idx_focus_card_card_time` (`card_id`, `swipe_time`),
+            KEY `idx_focus_card_recipient_time` (`recipient_open_id`, `swipe_time`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4", $errors);
 
         self::exec("CREATE TABLE IF NOT EXISTS `attendance_source_records` (
@@ -588,6 +618,9 @@ class Migrator {
         self::addColumn('attendance_daily_reports', 'invalid_early_leave_related', "tinyint(1) NOT NULL DEFAULT 0", $errors);
         self::addColumn('device_card_bindings', 'valid_to', "int unsigned NOT NULL DEFAULT 0", $errors);
         self::addColumn('device_card_sync_jobs', 'valid_to', "int unsigned NOT NULL DEFAULT 0", $errors);
+        self::addColumn('focus_card_message_queue', 'urgent_app_status', "varchar(20) NOT NULL DEFAULT 'skipped' AFTER `message_id`", $errors);
+        self::addColumn('focus_card_message_queue', 'urgent_sms_status', "varchar(20) NOT NULL DEFAULT 'skipped' AFTER `urgent_app_status`", $errors);
+        self::addColumn('focus_card_message_queue', 'urgent_phone_status', "varchar(20) NOT NULL DEFAULT 'skipped' AFTER `urgent_sms_status`", $errors);
 
         self::addColumn('devices', 'allowedEmployee', "longtext", $errors);
         self::addColumn('devices', 'allowedGuest', "longtext", $errors);

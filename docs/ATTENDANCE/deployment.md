@@ -10,9 +10,9 @@
 php /home/210official/doorlock/cron.php
 ```
 
-`cron.php` 会做三件事：
+`cron.php` 会处理以下任务：
 
-- 处理原有 OA / 飞书 / 机器人刷卡提醒队列。
+- 处理原有 OA / 飞书 / 机器人刷卡提醒队列，以及重点卡片加急队列。
 - 检查是否到达考勤全量同步时间。
 - 唤醒 `attendance_worker.php` 处理考勤任务。
 
@@ -43,7 +43,10 @@ php /home/210official/doorlock/attendance_worker.php
         'attendanceGroupGet' => 'https://open.feishu.cn/open-apis/attendance/v1/groups/{group_id}',
         'attendanceShiftGet' => 'https://open.feishu.cn/open-apis/attendance/v1/shifts/{shift_id}',
         'attendanceUserDailyShiftsQuery' => 'https://open.feishu.cn/open-apis/attendance/v1/user_daily_shifts/query',
-        'attendanceGroupListUser' => 'https://open.feishu.cn/open-apis/attendance/v1/groups/{group_id}/list_user'
+        'attendanceGroupListUser' => 'https://open.feishu.cn/open-apis/attendance/v1/groups/{group_id}/list_user',
+        'urgentAppMessage' => 'https://open.feishu.cn/open-apis/im/v1/messages/{message_id}/urgent_app?user_id_type=open_id',
+        'urgentSmsMessage' => 'https://open.feishu.cn/open-apis/im/v1/messages/{message_id}/urgent_sms?user_id_type=open_id',
+        'urgentPhoneMessage' => 'https://open.feishu.cn/open-apis/im/v1/messages/{message_id}/urgent_phone?user_id_type=open_id'
     ]
 ]
 ```
@@ -54,6 +57,7 @@ AMT 凭证也继续放在 `config.php` 的 `oa.appId` 和 `oa.appSecret`。
 
 后台 `系统设置` 需要确认：
 
+- `重点关注卡片`：添加一个或多个精确匹配卡号、一个或多个飞书接收人，并选择应用内、短信、电话加急；三种方式可同时勾选。
 - `启用模块`：启用 P0 考勤模块。
 - `配对间隔秒`：默认 300 秒。
 - `有效时间`：双认证周期内有效考勤时间取值规则，默认“最后一次认证”，可切换为“最早一次认证”；切换后只影响后续计算，不自动重算历史日报。
@@ -83,6 +87,7 @@ AMT 凭证也继续放在 `config.php` 的 `oa.appId` 和 `oa.appSecret`。
 - 每日班表查询所需权限：按飞书开放平台“查询班表信息”接口要求开通，并确保数据权限范围覆盖所有需要计算考勤的员工。
 - `contact:user:readonly`、`contact:department:readonly`：已有通讯录同步需要。
 - `im:message`：已有刷卡机器人卡片提醒需要。
+- 消息加急相关权限：按飞书开放平台的应用内、短信、电话加急接口要求开通；短信和电话加急会消耗企业额度。
 
 应用数据权限范围必须覆盖需要计算考勤的员工。
 
@@ -114,6 +119,7 @@ https://你的域名/?action=feishuWebhook
 6. 点击日报“溯源”，确认能看到源流水、配对间隔和外部记录 ID。
 7. 用“重算日报”按钮手动指定日期范围，确认封存日报只在手动范围任务中更新。
 8. 导出 Excel，确认字段符合系统设置，且没有 JSON 原文。
+9. 在重点关注卡片中同时勾选应用内、短信、电话加急，用重点卡片执行一次允许开门和一次拒绝开门刷卡，确认两次均发送红色卡片，且 `focus_card_message_queue` 三个渠道状态均为 `sent`。
 
 ## 故障排查
 

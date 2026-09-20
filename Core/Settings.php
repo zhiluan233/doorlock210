@@ -37,6 +37,14 @@ class Settings {
             'feishu_message_card_template' => "**刷卡方式** 门禁刷卡\n**刷卡设备** {device}\n**刷卡时间** {datetime}",
             'feishu_message_batch_size' => '50',
 
+            'focus_card_alert_enabled' => 'false',
+            'focus_card_numbers' => '',
+            'focus_card_recipient_open_ids' => '',
+            'focus_card_urgent_app_enabled' => 'true',
+            'focus_card_urgent_sms_enabled' => 'false',
+            'focus_card_urgent_phone_enabled' => 'false',
+            'focus_card_message_batch_size' => '50',
+
             'attendance_module_enabled' => 'false',
             'attendance_pair_interval_seconds' => '300',
             'attendance_pair_effective_time_rule' => 'latest',

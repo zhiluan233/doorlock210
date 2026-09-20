@@ -177,6 +177,7 @@ class OperationLog {
             'attendanceTrace' => '查看考勤溯源',
             'editPassPermission' => '修改通行权限',
             'saveSystemSettings' => '保存系统设置',
+            'saveFocusCardSettings' => '保存重点关注卡片设置',
             'remoteOpenDoor' => '远程开门',
             'saveAccessRole' => '保存门禁角色',
             'saveAccessRoleDevices' => '下发角色门禁',
@@ -286,6 +287,9 @@ class OperationLog {
                 break;
             case 'saveSystemSettings':
                 $descriptor['detail'] = '保存系统设置';
+                break;
+            case 'saveFocusCardSettings':
+                $descriptor['detail'] = '保存重点关注卡片设置';
                 break;
             case 'saveAccessPolicy':
                 $device = self::findById('devices', intval($_POST['device_id'] ?? 0));

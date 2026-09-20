@@ -292,6 +292,62 @@ class appLinkFeishu {
         return ['ok' => false, 'message' => json_encode($data, JSON_UNESCAPED_UNICODE)];
     }
 
+    public function sendUrgentAppMessage($messageId, $openIds) {
+        return $this->sendUrgentMessage('urgentAppMessage', 'urgent_app', $messageId, $openIds);
+    }
+
+    public function sendUrgentSmsMessage($messageId, $openIds) {
+        return $this->sendUrgentMessage('urgentSmsMessage', 'urgent_sms', $messageId, $openIds);
+    }
+
+    public function sendUrgentPhoneMessage($messageId, $openIds) {
+        return $this->sendUrgentMessage('urgentPhoneMessage', 'urgent_phone', $messageId, $openIds);
+    }
+
+    private function sendUrgentMessage($endpointKey, $pathSuffix, $messageId, $openIds) {
+        $messageId = trim((string)$messageId);
+        if ($messageId === '') {
+            return ['ok' => false, 'message' => '待加急的飞书 message_id 不能为空'];
+        }
+
+        $openIds = is_array($openIds) ? $openIds : [$openIds];
+        $openIds = array_values(array_unique(array_filter(array_map(function ($openId) {
+            return trim((string)$openId);
+        }, $openIds), function ($openId) {
+            return $openId !== '';
+        })));
+        if (count($openIds) === 0) {
+            return ['ok' => false, 'message' => '加急接收人不能为空'];
+        }
+        if (count($openIds) > 200) {
+            return ['ok' => false, 'message' => '飞书单次加急接收人不能超过 200 人'];
+        }
+
+        $tenantToken = $this->getTenantAccessToken();
+        if ($tenantToken === '') {
+            return ['ok' => false, 'message' => '无法获取 tenant_access_token'];
+        }
+        $endpoint = $this->endpoint($endpointKey);
+        if ($endpoint === '') {
+            return ['ok' => false, 'message' => '飞书 ' . $endpointKey . ' endpoint 未在 config.php 中配置'];
+        }
+        $url = strpos($endpoint, '{message_id}') !== false
+            ? str_replace('{message_id}', rawurlencode($messageId), $endpoint)
+            : rtrim($endpoint, '/') . '/' . rawurlencode($messageId) . '/' . $pathSuffix . '?user_id_type=open_id';
+        $data = $this->requestFeishu($url, 'PATCH', $tenantToken, ['user_id_list' => $openIds], 10);
+        $success = ($data['status_code'] ?? 0) >= 200
+            && ($data['status_code'] ?? 0) < 300
+            && intval($data['response']['code'] ?? -1) === 0;
+        $invalidIds = $data['response']['data']['invalid_user_id_list'] ?? [];
+        if ($success && (!is_array($invalidIds) || count($invalidIds) === 0)) {
+            return ['ok' => true, 'data' => $data['response']['data'] ?? []];
+        }
+        if ($success) {
+            return ['ok' => false, 'message' => '飞书未加急以下接收人：' . implode(',', $invalidIds)];
+        }
+        return ['ok' => false, 'message' => json_encode($data, JSON_UNESCAPED_UNICODE)];
+    }
+
     public function queryAttendanceUserFlows($userIds, $checkTimeFrom, $checkTimeTo) {
         $tenantToken = $this->getTenantAccessToken();
         if ($tenantToken === '') {
@@ -1052,13 +1108,21 @@ class appLinkFeishu {
         curl_setopt($ch, CURLOPT_NOSIGNAL, true);
 
         $headers = [];
-        if (strtoupper($method) == 'POST') {
+        $method = strtoupper((string)$method);
+        if ($method === 'POST') {
             curl_setopt($ch, CURLOPT_POST, true);
             $jsonBody = json_encode($body ?: [], JSON_UNESCAPED_UNICODE);
             curl_setopt($ch, CURLOPT_POSTFIELDS, $jsonBody);
             $headers[] = 'Content-Type: application/json; charset=utf-8';
-        } else {
+        } elseif ($method === 'GET') {
             curl_setopt($ch, CURLOPT_HTTPGET, true);
+        } else {
+            curl_setopt($ch, CURLOPT_CUSTOMREQUEST, $method);
+            if ($body !== null) {
+                $jsonBody = json_encode($body, JSON_UNESCAPED_UNICODE);
+                curl_setopt($ch, CURLOPT_POSTFIELDS, $jsonBody);
+                $headers[] = 'Content-Type: application/json; charset=utf-8';
+            }
         }
 
         if (!empty($authorization)) {
@@ -1091,6 +1155,9 @@ class appLinkFeishu {
             'oauthAuthorize' => 'https://accounts.feishu.cn/open-apis/authen/v1/authorize',
             'getUserAccessTokenV3' => 'https://accounts.feishu.cn/oauth/v3/token',
             'getJsSdkTicket' => 'https://open.feishu.cn/open-apis/jssdk/ticket/get',
+            'urgentAppMessage' => 'https://open.feishu.cn/open-apis/im/v1/messages/{message_id}/urgent_app?user_id_type=open_id',
+            'urgentSmsMessage' => 'https://open.feishu.cn/open-apis/im/v1/messages/{message_id}/urgent_sms?user_id_type=open_id',
+            'urgentPhoneMessage' => 'https://open.feishu.cn/open-apis/im/v1/messages/{message_id}/urgent_phone?user_id_type=open_id',
             'batchCreateAttendanceFlow' => 'https://open.feishu.cn/open-apis/attendance/v1/user_flows/batch_create',
             'attendanceUserFlowsQuery' => 'https://open.feishu.cn/open-apis/attendance/v1/user_flows/query',
             'attendanceUserFlowGet' => 'https://open.feishu.cn/open-apis/attendance/v1/user_flows/{user_flow_id}',

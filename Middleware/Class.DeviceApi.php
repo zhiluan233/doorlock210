@@ -142,6 +142,26 @@ class deviceApi {
                         $learnerInfo = Database::querySingleLine("learner", Array("card_id" => $card));
                         $guestInfo = Database::querySingleLine("guest", Array("card_id" => $card));
 
+                        if (class_exists(__NAMESPACE__ . '\\FocusCardAlertService')) {
+                            $focusSubjectKind = 'unknown';
+                            $focusSubject = [];
+                            if ($employeeInfo != null) {
+                                $focusSubjectKind = 'employee';
+                                $focusSubject = $employeeInfo;
+                            } elseif ($learnerInfo != null) {
+                                $focusSubjectKind = 'learner';
+                                $focusSubject = $learnerInfo;
+                            } elseif ($guestInfo != null) {
+                                $focusSubjectKind = 'guest';
+                                $focusSubject = $guestInfo;
+                            }
+                            $focusEventIdentity = $this->payloadValue($devicePayload, ['IndexEvent', 'indexEvent', 'Index', 'index']);
+                            if ($focusEventIdentity === '') {
+                                $focusEventIdentity = (string)($requestContext['taskNo'] ?? ($requestContext['id'] ?? ''));
+                            }
+                            FocusCardAlertService::enqueueSwipe($card, $deviceInfo, $eventTime, $focusSubjectKind, $focusSubject, $focusEventIdentity);
+                        }
+
                         if ($guestInfo != null) {
                             $reason = '';
                             $allowPass = AttendanceService::canGuestPass($guestInfo, $deviceInfo, $reason);

@@ -43,6 +43,7 @@ include(ROOT . "/Core/RuntimeMaintenance.php");
 include(ROOT . "/Middleware/Class.Feishu.php");
 include(ROOT . "/Middleware/Class.FeishuSync.php");
 include(ROOT . "/Middleware/Class.Attendance.php");
+include(ROOT . "/Middleware/Class.FocusCard.php");
 include(ROOT . "/Middleware/Class.AttendanceModule.php");
 include(ROOT . "/Core/DeviceCardSync.php");
 
@@ -52,6 +53,7 @@ $db = new Database();
 $migration = Migrator::ensure();
 $maintenance = RuntimeMaintenance::runScheduledCleanup();
 $queue = AttendanceService::processAllQueues();
+$focusCardQueue = FocusCardAlertService::processQueue(Settings::getInt('focus_card_message_batch_size', 50));
 $attendance = AttendanceModuleService::processCron();
 $deviceCardSync = DeviceCardSync::ensureWorkerRunning();
 $contactSyncSchedule = FeishuContactSync::scheduleDailyIfDue();
@@ -62,6 +64,7 @@ $result = [
     'migration' => $migration,
     'maintenance' => $maintenance,
     'queue' => $queue,
+    'focus_card_queue' => $focusCardQueue,
     'attendance' => $attendance,
     'device_card_sync' => $deviceCardSync,
     'contact_sync_schedule' => $contactSyncSchedule,
