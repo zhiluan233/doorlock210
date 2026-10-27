@@ -184,20 +184,24 @@ function dashboardFindDepartment($departmentId) {
 
 function dashboardDailyUnswipedWhere($alias, $dayStartTs, $dayEndTs) {
 	$cardColumn = $alias . ".`card_id`";
+	$timeWhere = Database::logTimeRange($dayStartTs, $dayEndTs);
+	// DISTINCT 使当天卡号集合只物化一次，避免对每个人重新扫描当天日志。
+	// 精确匹配和纯数字补零匹配分别保留，兼容短卡号、非数字卡号和历史数据。
 	return "NOT EXISTS (
-		SELECT 1 FROM `logs` l
-		WHERE l.`time` BETWEEN " . intval($dayStartTs) . " AND " . intval($dayEndTs) . "
-		AND (
-			l.`cardid`={$cardColumn}
-			OR ({$cardColumn} REGEXP '^[0-9]+$' AND l.`cardid` REGEXP '^[0-9]+$' AND LPAD(l.`cardid`, 10, '0')=LPAD({$cardColumn}, 10, '0'))
-		)
-		LIMIT 1
+		SELECT 1 FROM (SELECT DISTINCT `cardid` FROM `logs` WHERE {$timeWhere}) swiped_exact
+		WHERE swiped_exact.`cardid`={$cardColumn}
+	) AND NOT EXISTS (
+		SELECT 1 FROM (
+			SELECT DISTINCT LPAD(`cardid`, 10, '0') AS `cardid` FROM `logs`
+			WHERE {$timeWhere} AND `cardid` REGEXP '^[0-9]+$'
+		) swiped_numeric
+		WHERE {$cardColumn} REGEXP '^[0-9]+$' AND swiped_numeric.`cardid`=LPAD({$cardColumn}, 10, '0')
 	)";
 }
 
 function dashboardWhereSql($startTs, $endTs, $keyword, $actionType) {
 	$where = [
-		"`time` BETWEEN " . intval($startTs) . " AND " . intval($endTs),
+		Database::logTimeRange($startTs, $endTs),
 		"IFNULL(`passdoor`, '')<>''",
 		"IFNULL(`cardid`, '')<>''",
 		"`passdoor`<>'系统'"
@@ -261,7 +265,7 @@ function dashboardActionTypeText($type) {
 function dashboardBuildSeries($startTs, $endTs, $whereSql, $grain) {
 	$grain = intval($grain);
 	$bucketRows = dashboardFetchRows('logs', "SELECT FLOOR((`time` - {$startTs}) / {$grain}) AS `bucket_index`, COUNT(*) AS `total`, COUNT(DISTINCT CONCAT(IFNULL(`passusertype`, ''), '|', IFNULL(`passusername`, ''), '|', IFNULL(`cardid`, ''))) AS `people`, SUM(CASE WHEN `action` LIKE '%成功%' THEN 1 ELSE 0 END) AS `success_total`, SUM(CASE WHEN `action` LIKE '%失败%' THEN 1 ELSE 0 END) AS `failed_total` FROM `logs`{$whereSql} GROUP BY `bucket_index` ORDER BY `bucket_index` ASC");
-	$doorRows = dashboardFetchRows('logs', "SELECT FLOOR((`time` - {$startTs}) / {$grain}) AS `bucket_index`, IFNULL(NULLIF(`passdoor`, ''), '未知门禁') AS `door`, COUNT(*) AS `total` FROM `logs`{$whereSql} GROUP BY `bucket_index`, `door` ORDER BY `bucket_index` ASC, `total` DESC");
+	$doorRows = dashboardFetchRows('logs', "SELECT FLOOR((`time` - {$startTs}) / {$grain}) AS `bucket_index`, IFNULL(NULLIF(`passdoor`, ''), '未知门禁') AS `door`, COUNT(*) AS `total` FROM `logs`{$whereSql} GROUP BY `bucket_index`, `door` ORDER BY `bucket_index` ASC, `total` DESC, `door` ASC");
 	$doorMap = [];
 	foreach ($doorRows as $row) {
 		$bucketIndex = intval($row['bucket_index'] ?? 0);
@@ -301,7 +305,7 @@ function dashboardBuildSeries($startTs, $endTs, $whereSql, $grain) {
 
 function dashboardBuildThroughputPeak($startTs, $endTs, $whereSql, $grain) {
 	$grain = max(1, intval($grain));
-	$row = dashboardFetchOne('logs', "SELECT FLOOR((`time` - {$startTs}) / {$grain}) AS `bucket_index`, COUNT(*) AS `total`, COUNT(DISTINCT CONCAT(IFNULL(`passusertype`, ''), '|', IFNULL(`passusername`, ''), '|', IFNULL(`cardid`, ''))) AS `people` FROM `logs`{$whereSql} GROUP BY `bucket_index` ORDER BY `total` DESC LIMIT 1");
+	$row = dashboardFetchOne('logs', "SELECT FLOOR((`time` - {$startTs}) / {$grain}) AS `bucket_index`, COUNT(*) AS `total`, COUNT(DISTINCT CONCAT(IFNULL(`passusertype`, ''), '|', IFNULL(`passusername`, ''), '|', IFNULL(`cardid`, ''))) AS `people` FROM `logs`{$whereSql} GROUP BY `bucket_index` ORDER BY `total` DESC, `bucket_index` ASC LIMIT 1");
 	if (!$row || intval($row['total'] ?? 0) <= 0) {
 		return [
 			'grain' => $grain,
@@ -315,7 +319,9 @@ function dashboardBuildThroughputPeak($startTs, $endTs, $whereSql, $grain) {
 	$bucketIndex = intval($row['bucket_index'] ?? 0);
 	$bucketStart = $startTs + ($bucketIndex * $grain);
 	$bucketEnd = min($bucketStart + $grain - 1, $endTs);
-	$doorRows = dashboardFetchRows('logs', "SELECT IFNULL(NULLIF(`passdoor`, ''), '未知门禁') AS `door`, COUNT(*) AS `total` FROM `logs`{$whereSql} AND FLOOR((`time` - {$startTs}) / {$grain})={$bucketIndex} GROUP BY `door` ORDER BY `total` DESC LIMIT 3");
+	$bucketExclusiveEnd = $bucketStart + $grain;
+	$peakWhere = Database::logTimeRange($bucketStart, $bucketExclusiveEnd, '', false);
+	$doorRows = dashboardFetchRows('logs', "SELECT IFNULL(NULLIF(`passdoor`, ''), '未知门禁') AS `door`, COUNT(*) AS `total` FROM `logs`{$whereSql} AND {$peakWhere} GROUP BY `door` ORDER BY `total` DESC, `door` ASC LIMIT 3");
 	$doors = [];
 	foreach ($doorRows as $doorRow) {
 		$doors[] = [
@@ -362,13 +368,13 @@ $summary = dashboardFetchOne('logs', "SELECT
 $activeEmployee = dashboardFetchOne('employee', "SELECT COUNT(*) AS `total` FROM `employee` WHERE `status`='true'");
 $activeEmployeeTotal = intval($activeEmployee['total'] ?? 0);
 
-$typeRows = dashboardFetchRows('logs', "SELECT IFNULL(NULLIF(`passusertype`, ''), '未知') AS `label`, COUNT(*) AS `total` FROM `logs`{$whereSql} GROUP BY `label` ORDER BY `total` DESC");
-$doorRows = dashboardFetchRows('logs', "SELECT IFNULL(NULLIF(`passdoor`, ''), '未知门禁') AS `label`, COUNT(*) AS `total` FROM `logs`{$whereSql} GROUP BY `label` ORDER BY `total` DESC LIMIT 8");
-$personRows = dashboardFetchRows('logs', "SELECT IFNULL(NULLIF(`passusername`, ''), '未知人员') AS `name`, IFNULL(NULLIF(`passusertype`, ''), '未知') AS `kind`, IFNULL(NULLIF(`cardid`, ''), '-') AS `cardid`, COUNT(*) AS `total` FROM `logs`{$whereSql} GROUP BY `name`, `kind`, `cardid` ORDER BY `total` DESC LIMIT 8");
+$typeRows = dashboardFetchRows('logs', "SELECT IFNULL(NULLIF(`passusertype`, ''), '未知') AS `label`, COUNT(*) AS `total` FROM `logs`{$whereSql} GROUP BY `label` ORDER BY `total` DESC, `label` ASC");
+$doorRows = dashboardFetchRows('logs', "SELECT IFNULL(NULLIF(`passdoor`, ''), '未知门禁') AS `label`, COUNT(*) AS `total` FROM `logs`{$whereSql} GROUP BY `label` ORDER BY `total` DESC, `label` ASC LIMIT 8");
+$personRows = dashboardFetchRows('logs', "SELECT IFNULL(NULLIF(`passusername`, ''), '未知人员') AS `name`, IFNULL(NULLIF(`passusertype`, ''), '未知') AS `kind`, IFNULL(NULLIF(`cardid`, ''), '-') AS `cardid`, COUNT(*) AS `total` FROM `logs`{$whereSql} GROUP BY `name`, `kind`, `cardid` ORDER BY `total` DESC, `kind` ASC, `name` ASC, `cardid` ASC LIMIT 8");
 $dayRows = dashboardFetchRows('logs', "SELECT DATE(FROM_UNIXTIME(`time`)) AS `day`, COUNT(*) AS `total`, COUNT(DISTINCT CONCAT(IFNULL(`passusertype`, ''), '|', IFNULL(`passusername`, ''), '|', IFNULL(`cardid`, ''))) AS `people` FROM `logs`{$whereSql} GROUP BY `day` ORDER BY `day` ASC");
-$weekdayRows = dashboardFetchRows('logs', "SELECT CASE WHEN DAYOFWEEK(FROM_UNIXTIME(`time`)) IN (1,7) THEN '周末' ELSE '工作日' END AS `label`, COUNT(*) AS `total` FROM `logs`{$whereSql} GROUP BY `label` ORDER BY `total` DESC");
+$weekdayRows = dashboardFetchRows('logs', "SELECT CASE WHEN DAYOFWEEK(FROM_UNIXTIME(`time`)) IN (1,7) THEN '周末' ELSE '工作日' END AS `label`, COUNT(*) AS `total` FROM `logs`{$whereSql} GROUP BY `label` ORDER BY `total` DESC, `label` ASC");
 $edgeTimes = dashboardFetchOne('logs', "SELECT MIN(CASE WHEN `action` LIKE '%成功%' THEN `time` ELSE NULL END) AS `first_success`, MAX(`time`) AS `last_record` FROM `logs`{$whereSql}");
-$latestRows = dashboardFetchRows('logs', "SELECT * FROM `logs`{$whereSql} ORDER BY `time` DESC LIMIT 12");
+$latestRows = dashboardFetchRows('logs', "SELECT * FROM `logs`{$whereSql} ORDER BY `time` DESC, `id` DESC LIMIT 12");
 
 $chartSeriesByGrain = [];
 foreach (dashboardGrainOptions() as $grainValue => $grainLabel) {
@@ -406,7 +412,7 @@ $chartDetailLimit = 50000;
 $chartDetailRows = [];
 $chartDetailLimited = $totalSwipes > $chartDetailLimit;
 if ($totalSwipes > 0) {
-	$chartDetailRawRows = dashboardFetchRows('logs', "SELECT `time`, IFNULL(NULLIF(`passusername`, ''), '未知人员') AS `passusername`, IFNULL(NULLIF(`passusertype`, ''), '未知') AS `passusertype`, IFNULL(NULLIF(`passdoor`, ''), '未知门禁') AS `passdoor`, IFNULL(NULLIF(`cardid`, ''), '-') AS `cardid`, IFNULL(NULLIF(`action`, ''), '-') AS `action` FROM `logs`{$whereSql} ORDER BY `time` ASC LIMIT {$chartDetailLimit}");
+	$chartDetailRawRows = dashboardFetchRows('logs', "SELECT `time`, IFNULL(NULLIF(`passusername`, ''), '未知人员') AS `passusername`, IFNULL(NULLIF(`passusertype`, ''), '未知') AS `passusertype`, IFNULL(NULLIF(`passdoor`, ''), '未知门禁') AS `passdoor`, IFNULL(NULLIF(`cardid`, ''), '-') AS `cardid`, IFNULL(NULLIF(`action`, ''), '-') AS `action` FROM `logs`{$whereSql} ORDER BY `time` ASC, `id` ASC LIMIT {$chartDetailLimit}");
 	foreach ($chartDetailRawRows as $row) {
 		$chartDetailRows[] = [
 			'time' => intval($row['time'] ?? 0),
@@ -421,7 +427,7 @@ if ($totalSwipes > 0) {
 $todayStartTs = strtotime($today . ' 00:00:00');
 $todayEndTs = strtotime($today . ' 23:59:59');
 $dailyUnswipedRows = [];
-$dailyUnswipedEmployeeRows = dashboardFetchRows('employee', "SELECT e.* FROM `employee` e WHERE e.`status`='true' AND TRIM(IFNULL(e.`card_id`, ''))<>'' AND " . dashboardDailyUnswipedWhere('e', $todayStartTs, $todayEndTs) . " ORDER BY e.`name` ASC");
+$dailyUnswipedEmployeeRows = dashboardFetchRows('employee', "SELECT e.* FROM `employee` e WHERE e.`status`='true' AND TRIM(IFNULL(e.`card_id`, ''))<>'' AND " . dashboardDailyUnswipedWhere('e', $todayStartTs, $todayEndTs) . " ORDER BY e.`name` ASC, e.`id` ASC");
 foreach ($dailyUnswipedEmployeeRows as $employeeRow) {
 	$dailyUnswipedRows[] = [
 		'kind' => '员工',
@@ -438,7 +444,7 @@ foreach ($dailyUnswipedEmployeeRows as $employeeRow) {
 		'updated_at' => '-'
 	];
 }
-$dailyUnswipedLearnerRows = dashboardFetchRows('learner', "SELECT l.* FROM `learner` l WHERE l.`status`='true' AND TRIM(IFNULL(l.`card_id`, ''))<>'' AND " . dashboardDailyUnswipedWhere('l', $todayStartTs, $todayEndTs) . " ORDER BY l.`name` ASC");
+$dailyUnswipedLearnerRows = dashboardFetchRows('learner', "SELECT l.* FROM `learner` l WHERE l.`status`='true' AND TRIM(IFNULL(l.`card_id`, ''))<>'' AND " . dashboardDailyUnswipedWhere('l', $todayStartTs, $todayEndTs) . " ORDER BY l.`name` ASC, l.`id` ASC");
 foreach ($dailyUnswipedLearnerRows as $learnerRow) {
 	$classText = dashboardText($learnerRow['class_name'] ?? '');
 	$trainingCenter = dashboardText($learnerRow['training_center'] ?? '');

@@ -9,6 +9,8 @@ Code by Jason / Codex
 
 namespace anim210System;
 
+if (PHP_SAPI!=='cli') { http_response_code(403); exit('CLI only'); }
+
 define("ROOT", __DIR__);
 
 require(ROOT . "/Core/vendor/autoload.php");
@@ -22,7 +24,11 @@ include(ROOT . "/Core/DeviceCardSync.php");
 
 $conn = null;
 $db = new Database();
-Migrator::ensure();
+$migration = Migrator::ensure();
+if (empty($migration['ok'])) {
+    error_log('doorlock migration: ' . ($migration['message'] ?? 'unknown error'));
+    exit(1);
+}
 
 $result = DeviceCardSync::runWorker();
 

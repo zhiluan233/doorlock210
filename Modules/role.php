@@ -63,16 +63,15 @@ function roleStatusText($role) {
 	return $enabled ? '有效' : '已停用';
 }
 
-Database::delete('access_role_members', "DELETE m FROM `access_role_members` m LEFT JOIN `employee` e ON e.`open_id`=m.`employee_open_id` WHERE IFNULL(m.`member_kind`, 'employee')='employee' AND e.`open_id` IS NULL", '', true);
-Database::delete('access_role_members', "DELETE m FROM `access_role_members` m LEFT JOIN `learner` l ON l.`student_no`=m.`employee_open_id` WHERE m.`member_kind`='learner' AND l.`student_no` IS NULL", '', true);
-Database::delete('access_role_members', "DELETE m FROM `access_role_members` m LEFT JOIN `guest` g ON g.`open_id`=m.`employee_open_id` WHERE m.`member_kind`='guest' AND g.`open_id` IS NULL", '', true);
+require_once ROOT . '/Core/RuntimeMaintenance.php';
+$validRoleMember = RuntimeMaintenance::validRoleMemberWhere('m');
 
 $employeesRaw = roleFetchRows("SELECT `open_id`, `name`, `employee_id`, `status` FROM `employee` WHERE `open_id`<>'' ORDER BY `status` DESC, `name` ASC", 'employee');
 $learnersRaw = roleFetchRows("SELECT `student_no`, `name`, `realname`, `class_name`, `training_center`, `enrolled_at`, `status` FROM `learner` WHERE `student_no`<>'' ORDER BY `status` DESC, `name` ASC", 'learner');
 $guestsRaw = roleFetchRows("SELECT `open_id`, `name`, `status` FROM `guest` WHERE `open_id`<>'' ORDER BY `status` DESC, `name` ASC", 'guest');
 $devicesRaw = roleFetchRows("SELECT `id`, `name`, `ip` FROM `devices` ORDER BY `id` ASC", 'devices');
-$rolesRaw = roleFetchRows("SELECT r.*, (SELECT COUNT(*) FROM `access_role_members` m WHERE m.`role_id`=r.`id`) AS member_count FROM `access_roles` r ORDER BY r.`builtin_key` DESC, r.`enabled` DESC, r.`id` ASC", 'access_roles');
-$membersRaw = roleFetchRows("SELECT m.`role_id`, IFNULL(m.`member_kind`, 'employee') AS `member_kind`, m.`employee_open_id` FROM `access_role_members` m INNER JOIN `access_roles` r ON r.`id`=m.`role_id` ORDER BY m.`role_id` ASC, m.`id` ASC", 'access_role_members');
+$rolesRaw = roleFetchRows("SELECT r.*, (SELECT COUNT(*) FROM `access_role_members` m WHERE m.`role_id`=r.`id` AND {$validRoleMember}) AS member_count FROM `access_roles` r ORDER BY r.`builtin_key` DESC, r.`enabled` DESC, r.`id` ASC", 'access_roles');
+$membersRaw = roleFetchRows("SELECT m.`role_id`, IFNULL(m.`member_kind`, 'employee') AS `member_kind`, m.`employee_open_id` FROM `access_role_members` m INNER JOIN `access_roles` r ON r.`id`=m.`role_id` WHERE {$validRoleMember} ORDER BY m.`role_id` ASC, m.`id` ASC", 'access_role_members');
 $rolePoliciesRaw = roleFetchRows("SELECT `device_id`, `subject_value` FROM `access_policies` WHERE `enabled`=1 AND `subject_type`='role' ORDER BY `device_id` ASC", 'access_policies');
 
 $employees = [];

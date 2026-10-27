@@ -17,3 +17,5 @@ feishu_key.json
 
 docs/
 tmp/
+*.sql.zip
+*.sql.gz

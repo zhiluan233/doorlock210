@@ -11,6 +11,8 @@ namespace anim210System;
 
 use anim210System;
 
+require_once __DIR__ . '/../Core/MessageWorker.php';
+
 class AttendanceService {
 
     public static function canEmployeePass($employeeInfo, $deviceInfo, &$reason = '')
@@ -122,10 +124,24 @@ class AttendanceService {
             'passusername' => $username,
             'passusertype' => $userType,
             'passdoor' => $doorName,
-            'cardid' => $cardId,
+            'cardid' => self::normalizeCardNumber($cardId),
             'action' => $action,
             'time' => $eventTime
         ]);
+    }
+
+    public static function persistEmployeeSwipe($employee, $device, $cardId, $eventTime)
+    {
+        global $conn;
+        if (!mysqli_begin_transaction($conn)) { throw new \RuntimeException('Cannot begin swipe transaction'); }
+        try {
+            self::writeAccessLog($employee['name'], '员工', $device['name'], $cardId, '开门成功', $eventTime);
+            self::enqueueSwipe($employee, $device, $cardId, 'card', $eventTime);
+            if (!mysqli_commit($conn)) { throw new \RuntimeException('Cannot commit swipe transaction'); }
+        } catch (\Throwable $e) {
+            mysqli_rollback($conn);
+            throw $e;
+        }
     }
 
     public static function normalizeCardNumber($cardId)
@@ -276,12 +292,7 @@ class AttendanceService {
 
     public static function scheduleAsyncMessage($eventHash)
     {
-        register_shutdown_function(function () use ($eventHash) {
-            if (function_exists('fastcgi_finish_request')) {
-                @fastcgi_finish_request();
-            }
-            AttendanceService::processMessageQueue(1, $eventHash);
-        });
+        MessageWorker::schedule();
     }
 
     public static function processAllQueues()
@@ -431,6 +442,15 @@ class AttendanceService {
     }
 
     public static function processMessageQueue($limit = 50, $eventHash = '')
+    {
+        global $conn;
+        $lock=Database::querySingleLine('attendance_queue',"SELECT GET_LOCK(CONCAT('doorlock_swipe_messages:',SHA1(DATABASE())),0) AS acquired",true);
+        if (intval($lock['acquired'] ?? 0)!==1) { return ['total'=>0,'sent'=>0,'failed'=>0,'busy'=>true]; }
+        try { return self::processMessageQueueUnlocked($limit,$eventHash); }
+        finally { mysqli_query($conn,"SELECT RELEASE_LOCK(CONCAT('doorlock_swipe_messages:',SHA1(DATABASE())))"); }
+    }
+
+    private static function processMessageQueueUnlocked($limit, $eventHash)
     {
         $rows = self::loadQueueRows('message', $limit, $eventHash);
         if (count($rows) === 0) {

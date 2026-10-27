@@ -14,7 +14,6 @@ class DeviceCardSync {
     const MAX_SLOT_INDEX = 61200;
     const MANUAL_STAGE_UPSERTING = 'upserting';
 
-    private static $workerScheduled = false;
 
     public static function enqueueFullSync($deviceId, $source = 'manual', $startWorker = true)
     {
@@ -158,17 +157,10 @@ class DeviceCardSync {
             return array_merge(['ok' => true, 'started' => true, 'message' => '端侧卡库下发 worker 已启动'], self::workerStatus());
         }
 
-        if (self::$workerScheduled) {
-            return array_merge(['ok' => true, 'started' => false, 'message' => '端侧卡库下发 worker 已安排在请求结束后执行'], self::workerStatus());
+        if (PHP_SAPI==='cli') {
+            return ['ok'=>true,'started'=>true,'result'=>self::runWorker(25),'message'=>'CLI 内处理端侧卡库任务'];
         }
-        self::$workerScheduled = true;
-        register_shutdown_function(function() {
-            if (function_exists('fastcgi_finish_request')) {
-                @fastcgi_finish_request();
-            }
-            DeviceCardSync::runWorker(25);
-        });
-        return array_merge(['ok' => true, 'started' => true, 'message' => '端侧卡库下发 worker 将在请求结束后执行'], self::workerStatus());
+        return array_merge(['ok'=>true,'started'=>false,'message'=>'任务已入库，等待 CLI 定时 worker；请配置 phpCliBinary 或 CLI 计划任务'],self::workerStatus());
     }
 
     public static function workerStatus()

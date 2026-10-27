@@ -51,6 +51,13 @@ $conn = null;
 $db = new Database();
 
 $migration = Migrator::ensure();
+if (empty($migration['ok'])) {
+    if (PHP_SAPI !== 'cli') {
+        http_response_code(503);
+    }
+    echo json_encode(['migration' => $migration], JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT) . PHP_EOL;
+    exit(1);
+}
 $maintenance = RuntimeMaintenance::runScheduledCleanup();
 $queue = AttendanceService::processAllQueues();
 $focusCardQueue = FocusCardAlertService::processQueue(Settings::getInt('focus_card_message_batch_size', 50));
@@ -58,6 +65,8 @@ $attendance = AttendanceModuleService::processCron();
 $deviceCardSync = DeviceCardSync::ensureWorkerRunning();
 $contactSyncSchedule = FeishuContactSync::scheduleDailyIfDue();
 $contactSync = FeishuContactSync::processNextJob(1);
+$archive = ArchiveStore::runScheduled();
+$health = RuntimeHealth::run(['archive'=>$archive]);
 
 $result = [
     'time' => date('Y-m-d H:i:s'),
@@ -68,7 +77,9 @@ $result = [
     'attendance' => $attendance,
     'device_card_sync' => $deviceCardSync,
     'contact_sync_schedule' => $contactSyncSchedule,
-    'contact_sync' => $contactSync
+    'contact_sync' => $contactSync,
+    'archive' => $archive,
+    'health' => $health
 ];
 
 echo json_encode($result, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT) . PHP_EOL;

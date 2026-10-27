@@ -29,6 +29,11 @@ if ($isReadonly && !in_array($module, ['home', 'admininfo', 'dashboard', 'attend
     $_GET['module'] = 'accesslog';
 }
 
+// 鉴权后的只读页面不持有 session 锁，慢报表不会阻塞同一用户的其他请求。
+if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'GET' && session_status() === PHP_SESSION_ACTIVE) {
+    session_write_close();
+}
+
 OperationLog::logPanelView($module, $rs);
 
 ?>
@@ -273,6 +278,9 @@ OperationLog::logPanelView($module, $rs);
 	</head>
 
 	<body class="page-sidebar-fixed">
+		<?php $runtimeHealth = RuntimeHealth::snapshot(); if (is_array($runtimeHealth) && empty($runtimeHealth['ok'])) { ?>
+		<div class="alert alert-warning" role="alert" style="margin:16px;">系统维护提醒：磁盘容量、数据库持久化配置或归档任务需要检查。检查时间：<?php echo htmlspecialchars(date('Y-m-d H:i:s',intval($runtimeHealth['checked_at'] ?? 0)),ENT_QUOTES,'UTF-8'); ?>。请管理员查看计划任务的 health 结果。</div>
+		<?php } ?>
 		<script>
 			try {
 				if (window.innerWidth >= 992 && localStorage.getItem('doorlockSidebarCollapsed') === '1') {

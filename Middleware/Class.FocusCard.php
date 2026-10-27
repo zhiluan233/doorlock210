@@ -9,6 +9,8 @@ Code by Jason / Codex
 
 namespace anim210System;
 
+require_once __DIR__ . '/../Core/MessageWorker.php';
+
 class FocusCardAlertService {
 
     public static function enqueueSwipe($cardId, $deviceInfo, $eventTime = null, $subjectKind = '', $subjectInfo = [], $eventIdentity = '')
@@ -289,12 +291,7 @@ class FocusCardAlertService {
 
     private static function scheduleImmediate($eventHash, $recipientCount)
     {
-        register_shutdown_function(function () use ($eventHash, $recipientCount) {
-            if (function_exists('fastcgi_finish_request')) {
-                @fastcgi_finish_request();
-            }
-            FocusCardAlertService::processQueue(max(1, min(200, intval($recipientCount))), $eventHash);
-        });
+        MessageWorker::schedule();
     }
 
     private static function claimRows($limit, $eventHash)

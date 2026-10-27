@@ -116,7 +116,7 @@ $filters = [
 	'keyword' => $keyword
 ];
 $summary = class_exists(__NAMESPACE__ . '\\AttendanceModuleService') ? AttendanceModuleService::reportSummary($filters) : [];
-$total = class_exists(__NAMESPACE__ . '\\AttendanceModuleService') ? AttendanceModuleService::reportCount($filters) : 0;
+$total = intval($summary['total'] ?? 0);
 $rows = class_exists(__NAMESPACE__ . '\\AttendanceModuleService') ? AttendanceModuleService::reportRows($filters, $pageSize, ($pageNo - 1) * $pageSize) : [];
 $worker = class_exists(__NAMESPACE__ . '\\AttendanceModuleService') ? AttendanceModuleService::workerStatus() : [];
 $groups = attendanceFetchRows('attendance_groups', "SELECT * FROM `attendance_groups` ORDER BY `enabled` DESC, `source` DESC, `name` ASC LIMIT 30");
@@ -431,6 +431,7 @@ function submitAttendanceExport() {
 function syncAttendanceFlows() {
 	layui.use('layer', function() {
 		$.ajax({
+			timeout: 15000,
 			type: 'POST',
 			url: '?action=syncAttendanceFlows&page=panel&module=attendance&csrf=' + attendanceCsrf,
 			dataType: 'json',
@@ -448,6 +449,7 @@ function syncAttendanceFlows() {
 function syncAttendanceGroups() {
 	layui.use('layer', function() {
 		$.ajax({
+			timeout: 15000,
 			type: 'POST',
 			url: '?action=syncAttendanceGroups&page=panel&module=attendance&csrf=' + attendanceCsrf,
 			dataType: 'json',
@@ -466,6 +468,7 @@ function recalculateAttendanceReports() {
 		layui.layer.confirm('将按当前筛选日期范围重算考勤日报。昨天及以前属于封存日报，只会通过这类手动任务更新。确认继续？', function(index) {
 			layui.layer.close(index);
 			$.ajax({
+				timeout: 15000,
 				type: 'POST',
 				url: '?action=recalculateAttendanceReports&page=panel&module=attendance&csrf=' + attendanceCsrf,
 				dataType: 'json',
@@ -484,6 +487,7 @@ function recalculateAttendanceReports() {
 function showAttendanceTrace(reportId) {
 	layui.use('layer', function() {
 		$.ajax({
+			timeout: 15000,
 			type: 'POST',
 			url: '?action=attendanceTrace&page=panel&module=attendance&csrf=' + attendanceCsrf,
 			dataType: 'json',

@@ -41,7 +41,7 @@ if ($keyword !== '') {
 	$where[] = "(`passusername` LIKE {$like} OR `passusertype` LIKE {$like} OR `passdoor` LIKE {$like} OR `cardid` LIKE {$like} OR `action` LIKE {$like})";
 }
 $whereSql = count($where) > 0 ? ' WHERE ' . implode(' AND ', $where) : '';
-$mainSQL = "SELECT * FROM `logs`{$whereSql} ORDER BY `time` DESC LIMIT 3000";
+$mainSQL = "SELECT * FROM `logs`{$whereSql} ORDER BY `time` DESC, `id` DESC LIMIT 3000";
 $logData = Database::query("logs", $mainSQL, '', true);
 $rows = [];
 while ($logData instanceof \mysqli_result && $row = mysqli_fetch_assoc($logData)) {

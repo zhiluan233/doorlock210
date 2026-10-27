@@ -205,8 +205,7 @@ class deviceApi {
                             }
                                 http_response_code(200);
                                 $resp = $this->cardResponse($deviceInfo, $devicePayload, '1', $requestContext);
-                                AttendanceService::writeAccessLog($employeeInfo['name'], '员工', $deviceInfo['name'], $card, '开门成功', $eventTime);
-                                AttendanceService::enqueueSwipe($employeeInfo, $deviceInfo, $card, 'card', $eventTime);
+                                AttendanceService::persistEmployeeSwipe($employeeInfo, $deviceInfo, $card, $eventTime);
                                 $this->exitDeviceJson($resp, $requestContext);
                         }
 

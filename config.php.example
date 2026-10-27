@@ -17,6 +17,28 @@ $_config = [
 	/* 名称 */ 'db_name'           => '',
 	/* 编码 */ 'db_code'           => 'utf8mb4',
 
+	// Web 请求设置总数据库预算和单查询超时；CLI worker 使用独立较长读取超时。
+	'db_runtime' => [
+		'connect_timeout' => 3, 'web_read_timeout' => 8, 'web_budget_seconds' => 12,
+		'web_query_timeout_ms' => 5000, 'worker_read_timeout' => 120, 'slow_query_ms' => 1000
+	],
+	// 一年以上完整行快照归档；查询字段留在 MySQL，大字段自动从归档恢复读取。
+	// 归档要求 PHP 8.1+（fsync），目录建议挂载独立磁盘/NAS，必须随数据库一起备份。
+	'archive' => [
+		'enabled' => false, 'directory' => '', // 如 /mnt/doorlock-archive；必须在项目目录之外
+		'start_hour' => 2, 'end_hour' => 5, 'batch_size' => 1000,
+		'min_free_bytes' => 2147483648
+	],
+	'maintenance' => [
+		'database_volume_path' => '', // 填 MySQL 数据所在挂载点；空值时使用项目所在磁盘
+		'min_free_bytes' => 5368709120, 'min_free_ratio' => 0.1
+	],
+	// 可选 phpredis 扩展，仅缓存可校验且不可变的归档原文。停电/清空 Redis 可直接重建。
+	'redis' => [
+		'enabled' => false, 'host' => '127.0.0.1', 'port' => 6379,
+		'password' => '', 'database' => 0
+	],
+
 	// 通用物联网API请求key
 	'apiCommonKey' => '',
 	// 开放API中心请求key，支持配置多个；为空时API中心不可调用

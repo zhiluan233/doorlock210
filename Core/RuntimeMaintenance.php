@@ -15,8 +15,45 @@ class RuntimeMaintenance {
         $limit = max(1, min(1000, intval($limit)));
         return [
             'expired_guests' => self::deleteExpiredGuests($limit),
-            'expired_roles' => self::disableExpiredRoles($limit)
+            'expired_roles' => self::disableExpiredRoles($limit),
+            'orphan_role_members' => self::deleteOrphanRoleMembers($limit)
         ];
+    }
+
+    public static function validRoleMemberWhere($alias = 'm')
+    {
+        $m = '`' . $alias . '`';
+        // Unknown kinds were never deleted by the legacy three cleanup statements.
+        return "(IFNULL({$m}.`member_kind`,'employee') NOT IN ('employee','learner','guest')"
+            . " OR (IFNULL({$m}.`member_kind`,'employee')='employee' AND EXISTS (SELECT 1 FROM `employee` e WHERE e.`open_id`={$m}.`employee_open_id`))"
+            . " OR ({$m}.`member_kind`='learner' AND EXISTS (SELECT 1 FROM `learner` l WHERE l.`student_no`={$m}.`employee_open_id`))"
+            . " OR ({$m}.`member_kind`='guest' AND EXISTS (SELECT 1 FROM `guest` g WHERE g.`open_id`={$m}.`employee_open_id`)))";
+    }
+
+    public static function deleteOrphanRoleMembers($limit = 200)
+    {
+        global $conn;
+        $limit = max(1,min(1000,intval($limit)));
+        $path = ROOT . '/tmp/doorlock_role_cleanup.json';
+        $state = is_file($path) ? json_decode((string)@file_get_contents($path),true) : [];
+        // Namespace the cursor by database, so another checkout/database cannot skip records.
+        $database = Database::querySingleLine('access_role_members','SELECT DATABASE() AS name',true)['name'];
+        $last = ($state['database'] ?? '')===$database ? intval($state['last_id'] ?? 0) : 0;
+        $rs = mysqli_query($conn,"SELECT `id` FROM `access_role_members` WHERE `id`>{$last} ORDER BY `id` LIMIT {$limit}");
+        $ids = [];
+        while ($row = mysqli_fetch_assoc($rs)) { $ids[]=intval($row['id']); }
+        $deleted = 0;
+        if ($ids) {
+            $valid = self::validRoleMemberWhere('m');
+            mysqli_query($conn,"DELETE m FROM `access_role_members` m WHERE m.`id` IN (" . implode(',',$ids) . ") AND NOT {$valid}");
+            $deleted = mysqli_affected_rows($conn);
+        }
+        $next = count($ids)<$limit ? 0 : $ids[count($ids)-1];
+        $temporary = $path . '.' . bin2hex(random_bytes(4));
+        if (@file_put_contents($temporary,json_encode(['database'=>$database,'last_id'=>$next]),LOCK_EX)!==false) {
+            @rename($temporary,$path);
+        }
+        return ['scanned'=>count($ids),'deleted'=>$deleted];
     }
 
     public static function deleteExpiredGuests($limit = 200)

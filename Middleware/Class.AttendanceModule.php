@@ -11,7 +11,6 @@ namespace anim210System;
 
 class AttendanceModuleService {
 
-    private static $workerScheduled = false;
 
     public static function enabled()
     {
@@ -53,8 +52,9 @@ class AttendanceModuleService {
             ]),
             'device_name' => $deviceInfo['name'] ?? '',
             'raw_payload' => [
-                'employee' => self::limitedSubjectSnapshot($employeeInfo),
-                'device' => self::limitedSubjectSnapshot($deviceInfo),
+                // 只保留溯源身份，避免每次刷卡复制设备完整权限名单和配置。
+                'employee' => array_intersect_key($employeeInfo, array_flip(['id', 'open_id', 'user_id', 'employee_id', 'name', 'card_id'])),
+                'device' => array_intersect_key($deviceInfo, array_flip(['id', 'did', 'serial', 'device_sn', 'name', 'model', 'controller_type'])),
                 'card_id' => $cardId
             ]
         ]);
@@ -262,16 +262,10 @@ class AttendanceModuleService {
             return array_merge(['ok' => true, 'started' => true, 'message' => '考勤 worker 已启动'], self::workerStatus());
         }
 
-        if (!self::$workerScheduled) {
-            self::$workerScheduled = true;
-            register_shutdown_function(function() {
-                if (function_exists('fastcgi_finish_request')) {
-                    @fastcgi_finish_request();
-                }
-                AttendanceModuleService::runWorker(25);
-            });
+        if (PHP_SAPI==='cli') {
+            return ['ok'=>true,'started'=>true,'result'=>self::runWorker(25),'message'=>'CLI 内处理考勤任务'];
         }
-        return array_merge(['ok' => true, 'started' => true, 'message' => '考勤 worker 将在请求结束后执行'], self::workerStatus());
+        return array_merge(['ok'=>true,'started'=>false,'message'=>'任务已入库，等待 CLI 定时 worker；请配置 phpCliBinary 或 CLI 计划任务'],self::workerStatus());
     }
 
     public static function runWorker($maxSeconds = 0)
@@ -348,7 +342,7 @@ class AttendanceModuleService {
         $where = self::reportWhere($filters);
         $limit = max(1, min(500, intval($limit)));
         $offset = max(0, intval($offset));
-        $sql = "SELECT * FROM `attendance_daily_reports` {$where} ORDER BY `work_date` DESC, `employee_name` ASC LIMIT {$offset}, {$limit}";
+        $sql = "SELECT * FROM `attendance_daily_reports` {$where} ORDER BY `work_date` DESC, `employee_name` ASC, `person_key` ASC, `id` ASC LIMIT {$offset}, {$limit}";
         return self::fetchRows('attendance_daily_reports', $sql);
     }
 
@@ -376,7 +370,8 @@ class AttendanceModuleService {
         $date = $report['work_date'] ?? '';
         $safePerson = Database::escape($personKey);
         $safeDate = Database::escape($date);
-        $sources = self::fetchRows('attendance_source_records', "SELECT * FROM `attendance_source_records` WHERE `punch_date`='{$safeDate}' AND (CONCAT('open:', `employee_open_id`)='{$safePerson}' OR CONCAT('no:', `employee_no`)='{$safePerson}' OR CONCAT('user:', `employee_user_id`)='{$safePerson}') ORDER BY `punch_time` ASC, `id` ASC");
+        $personWhere = self::sourcePersonWhere($personKey);
+        $sources = self::fetchRows('attendance_source_records', "SELECT * FROM `attendance_source_records` WHERE `punch_date`='{$safeDate}' AND {$personWhere} ORDER BY `punch_time` ASC, `id` ASC");
         $effective = self::fetchRows('attendance_effective_records', "SELECT * FROM `attendance_effective_records` WHERE `work_date`='{$safeDate}' AND `person_key`='{$safePerson}' ORDER BY `effective_time` ASC, `id` ASC");
         return ['report' => $report, 'sources' => $sources, 'effective' => $effective];
     }
@@ -716,15 +711,20 @@ class AttendanceModuleService {
         $date = self::normalizeDate($date, date('Y-m-d'));
         $from = strtotime($date . ' 00:00:00');
         $to = strtotime($date . ' 23:59:59');
-        $rows = self::fetchRows('logs', "SELECT * FROM `logs` WHERE `time`>={$from} AND `time`<={$to} AND `passusertype`='员工' AND `action` LIKE '%成功%' AND IFNULL(`cardid`, '')<>'' ORDER BY `time` ASC");
+        $timeWhere = Database::logTimeRange($from, $to);
+        $rows = self::fetchRows('logs', "SELECT * FROM `logs` WHERE {$timeWhere} AND `passusertype`='员工' AND `action` LIKE '%成功%' AND IFNULL(`cardid`, '')<>'' ORDER BY `time` ASC");
         $count = 0;
+        $employeesByCard = [];
         foreach ($rows as $row) {
             $cardId = AttendanceService::normalizeCardNumber($row['cardid'] ?? '');
             if ($cardId === '') {
                 continue;
             }
             $safeCard = Database::escape($cardId);
-            $employee = Database::querySingleLine('employee', "SELECT * FROM `employee` WHERE `card_id`='{$safeCard}' OR (`card_id` REGEXP '^[0-9]+$' AND LPAD(`card_id`, 10, '0')='{$safeCard}') LIMIT 1", true);
+            if (!array_key_exists($cardId, $employeesByCard)) {
+                $employeesByCard[$cardId] = Database::querySingleLine('employee', "SELECT * FROM `employee` WHERE `card_id`='{$safeCard}' OR (`card_id` REGEXP '^[0-9]+$' AND LPAD(`card_id`, 10, '0')='{$safeCard}') LIMIT 1", true);
+            }
+            $employee = $employeesByCard[$cardId];
             if (!$employee) {
                 continue;
             }
@@ -777,20 +777,34 @@ class AttendanceModuleService {
         $safeCard = Database::escape($cardId);
         $safeLocation = Database::escape($locationName);
         $punchTime = intval($punchTime);
-        $identity = [];
+        // 先用 (source, external_id) 唯一索引；与其他条件 OR 会拖成大范围扫描。
+        $row = Database::querySingleLine('attendance_source_records', "SELECT `id` FROM `attendance_source_records` WHERE `source`='badge' AND `external_id`='{$safeExternal}' LIMIT 1", true);
+        if ($row) {
+            return true;
+        }
+
+        $eventWhere = "`source`='badge' AND `punch_time`={$punchTime} AND `card_id`='{$safeCard}' AND `location_name`='{$safeLocation}'";
+        $hasIdentity = false;
         foreach ([
             'employee_open_id' => $employee['open_id'] ?? '',
-            'employee_user_id' => $employee['user_id'] ?? '',
-            'employee_no' => $employee['employee_id'] ?? ''
+            'employee_no' => $employee['employee_id'] ?? '',
+            'employee_user_id' => $employee['user_id'] ?? ''
         ] as $column => $value) {
             $value = trim((string)$value);
-            if ($value !== '') {
-                $identity[] = "`{$column}`='" . Database::escape($value) . "'";
+            if ($value === '') {
+                continue;
+            }
+            $hasIdentity = true;
+            $safeValue = Database::escape($value);
+            $row = Database::querySingleLine('attendance_source_records', "SELECT `id` FROM `attendance_source_records` WHERE {$eventWhere} AND `{$column}`='{$safeValue}' LIMIT 1", true);
+            if ($row) {
+                return true;
             }
         }
-        $identitySql = count($identity) > 0 ? '(' . implode(' OR ', $identity) . ')' : '1=1';
-        $row = Database::querySingleLine('attendance_source_records', "SELECT `id` FROM `attendance_source_records` WHERE `source`='badge' AND (`external_id`='{$safeExternal}' OR (`punch_time`={$punchTime} AND `card_id`='{$safeCard}' AND `location_name`='{$safeLocation}' AND {$identitySql})) LIMIT 1", true);
-        return $row ? true : false;
+        if (!$hasIdentity) {
+            return (bool)Database::querySingleLine('attendance_source_records', "SELECT `id` FROM `attendance_source_records` WHERE {$eventWhere} LIMIT 1", true);
+        }
+        return false;
     }
 
     private static function repairMissingLocationNames($limit = 500)
@@ -910,12 +924,15 @@ class AttendanceModuleService {
         }
         $id = intval(mysqli_insert_id($conn));
         if ($id > 0) {
+            if (!empty($GLOBALS['_config']['archive']['enabled'])) { ArchiveStore::notifyWrite('attendance_source_records',$id,$record); }
             return $id;
         }
         $source = Database::escape($record['source']);
         $externalId = Database::escape($record['external_id']);
         $row = Database::querySingleLine('attendance_source_records', "SELECT `id` FROM `attendance_source_records` WHERE `source`='{$source}' AND `external_id`='{$externalId}' LIMIT 1", true);
-        return intval($row['id'] ?? 0);
+        $id = intval($row['id'] ?? 0);
+        if (!empty($GLOBALS['_config']['archive']['enabled'])) { ArchiveStore::notifyWrite('attendance_source_records',$id,$record); }
+        return $id;
     }
 
     private static function ingestFeishuFlowRecord($record, $rawPayload)
@@ -963,6 +980,7 @@ class AttendanceModuleService {
             'punch_date' => date('Y-m-d', $checkTime),
             'location_name' => $location,
             'device_name' => $deviceName,
+            // 保留旧版原文上下文，历史 type/点位回填依赖这些信息。
             'raw_payload' => $rawPayload
         ]);
     }
@@ -1223,7 +1241,8 @@ class AttendanceModuleService {
         $safePerson = Database::escape($personKey);
         $safeDate = Database::escape($date);
         mysqli_query($conn, "DELETE FROM `attendance_effective_records` WHERE `person_key`='{$safePerson}' AND `work_date`='{$safeDate}'");
-        $records = self::fetchRows('attendance_source_records', "SELECT * FROM `attendance_source_records` WHERE `punch_date`='{$safeDate}' AND (CONCAT('open:', `employee_open_id`)='{$safePerson}' OR CONCAT('no:', `employee_no`)='{$safePerson}' OR CONCAT('user:', `employee_user_id`)='{$safePerson}') ORDER BY `punch_time` ASC, `id` ASC");
+        $personWhere = self::sourcePersonWhere($personKey);
+        $records = self::fetchRows('attendance_source_records', "SELECT * FROM `attendance_source_records` WHERE `punch_date`='{$safeDate}' AND {$personWhere} ORDER BY `punch_time` ASC, `id` ASC");
 
         $group = self::groupForEmployee($employee, $personKey, $date);
         $interval = max(60, min(3600, Settings::getInt('attendance_pair_interval_seconds', 300)));
@@ -1524,6 +1543,9 @@ class AttendanceModuleService {
         ]);
         unset($data['direct_reason'], $data['suppress_message']);
         $result = Database::insert('attendance_effective_records', $data);
+        if ($result===true && !empty($GLOBALS['_config']['archive']['enabled'])) {
+            ArchiveStore::notifyWrite('attendance_effective_records',intval(mysqli_insert_id($GLOBALS['conn'])),$data);
+        }
         if ($result === true && $notify && empty($pair['suppress_message'])) {
             self::enqueueEffectiveMessage($pair);
         }
@@ -1950,9 +1972,9 @@ class AttendanceModuleService {
         }
         $from = $time - intval($interval);
         $to = $time + intval($interval);
-        $safePerson = Database::escape($personKey);
+        $personWhere = self::sourcePersonWhere($personKey);
         $kindSql = self::sourceKindRole($row) === 'badge' ? "`source_kind`='face'" : "`source_kind` IN ('badge','feishu_badge')";
-        $sql = "SELECT `id` FROM `attendance_source_records` WHERE `id`<>" . intval($row['id'] ?? 0) . " AND `punch_time` BETWEEN {$from} AND {$to} AND {$kindSql} AND (CONCAT('open:', `employee_open_id`)='{$safePerson}' OR CONCAT('no:', `employee_no`)='{$safePerson}' OR CONCAT('user:', `employee_user_id`)='{$safePerson}') LIMIT 1";
+        $sql = "SELECT `id` FROM `attendance_source_records` WHERE `id`<>" . intval($row['id'] ?? 0) . " AND `punch_time` BETWEEN {$from} AND {$to} AND {$kindSql} AND {$personWhere} LIMIT 1";
         $found = Database::querySingleLine('attendance_source_records', $sql, true);
         return $found ? true : false;
     }
@@ -1968,10 +1990,10 @@ class AttendanceModuleService {
             return false;
         }
         $from = max(0, $time - intval($interval));
-        $safePerson = Database::escape($personKey);
+        $personWhere = self::sourcePersonWhere($personKey);
         $phase = (string)($messageRow['phase'] ?? '');
         $kindSql = self::sourceKindRole($row) === 'badge' ? "`source_kind` IN ('badge','feishu_badge')" : "`source_kind`='face'";
-        $sql = "SELECT * FROM `attendance_source_records` WHERE `id`<>" . intval($row['id'] ?? 0) . " AND `punch_time` BETWEEN {$from} AND {$time} AND {$kindSql} AND `warning_status` IN ('sent','failed') AND (CONCAT('open:', `employee_open_id`)='{$safePerson}' OR CONCAT('no:', `employee_no`)='{$safePerson}' OR CONCAT('user:', `employee_user_id`)='{$safePerson}') ORDER BY `punch_time` DESC, `id` DESC LIMIT 10";
+        $sql = "SELECT * FROM `attendance_source_records` WHERE `id`<>" . intval($row['id'] ?? 0) . " AND `punch_time` BETWEEN {$from} AND {$time} AND {$kindSql} AND `warning_status` IN ('sent','failed') AND {$personWhere} ORDER BY `punch_time` DESC, `id` DESC LIMIT 10";
         $candidates = self::fetchRows('attendance_source_records', $sql);
         if (count($candidates) === 0) {
             return false;
@@ -2269,6 +2291,11 @@ class AttendanceModuleService {
         }
         $sql = "INSERT INTO `attendance_daily_reports` (" . implode(',', $columns) . ") VALUES (" . implode(',', $values) . ") ON DUPLICATE KEY UPDATE " . implode(',', $update);
         mysqli_query($conn, $sql);
+        if (!empty($GLOBALS['_config']['archive']['enabled']) && strtotime($date)<strtotime('-1 year')) {
+            $safeHash = Database::escape($reportHash);
+            $report = Database::querySingleLine('attendance_daily_reports',"SELECT `id` FROM `attendance_daily_reports` WHERE `report_hash`='{$safeHash}'",true);
+            ArchiveStore::notifyWrite('attendance_daily_reports',intval($report['id'] ?? 0),$data);
+        }
     }
 
     private static function legacyDailyStatus($first, $isLate, $isEarlyLeave)
@@ -2980,6 +3007,18 @@ class AttendanceModuleService {
         $safeDate = Database::escape($date);
         $row = Database::querySingleLine('attendance_daily_reports', "SELECT COUNT(*) AS `total` FROM (" . self::personKeysForDateSql($safeDate) . ") t", true);
         return intval($row['total'] ?? 0);
+    }
+
+    private static function sourcePersonWhere($personKey)
+    {
+        $parts = explode(':', (string)$personKey, 2);
+        $columns = ['open' => 'employee_open_id', 'no' => 'employee_no', 'user' => 'employee_user_id'];
+        $kind = strtolower($parts[0]);
+        if (count($parts) !== 2 || !isset($columns[$kind])) {
+            return '1=0';
+        }
+        // 对字段做 CONCAT 会使现有 (员工身份, punch_time) 索引无法直接查找。
+        return '`' . $columns[$kind] . "`='" . Database::escape($parts[1]) . "'";
     }
 
     private static function personKeysForDateSql($safeDate)

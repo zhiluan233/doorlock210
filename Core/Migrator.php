@@ -15,11 +15,49 @@ class Migrator {
 
     public static function ensure()
     {
-        global $conn, $_config;
+        global $conn;
 
         if (!$conn) {
             return ['ok' => false, 'message' => '数据库未连接'];
         }
+
+        // 已完成的迁移不能在每次页面请求、回调和 worker 启动时重跑。
+        $locked = false;
+        try {
+            Settings::invalidate();
+            if (self::currentVersion() === self::SCHEMA_VERSION) {
+                return ['ok' => true, 'message' => '数据库结构已是最新版本'];
+            }
+            // 按数据库隔离迁移锁；高峰期其他请求立即返回，不排队执行 DDL。
+            $rs = mysqli_query($conn, "SELECT GET_LOCK(CONCAT('doorlock_migrate:', SHA1(DATABASE())), 0) AS acquired");
+            $lock = $rs ? mysqli_fetch_assoc($rs) : [];
+            if ($rs) {
+                mysqli_free_result($rs);
+            }
+            if (intval($lock['acquired'] ?? 0) !== 1) {
+                return ['ok' => false, 'message' => '数据库迁移正在执行或无法取得迁移锁，请稍后重试'];
+            }
+            $locked = true;
+
+            // 等待取锁期间，另一进程可能已完成迁移，必须重新读取版本。
+            Settings::invalidate();
+            if (self::currentVersion() === self::SCHEMA_VERSION) {
+                return ['ok' => true, 'message' => '数据库结构已是最新版本'];
+            }
+            return self::migrate();
+        } catch (\mysqli_sql_exception $e) {
+            return ['ok' => false, 'message' => '数据库迁移失败：' . $e->getMessage()];
+        } finally {
+            if ($locked) {
+                try { mysqli_query($conn, "SELECT RELEASE_LOCK(CONCAT('doorlock_migrate:', SHA1(DATABASE())))"); }
+                catch (\Throwable $e) { error_log('doorlock migration lock release failed'); }
+            }
+        }
+    }
+
+    private static function migrate()
+    {
+        global $_config;
 
         $errors = [];
         self::exec("CREATE TABLE IF NOT EXISTS `system_settings` (
@@ -667,12 +705,17 @@ class Migrator {
         self::addIndex('attendance_source_records', 'idx_attendance_source_flow_type', ['punch_date', 'flow_type'], $errors);
         self::addIndex('attendance_daily_reports', 'idx_attendance_daily_flags', ['work_date', 'is_late', 'is_early_leave', 'is_full_absent'], $errors);
 
-        self::seedDefaults();
+        self::seedDefaults($errors);
         self::normalizeRuntimeSettings($errors);
         self::seedDefaultAccessRoles($errors);
         self::cleanupCredentialSettings($errors);
         self::ensureFeishuKeyFile($_config['feishu']['keyConfigFile'] ?? ROOT . '/feishu_key.json');
-        Settings::set('schema_version', self::SCHEMA_VERSION);
+        if (count($errors) === 0) {
+            $versionResult = Settings::set('schema_version', self::SCHEMA_VERSION);
+            if ($versionResult !== true) {
+                $errors[] = '保存数据库版本失败：' . (string)$versionResult;
+            }
+        }
 
         return [
             'ok' => count($errors) === 0,
@@ -685,11 +728,10 @@ class Migrator {
         return Settings::get('schema_version', '0');
     }
 
-    private static function seedDefaults()
+    private static function seedDefaults(&$errors)
     {
         global $conn;
 
-        $errors = [];
         foreach (Settings::defaults() as $key => $value) {
             if ($key === 'schema_version') {
                 continue;
@@ -712,7 +754,8 @@ class Migrator {
         self::exec("UPDATE `learner` SET `card_id`=LPAD(`card_id`, 10, '0') WHERE `card_id`<>'' AND `card_id` REGEXP '^[0-9]+$' AND CHAR_LENGTH(`card_id`)<10", $errors);
         self::exec("UPDATE `learner` SET `realname`=`name` WHERE `realname`=''", $errors);
         self::exec("UPDATE `learner` SET `enrolled_at`=`created_at` WHERE `enrolled_at`=0 AND `created_at`>0", $errors);
-        self::exec("UPDATE `logs` SET `cardid`=LPAD(`cardid`, 10, '0') WHERE `cardid`<>'' AND `cardid` REGEXP '^[0-9]+$' AND CHAR_LENGTH(`cardid`)<10", $errors);
+        // logs 是持续增长的历史大表，禁止在启动迁移中全表更新。
+        // 新日志在 writeAccessLog() 入库前统一卡号格式。
         self::exec("UPDATE `devices` SET `serial`=`did` WHERE `serial`='' AND `did`<>''", $errors);
         self::exec("UPDATE `devices` SET `controller_type`='single_door' WHERE `controller_type`='' AND (`model` LIKE '%G-1000%' OR `model` LIKE '%D110%')", $errors);
         self::exec("UPDATE `devices` SET `controller_type`='cloud_plus' WHERE `controller_type`='' AND (`model` LIKE '%G-Cloud%' OR `model` LIKE '%Cloud%')", $errors);

@@ -28,6 +28,7 @@ if (!empty($_SESSION['user'])) {
 }
 
 $cardId = $employee['card_id'] ?? '';
+if (session_status() === PHP_SESSION_ACTIVE) { session_write_close(); }
 $keyword = memberLimitText(trim((string)($_GET['q'] ?? '')), 40);
 $keyword = preg_replace('/\s+/u', ' ', $keyword);
 $keyword = $keyword === null ? '' : $keyword;
@@ -44,7 +45,7 @@ if ($cardId !== '') {
     if ($filterDate !== '') {
         $startAt = strtotime($filterDate . ' 00:00:00');
         $endAt = $startAt + 86400;
-        $where[] = "`time`>=" . intval($startAt) . " AND `time`<" . intval($endAt);
+        $where[] = Database::logTimeRange($startAt, $endAt, '', false);
     }
     if ($keyword !== '') {
         $safeKeyword = Database::escape($keyword);
@@ -52,7 +53,7 @@ if ($cardId !== '') {
         $where[] = "(`passdoor` LIKE {$likeKeyword} OR `action` LIKE {$likeKeyword} OR `cardid` LIKE {$likeKeyword})";
     }
     $queryLimit = $perPage + 1;
-    $sql = "SELECT `passdoor`, `cardid`, `action`, `time` FROM `logs` WHERE " . implode(' AND ', $where) . " ORDER BY `time` DESC LIMIT {$offset}, {$queryLimit}";
+    $sql = "SELECT `passdoor`, `cardid`, `action`, `time` FROM `logs` WHERE " . implode(' AND ', $where) . " ORDER BY `time` DESC, `id` DESC LIMIT {$offset}, {$queryLimit}";
     $rs = Database::query('logs', $sql, '', true);
     if ($rs instanceof \mysqli_result) {
         while ($row = mysqli_fetch_assoc($rs)) {

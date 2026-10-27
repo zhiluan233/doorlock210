@@ -20,6 +20,21 @@ include(ROOT . "/Core/Migrator.php");
 include(ROOT . "/Core/OperationLog.php");
 include(ROOT . "/Core/UserCheck.php");
 
+set_exception_handler(function (\Throwable $error) {
+    error_log('doorlock request failed type=' . get_class($error) . ' code=' . $error->getCode());
+    while (ob_get_level() > 0) { ob_end_clean(); }
+    http_response_code(503);
+    header('Retry-After: 3');
+    header('Cache-Control: no-store');
+    if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'GET' || isset($_GET['action'])) {
+        header('Content-Type: application/json; charset=utf-8');
+        echo json_encode(['ok'=>false,'retryable'=>true,'message'=>'数据服务暂时繁忙，请稍后重试'],JSON_UNESCAPED_UNICODE);
+    } else {
+        header('Content-Type: text/html; charset=utf-8');
+        echo '<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>数据服务繁忙</title><body><h2>数据服务暂时繁忙</h2><p>本次数据未能加载，请稍后重试。</p><button onclick="location.reload()">重新加载</button></body></html>';
+    }
+});
+
 /*
 
 // 获取客户端IP地址
@@ -79,7 +94,13 @@ $conn = null;
 $db = new anim210System\Database();
 
 if (!(isset($_GET['action']) && $_GET['action'] === 'api')) {
-    anim210System\Migrator::ensure();
+    $migration = anim210System\Migrator::ensure();
+    if (empty($migration['ok'])) {
+        error_log('doorlock migration: ' . ($migration['message'] ?? 'unknown error'));
+        http_response_code(503);
+        header('Retry-After: 3');
+        exit('数据库升级暂未完成，请稍后重试');
+    }
 }
 
 //页面渲染类与路由中间件
